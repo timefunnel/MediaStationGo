@@ -86,7 +86,7 @@ Write-Host "Packages: $Packages"
 Write-Host "Resource limit: cpus=$Cpus memory=$Memory"
 Write-Host "Local tracked diff: $hasDiff"
 if ($untracked.Count -gt 0) {
-    Write-Host "Untracked files are not included in the remote patch:"
+    Write-Host "Untracked files will be included in the remote patch with git add -N:"
     $untracked | ForEach-Object { Write-Host "  $_" }
 }
 
@@ -102,7 +102,18 @@ if (Test-Path $localPatch) {
     Remove-Item -Force $localPatch
 }
 
-Invoke-Checked "git" @("diff", "--binary", "--output=$localPatch", "--", ".")
+$intentToAddApplied = $false
+try {
+    if ($untracked.Count -gt 0) {
+        Invoke-Checked "git" (@("add", "-N", "--") + $untracked)
+        $intentToAddApplied = $true
+    }
+    Invoke-Checked "git" @("diff", "--binary", "HEAD", "--output=$localPatch", "--", ".")
+} finally {
+    if ($intentToAddApplied) {
+        Invoke-Checked "git" (@("reset", "--") + $untracked)
+    }
+}
 Invoke-Checked "ssh" @("-p", "$Port", $Remote, "mkdir -p $(ConvertTo-BashSingleQuoted "$RemoteRoot/patches")")
 Invoke-Checked "scp" @("-P", "$Port", $localPatch, "$Remote`:$remotePatch")
 
@@ -212,6 +223,7 @@ echo "formatted patch: `$FORMATTED_PATCH"
 du -sh "`$REMOTE_ROOT" 2>/dev/null || true
 "@
 
+$remoteScript = $remoteScript -replace "`r`n", "`n"
 $remoteScript | & ssh -p $Port $Remote "bash -s"
 if ($LASTEXITCODE -ne 0) {
     throw "remote test exited with code $LASTEXITCODE"
