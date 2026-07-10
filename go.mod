@@ -14,6 +14,7 @@ require (
 	github.com/spf13/viper v1.18.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.21.0
+	golang.org/x/image v0.15.0
 	gorm.io/driver/postgres v1.5.7
 	gorm.io/gorm v1.25.7
 )

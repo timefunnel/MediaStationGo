@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "golang.org/x/image/webp"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
