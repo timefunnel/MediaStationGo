@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
 func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library, rootID, typ, ref, path, name string, size int64, localMeta *LocalMetadata, existingMedia map[string]existingCloudMedia, writeBatch *localMediaWriteBatch, probeBudget *int, res *ScanResult) {
@@ -99,6 +101,10 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		return
 	}
 	if err := s.repo.Media.Upsert(ctx, m); err != nil {
+		if errors.Is(err, repository.ErrMediaHiddenByUser) {
+			res.Skipped++
+			return
+		}
 		addScanError(res, path, err)
 		s.log.Warn("upsert cloud media failed", zap.String("path", path), zap.Error(err))
 		return

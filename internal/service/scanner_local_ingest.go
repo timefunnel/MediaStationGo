@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
 // ingestFile upserts a single media file. seenInodes dedups hardlinks within a
@@ -193,6 +195,10 @@ func (s *ScannerService) writeLocalScanMedia(in localScanWriteInput) {
 		return
 	}
 	if err := s.repo.Media.Upsert(in.ctx, in.media); err != nil {
+		if errors.Is(err, repository.ErrMediaHiddenByUser) {
+			in.res.Skipped++
+			return
+		}
 		addScanError(in.res, in.path, err)
 		s.log.Warn("upsert media failed", zap.String("path", in.path), zap.Error(err))
 		return

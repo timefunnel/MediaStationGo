@@ -57,6 +57,49 @@ func TestListRecycleBinPrunesOldRowsOverLimit(t *testing.T) {
 	}
 }
 
+func TestListRecycleBinKeepsCloudTombstonesWhenPruning(t *testing.T) {
+	db := newServiceTestDB(t, &model.Media{})
+	repos := repository.New(db)
+	oldCloud := model.Media{
+		Base: model.Base{
+			ID:        "cloud-hidden",
+			DeletedAt: gorm.DeletedAt{Time: time.Now().Add(-24 * time.Hour), Valid: true},
+		},
+		Title: "Hidden Cloud",
+		Path:  "cloud://openlist/Movies/Hidden.mkv",
+	}
+	if err := db.Unscoped().Create(&oldCloud).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for i := 0; i < maxRecycleBinRecords+5; i++ {
+		deletedAt := now.Add(time.Duration(i) * time.Second)
+		media := model.Media{
+			Base: model.Base{
+				ID:        fmt.Sprintf("local-%03d", i),
+				DeletedAt: gorm.DeletedAt{Time: deletedAt, Valid: true},
+			},
+			Title: fmt.Sprintf("Local %03d", i),
+			Path:  filepath.Join(t.TempDir(), fmt.Sprintf("Local %03d.mkv", i)),
+		}
+		if err := db.Unscoped().Create(&media).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+	if _, err := svc.ListRecycleBin(t.Context(), 500); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Unscoped().Model(&model.Media{}).Where("id = ?", oldCloud.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("cloud tombstone should not be pruned from recycle storage")
+	}
+}
+
 func TestSoftDeleteInvalidatesMediaAndStatsCache(t *testing.T) {
 	db := newServiceTestDB(t, &model.Media{})
 	repos := repository.New(db)

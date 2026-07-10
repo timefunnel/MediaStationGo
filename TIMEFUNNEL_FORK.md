@@ -40,6 +40,15 @@ Priority 2 fixes:
 - Improve adult title normalization, poster/thumb handling, and subtitle status
   reporting.
 
+## Applied Local Patches
+
+- `timefunnel-20260710-openlist-warmup`: when OpenList `fs/get` reports a
+  false missing-file error for 115/OpenList paths, list the parent directory and
+  retry `fs/get` once while keeping playback on pure 302.
+- `timefunnel-20260710-cloud-tombstone`: cloud media deleted from MSG is kept as
+  a soft-deleted tombstone, and later scans skip that path instead of importing
+  it again. Explicit restore from the recycle bin remains supported.
+
 ## Baseline Validation
 
 Before deploying a custom image:

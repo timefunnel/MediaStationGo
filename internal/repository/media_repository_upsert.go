@@ -10,6 +10,8 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
+var ErrMediaHiddenByUser = errors.New("media hidden by user")
+
 // Upsert inserts or updates a media row keyed by Path (unique index).
 //
 // 重要：当一条行已经存在时，scanner 重扫只应该刷新文件级元数据
@@ -36,9 +38,21 @@ func (r *MediaRepository) upsert(ctx context.Context, m *model.Media) error {
 		r.indexMediaBestEffort(ctx, *m)
 		return nil
 	}
+	if mediaUpsertShouldKeepDeleted(existing, *m) {
+		*m = existing
+		return ErrMediaHiddenByUser
+	}
 
 	updates := mediaUpsertUpdates(existing, *m)
 	return r.applyMediaUpsertUpdates(ctx, m, existing, updates)
+}
+
+func mediaUpsertShouldKeepDeleted(existing, incoming model.Media) bool {
+	if !existing.DeletedAt.Valid {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(existing.Path)), "cloud://") ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(incoming.Path)), "cloud://")
 }
 
 func (r *MediaRepository) findOrCreateMediaByPath(ctx context.Context, m *model.Media) (model.Media, bool, error) {

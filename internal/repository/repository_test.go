@@ -360,6 +360,53 @@ func TestMediaUpsertMigratesCloudLibraryIDOnRescan(t *testing.T) {
 	}
 }
 
+func TestMediaUpsertKeepsSoftDeletedCloudMediaHidden(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := New(db)
+	path := "cloud://openlist/Movies/Hidden.mkv"
+	media := model.Media{
+		Base:         model.Base{ID: "hidden-cloud"},
+		LibraryID:    "lib-old",
+		Title:        "Hidden",
+		Path:         path,
+		ScrapeStatus: "matched",
+	}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.DB.Delete(&model.Media{}, "id = ?", media.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	incoming := model.Media{
+		LibraryID:    "lib-new",
+		Title:        "Hidden Rescan",
+		Path:         path,
+		SizeBytes:    2048,
+		ScrapeStatus: "pending",
+	}
+	err = repos.Media.Upsert(t.Context(), &incoming)
+	if !errors.Is(err, ErrMediaHiddenByUser) {
+		t.Fatalf("upsert error = %v, want ErrMediaHiddenByUser", err)
+	}
+	var got model.Media
+	if err := repos.DB.Unscoped().Where("path = ?", path).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !got.DeletedAt.Valid {
+		t.Fatalf("soft-deleted cloud row was restored: %#v", got)
+	}
+	if got.LibraryID != "lib-old" || got.Title != "Hidden" || got.SizeBytes != 0 {
+		t.Fatalf("hidden cloud row was mutated by rescan: %#v", got)
+	}
+}
+
 type fakeMediaSearchBackend struct {
 	ids []string
 	err error

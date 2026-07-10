@@ -13,18 +13,7 @@ const maxRecycleBinRecords = 200
 // SoftDelete moves a media row to the recycle bin (gorm soft delete).
 // The on-disk file is kept; admins can purge it later.
 func (s *MediaService) SoftDelete(ctx context.Context, id string) error {
-	media, err := s.repo.Media.FindByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if media != nil && isCloudMediaPath(media.Path) {
-		err := s.repo.DB.WithContext(ctx).Unscoped().Where("id = ?", id).Delete(&model.Media{}).Error
-		if err == nil {
-			s.invalidateMediaCache(ctx)
-		}
-		return err
-	}
-	err = s.repo.DB.WithContext(ctx).Where("id = ?", id).Delete(&model.Media{}).Error
+	err := s.repo.DB.WithContext(ctx).Where("id = ?", id).Delete(&model.Media{}).Error
 	if err == nil {
 		if pruneErr := pruneRecycleBinRows(ctx, s.repo.DB, maxRecycleBinRecords); pruneErr != nil {
 			return pruneErr
@@ -75,6 +64,7 @@ func pruneRecycleBinRows(ctx context.Context, db *gorm.DB, keep int) error {
 		Model(&model.Media{}).
 		Select("id").
 		Where("deleted_at IS NOT NULL").
+		Where("path NOT LIKE ?", "cloud://%").
 		Order("deleted_at desc").
 		Limit(100000).
 		Offset(keep).

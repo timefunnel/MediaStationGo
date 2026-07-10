@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
 type localMediaWriteBatch struct {
@@ -96,6 +98,10 @@ func (b *localMediaWriteBatch) Flush() {
 		}
 		wasExisting := b.mediaPathExists(item.media.Path)
 		if err := b.scanner.repo.Media.Upsert(b.ctx, item.media); err != nil {
+			if errors.Is(err, repository.ErrMediaHiddenByUser) {
+				b.res.Skipped++
+				continue
+			}
 			addScanError(b.res, item.path, err)
 			b.scanner.log.Warn("upsert media failed", zap.String("path", item.path), zap.Error(err))
 			continue
@@ -147,6 +153,10 @@ func (b *localMediaWriteBatch) upsertExistingItem(item localMediaWriteItem) {
 		return
 	}
 	if err := b.scanner.repo.Media.Upsert(b.ctx, item.media); err != nil {
+		if errors.Is(err, repository.ErrMediaHiddenByUser) {
+			b.res.Skipped++
+			return
+		}
 		addScanError(b.res, item.path, err)
 		b.scanner.log.Warn("upsert media failed", zap.String("path", item.path), zap.Error(err))
 		return
