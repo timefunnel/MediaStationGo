@@ -77,6 +77,11 @@ image, and refuses to start when the remote host is already busy or low on
 available memory. Do not place this test cache under `/data`; that disk is
 reserved for media service data and is already capacity constrained.
 
+The default resource limit is intentionally conservative (`1` CPU, `1280m`
+memory, and load1 threshold `1.5`) to avoid visible service jitter on the small
+production VPS. Raise these values only for an explicit release validation
+window.
+
 Fast targeted validation:
 
 ```powershell

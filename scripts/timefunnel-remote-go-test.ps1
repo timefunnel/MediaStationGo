@@ -7,9 +7,9 @@ param(
     [string]$RemoteRoot = "/opt/codex-build/mediastationgo",
     [string]$Image = "golang:1.25",
     [string]$Packages = "./internal/service ./internal/handler",
-    [string]$Cpus = "2",
-    [string]$Memory = "1536m",
-    [double]$MaxLoad1 = 2.5,
+    [string]$Cpus = "1",
+    [string]$Memory = "1280m",
+    [double]$MaxLoad1 = 1.5,
     [int]$MinMemAvailableMb = 1200,
     [switch]$Full,
     [switch]$NoGofmt,
@@ -147,7 +147,7 @@ case "`$REMOTE_ROOT" in
 esac
 
 load1="`$(awk '{print `$1}' /proc/loadavg)"
-too_busy="`$(awk -v load="`$load1" -v max="`$MAX_LOAD_1" 'BEGIN {print (load > max) ? 1 : 0}')"
+too_busy="`$(awk -v load_value="`$load1" -v max="`$MAX_LOAD_1" 'BEGIN {print (load_value > max) ? 1 : 0}')"
 if [ "`$too_busy" = "1" ]; then
   echo "remote host is busy: load1=`$load1 max=`$MAX_LOAD_1" >&2
   exit 20
@@ -205,7 +205,8 @@ fi
 
 git diff --binary --output="`$FORMATTED_PATCH" -- .
 
-run_go sh -lc "go test `$TEST_PACKAGES"
+# shellcheck disable=SC2086
+run_go go test `$TEST_PACKAGES
 
 echo "formatted patch: `$FORMATTED_PATCH"
 du -sh "`$REMOTE_ROOT" 2>/dev/null || true
