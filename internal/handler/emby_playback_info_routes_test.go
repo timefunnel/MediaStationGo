@@ -94,7 +94,7 @@ func TestEmbyLowercasePlaybackInfoRouteReturnsJSON(t *testing.T) {
 	}
 }
 
-func TestEmbyPlaybackInfoSubtitleDeliveryURLServesVTT(t *testing.T) {
+func TestEmbyPlaybackInfoSubtitleDeliveryURLServesNativeSRT(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\n你好\n"), 0o644); err != nil {
@@ -177,10 +177,10 @@ func TestEmbyPlaybackInfoSubtitleDeliveryURLServesVTT(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("unexpected subtitle status: %d body=%s", w.Code, w.Body.String())
 	}
-	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/vtt") {
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "application/x-subrip") {
 		t.Fatalf("subtitle content type = %q", contentType)
 	}
-	if body := w.Body.String(); !strings.Contains(body, "WEBVTT") || !strings.Contains(body, "你好") {
+	if body := w.Body.String(); strings.Contains(body, "WEBVTT") || !strings.Contains(body, "00:00:01,000 --> 00:00:02,000") {
 		t.Fatalf("unexpected subtitle body: %q", body)
 	}
 }

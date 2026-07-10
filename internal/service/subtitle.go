@@ -63,9 +63,46 @@ type SubtitleTrack struct {
 // extToCodec maps the file extension to the inner codec name.
 var extToCodec = map[string]string{
 	".srt": "srt",
-	".vtt": "vtt",
+	".vtt": "webvtt",
 	".ass": "ass",
 	".ssa": "ssa",
+}
+
+// SubtitleContentType returns the response content type for a subtitle stream
+// format used by Emby-compatible clients.
+func SubtitleContentType(format string) (string, bool) {
+	ext, ok := normalizeSubtitleExtension(format)
+	if !ok {
+		return "", false
+	}
+	switch ext {
+	case ".vtt":
+		return "text/vtt; charset=utf-8", true
+	case ".srt":
+		return "application/x-subrip; charset=utf-8", true
+	case ".ass":
+		return "text/x-ass; charset=utf-8", true
+	case ".ssa":
+		return "text/x-ssa; charset=utf-8", true
+	default:
+		return "", false
+	}
+}
+
+func normalizeSubtitleExtension(format string) (string, bool) {
+	format = strings.ToLower(strings.TrimSpace(format))
+	format = strings.TrimPrefix(format, ".")
+	if format == "" {
+		format = "vtt"
+	}
+	switch format {
+	case "vtt", "webvtt":
+		return ".vtt", true
+	case "srt", "ass", "ssa":
+		return "." + format, true
+	default:
+		return "", false
+	}
 }
 
 // Discover lists every external subtitle file for a media row. The URL is
@@ -140,16 +177,22 @@ func detectLang(name, base string) string {
 	return strings.ToLower(suffix)
 }
 
-// Serve writes the subtitle file as WebVTT (.vtt). SRT/SSA files are
-// converted minimally on the fly. Returns ErrSubtitleNotFound when the
-// path is rejected (path traversal / not in the media directory).
+// Serve writes the subtitle file as WebVTT (.vtt). SRT/SSA files are converted
+// minimally on the fly. Returns ErrSubtitleNotFound when the path is rejected.
 func (s *SubtitleService) Serve(ctx context.Context, mediaID, sub string, w io.Writer) error {
+	return s.ServeAs(ctx, mediaID, sub, ".vtt", w)
+}
+
+// ServeAs writes the subtitle in the requested Emby-compatible format. Native
+// .srt/.ass/.ssa requests are served without conversion; .vtt requests convert
+// supported text subtitle formats to WebVTT.
+func (s *SubtitleService) ServeAs(ctx context.Context, mediaID, sub, format string, w io.Writer) error {
 	m, err := s.repo.Media.FindByID(ctx, mediaID)
 	if err != nil || m == nil {
 		return errors.New("media not found")
 	}
 	if typ, ref, name, ok := parseCloudSubtitlePath(sub); ok {
-		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, w)
+		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, format, w)
 	}
 	abs, err := filepath.Abs(sub)
 	if err != nil {
@@ -170,15 +213,36 @@ func (s *SubtitleService) Serve(ctx context.Context, mediaID, sub string, w io.W
 		return err
 	}
 
-	switch strings.ToLower(filepath.Ext(abs)) {
+	return writeSubtitleBody(w, body, filepath.Ext(abs), format)
+}
+
+func writeSubtitleBody(w io.Writer, body []byte, sourceExt, targetExt string) error {
+	sourceExt, sourceOK := normalizeSubtitleExtension(sourceExt)
+	if !sourceOK {
+		return errors.New("unsupported subtitle format")
+	}
+	targetExt, targetOK := normalizeSubtitleExtension(targetExt)
+	if !targetOK {
+		return errors.New("unsupported subtitle target format")
+	}
+	if targetExt != ".vtt" {
+		if targetExt != sourceExt {
+			return errors.New("subtitle target format does not match source")
+		}
+		_, err := w.Write(body)
+		return err
+	}
+	switch sourceExt {
 	case ".vtt":
-		_, err = w.Write(body)
+		_, err := w.Write(body)
+		return err
 	case ".srt":
-		_, err = w.Write([]byte(srtToVTT(string(body))))
+		_, err := w.Write([]byte(srtToVTT(string(body))))
+		return err
 	case ".ass", ".ssa":
-		_, err = w.Write([]byte(assToVTT(string(body))))
+		_, err := w.Write([]byte(assToVTT(string(body))))
+		return err
 	default:
 		return errors.New("unsupported subtitle format")
 	}
-	return err
 }

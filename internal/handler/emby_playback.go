@@ -220,7 +220,7 @@ func embySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
 			c.Status(http.StatusNotFound)
 			return
 		}
-		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex)
+		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex, c.Param("format"))
 	}
 }
 
@@ -235,11 +235,11 @@ func embyLegacySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
 			}
 			trackIndex = maxInt(0, streamIndex-1)
 		}
-		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex)
+		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex, c.Param("format"))
 	}
 }
 
-func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID string, trackIndex int) {
+func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID string, trackIndex int, format string) {
 	uid := embyUserID(c)
 	item, err := svc.Emby.Item(c.Request.Context(), mediaID, uid)
 	if err != nil || item == nil || svc.Subtitle == nil {
@@ -255,13 +255,18 @@ func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID stri
 		c.Status(http.StatusNotFound)
 		return
 	}
-	c.Header("Content-Type", "text/vtt; charset=utf-8")
+	contentType, ok := service.SubtitleContentType(format)
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "public, max-age=3600")
 	if c.Request.Method == http.MethodHead {
 		c.Status(http.StatusOK)
 		return
 	}
-	if err := svc.Subtitle.Serve(c.Request.Context(), mediaID, tracks[trackIndex].Path, c.Writer); err != nil {
+	if err := svc.Subtitle.ServeAs(c.Request.Context(), mediaID, tracks[trackIndex].Path, format, c.Writer); err != nil {
 		c.Status(http.StatusNotFound)
 	}
 }

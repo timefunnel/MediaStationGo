@@ -104,8 +104,11 @@ func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
 	if subtitle == nil {
 		t.Fatalf("expected subtitle stream, got %#v", streams)
 	}
-	if subtitle["Codec"] != "webvtt" || subtitle["DeliveryUrl"] != "/emby/api/subtitles/media-sub/Stream.vtt?mp_track=0" {
+	if subtitle["Codec"] != "srt" || subtitle["DeliveryUrl"] != "/emby/Videos/media-sub/media-sub/Subtitles/2/Stream.srt?mp_track=0" {
 		t.Fatalf("unexpected subtitle stream: %#v", subtitle)
+	}
+	if subtitle["DisplayTitle"] != "zh - SRT - External" {
+		t.Fatalf("unexpected subtitle display title: %#v", subtitle)
 	}
 	if source["DefaultSubtitleStreamIndex"] != subtitle["Index"] {
 		t.Fatalf("DefaultSubtitleStreamIndex should point to first external subtitle: %#v", source)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -155,15 +156,17 @@ func embyExternalSubtitleStream(mediaID string, streamIndex, trackIndex int, tra
 	label := strings.TrimSpace(firstNonEmpty(track.Label, track.Lang, "Subtitle"))
 	lang := strings.TrimSpace(firstNonEmpty(track.Lang, "und"))
 	localizedDefault := ""
+	ext := subtitleDeliveryExtension(track)
+	codec := subtitleCodecForExtension(ext)
 	if trackIndex == 0 {
 		localizedDefault = "Default"
 	}
 	return map[string]any{
 		"Index":                  streamIndex,
 		"Type":                   "Subtitle",
-		"Codec":                  "webvtt",
+		"Codec":                  codec,
 		"Language":               lang,
-		"DisplayTitle":           embySubtitleDisplayTitle(label, "WEBVTT"),
+		"DisplayTitle":           embySubtitleDisplayTitle(label, subtitleCodecDisplayLabel(codec)),
 		"Title":                  label,
 		"IsExternal":             true,
 		"IsExternalUrl":          false,
@@ -173,13 +176,74 @@ func embyExternalSubtitleStream(mediaID string, streamIndex, trackIndex int, tra
 		"IsTextSubtitleStream":   true,
 		"SupportsExternalStream": true,
 		"DeliveryMethod":         "External",
-		"DeliveryUrl":            embySubtitleDeliveryURL(mediaID, trackIndex),
+		"DeliveryUrl":            embySubtitleDeliveryURL(mediaID, streamIndex, trackIndex, ext),
 		"Path":                   track.Path,
 		"Protocol":               "File",
 		"LocalizedDefault":       localizedDefault,
 		"LocalizedForced":        "",
 		"LocalizedExternal":      "External",
 	}
+}
+
+func subtitleDeliveryExtension(track SubtitleTrack) string {
+	if ext := subtitleExtensionFromCodec(track.Codec); ext != "" {
+		return ext
+	}
+	if ext := subtitleExtensionFromPath(track.Path); ext != "" {
+		return ext
+	}
+	return ".vtt"
+}
+
+func subtitleExtensionFromCodec(codec string) string {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "webvtt", "vtt":
+		return ".vtt"
+	case "srt", "ass", "ssa":
+		return "." + strings.ToLower(strings.TrimSpace(codec))
+	default:
+		return ""
+	}
+}
+
+func subtitleExtensionFromPath(path string) string {
+	if parsed, err := url.Parse(strings.TrimSpace(path)); err == nil {
+		if name := strings.TrimSpace(parsed.Query().Get("name")); name != "" {
+			if ext, ok := normalizeSubtitleExtension(filepath.Ext(name)); ok {
+				return ext
+			}
+		}
+	}
+	trimmed := strings.TrimSpace(path)
+	if idx := strings.IndexAny(trimmed, "?#"); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	if ext, ok := normalizeSubtitleExtension(filepath.Ext(trimmed)); ok {
+		return ext
+	}
+	return ""
+}
+
+func subtitleCodecForExtension(ext string) string {
+	switch strings.ToLower(strings.TrimSpace(ext)) {
+	case ".vtt":
+		return "webvtt"
+	case ".srt":
+		return "srt"
+	case ".ass":
+		return "ass"
+	case ".ssa":
+		return "ssa"
+	default:
+		return "webvtt"
+	}
+}
+
+func subtitleCodecDisplayLabel(codec string) string {
+	if strings.EqualFold(strings.TrimSpace(codec), "webvtt") {
+		return "WEBVTT"
+	}
+	return strings.ToUpper(strings.TrimSpace(codec))
 }
 
 func embySubtitleDisplayTitle(label, codecLabel string) string {
@@ -198,10 +262,14 @@ func embySubtitleDisplayTitle(label, codecLabel string) string {
 	return label + " - " + codecLabel + " - External"
 }
 
-func embySubtitleDeliveryURL(mediaID string, trackIndex int) string {
+func embySubtitleDeliveryURL(mediaID string, streamIndex, trackIndex int, ext string) string {
+	if _, ok := SubtitleContentType(ext); !ok {
+		ext = ".vtt"
+	}
 	q := url.Values{}
 	q.Set("mp_track", fmt.Sprintf("%d", trackIndex))
-	return "/emby/api/subtitles/" + url.PathEscape(strings.TrimSpace(mediaID)) + "/Stream.vtt?" + q.Encode()
+	mediaID = url.PathEscape(strings.TrimSpace(mediaID))
+	return fmt.Sprintf("/emby/Videos/%s/%s/Subtitles/%d/Stream%s?%s", mediaID, mediaID, streamIndex, ext, q.Encode())
 }
 
 func preferMediaVersion(candidate, current model.Media) bool {

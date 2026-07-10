@@ -135,7 +135,7 @@ func parseCloudSubtitlePath(raw string) (typ, ref, name string, ok bool) {
 	return strings.TrimSpace(u.Host), strings.TrimSpace(ref), strings.TrimSpace(u.Query().Get("name")), ref != ""
 }
 
-func serveCloudSubtitle(ctx context.Context, s *SubtitleService, m model.Media, typ, ref, name string, w io.Writer) error {
+func serveCloudSubtitle(ctx context.Context, s *SubtitleService, m model.Media, typ, ref, name, format string, w io.Writer) error {
 	if s == nil || s.storage == nil {
 		return errors.New("cloud storage service unavailable")
 	}
@@ -157,16 +157,9 @@ func serveCloudSubtitle(ctx context.Context, s *SubtitleService, m model.Media, 
 	if err != nil {
 		return err
 	}
-	ext := strings.ToLower(filepath.Ext(firstNonEmpty(name, ref)))
-	switch ext {
-	case ".vtt":
-		_, err = io.WriteString(w, body)
-	case ".srt":
-		_, err = io.WriteString(w, srtToVTT(body))
-	case ".ass", ".ssa":
-		_, err = io.WriteString(w, assToVTT(body))
-	default:
-		return errors.New("unsupported subtitle format")
-	}
-	return err
+	return writeSubtitleBody(w, []byte(body), cloudSubtitleSourceExtension(name, ref), format)
+}
+
+func cloudSubtitleSourceExtension(name, ref string) string {
+	return filepath.Ext(firstNonEmpty(name, ref))
 }
