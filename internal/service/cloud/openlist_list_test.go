@@ -17,7 +17,7 @@ func TestOpenListWebDAVListAndResolve(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/fs/get" {
-			t.Fatalf("Resolve should not call /api/fs/get")
+			http.NotFound(w, r)
 			return
 		}
 		if r.Method != "PROPFIND" || r.URL.Path != "/dav" {
@@ -61,12 +61,9 @@ func TestOpenListWebDAVListAndResolve(t *testing.T) {
 	if len(entries) != 1 || entries[0].ID != "/Cloud/Movie.mkv" || entries[0].Size != 1024 {
 		t.Fatalf("entries = %#v", entries)
 	}
-	link, err := p.Resolve(context.Background(), entries[0].ID)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if link.URL != srv.URL+"/dav/Cloud/Movie.mkv" || !link.Proxy {
-		t.Fatalf("link = %#v, want WebDAV proxy link", link)
+	_, err = p.Resolve(context.Background(), entries[0].ID)
+	if err == nil || !strings.Contains(err.Error(), "pure 302 playback requires OpenList raw_url") {
+		t.Fatalf("openlist video resolve should require raw_url instead of WebDAV proxy fallback, err=%v", err)
 	}
 }
 
