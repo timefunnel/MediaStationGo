@@ -366,6 +366,46 @@ func TestEmbySeriesNameNormalizesReleaseNoiseAcrossSeasons(t *testing.T) {
 	}
 }
 
+func TestEmbySeriesNameNormalizesTotalEpisodeSuffix(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "TV", Path: `cloud://openlist/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	rows := []model.Media{
+		{
+			Base:       model.Base{ID: "fz2-e01"},
+			LibraryID:  lib.ID,
+			Title:      "\u7f5a\u7f6a2 \u516840\u96c6",
+			Path:       `cloud://openlist/tv/fazui2/fazui2.E01.mkv`,
+			SeasonNum:  1,
+			EpisodeNum: 1,
+		},
+		{
+			Base:       model.Base{ID: "fz2-e40"},
+			LibraryID:  lib.ID,
+			Title:      "\u7f5a\u7f6a2",
+			Path:       `cloud://openlist/tv/fazui2/fazui2.E40.mkv`,
+			SeasonNum:  1,
+			EpisodeNum: 40,
+		},
+	}
+	for _, media := range rows {
+		if err := svc.repo.DB.Create(&media).Error; err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+	}
+
+	root, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, Limit: 50})
+	if err != nil {
+		t.Fatalf("library items: %v", err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Name"] != "\u7f5a\u7f6a2" || items[0]["RecursiveItemCount"] != 2 {
+		t.Fatalf("total episode suffix should not split one series, got %#v", items)
+	}
+}
+
 func TestEmbyCloudAnimeUsesSeriesNameFromChineseSeasonFolder(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "OpenList · 国漫", Path: `cloud://openlist/国漫`, Type: "anime", Enabled: true}

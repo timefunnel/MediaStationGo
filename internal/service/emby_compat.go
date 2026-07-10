@@ -125,13 +125,14 @@ const (
 )
 
 var (
-	embySeasonDirRE           = regexp.MustCompile("(?i)^(season[\\s._-]*\\d+|s\\d+|specials?|sp|ova|oad|extra|extras|\u7b2c\\s*[0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u96f6\u4e24]+\\s*\u5b63|\u7279\u522b\u7bc7|\u7279\u5225\u7bc7|\u756a\u5916|\u7279\u5178)$")
-	embyYearSuffixRE          = regexp.MustCompile("\\s*[\\(\uFF08\\[]\\d{4}[\\)\uFF09\\]]\\s*$")
-	embyEpisodeTitleRE        = regexp.MustCompile("(?i)\\s*[-_ ]*s\\d{1,2}e\\d{1,3}.*$")
-	embyEpisodeOnlyTitleRE    = regexp.MustCompile("(?i)^\\s*(?:\\d{1,4}|e?p?\\.?\\s*\\d{1,4}|\u7b2c\\s*\\d{1,4}\\s*[\u96c6\u8bdd\u8a71])\\s*$")
-	embyReleaseSitePrefixRE   = regexp.MustCompile("^\u3010[^\u3011]*(?:\u53d1\u5e03|www|com|net|org|\u9ad8\u6e05|\u5267\u96c6)[^\u3011]*\u3011\\s*")
-	embySeriesSeasonSuffixRE  = regexp.MustCompile("(?i)[\\s._-]*(?:\u7b2c\\s*[0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u96f6\u4e24]+\\s*\u5b63|season\\s*\\d+|s\\d{1,2})(?:[\\s._\\-\\[\\(\uFF08\u3010].*)?$")
-	embyChineseLeadingTitleRE = regexp.MustCompile("^([\\p{Han}][\\p{Han}0-9A-Za-z\u00b7\u30fb:\uFF1A\u300a\u300b\uFF01!\uFF1F?\uFF0C,\u3002.\\s-]*[\\p{Han}])\\s+[A-Za-z][A-Za-z0-9 .'\\-:]*$")
+	embySeasonDirRE                 = regexp.MustCompile("(?i)^(season[\\s._-]*\\d+|s\\d+|specials?|sp|ova|oad|extra|extras|\u7b2c\\s*[0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u96f6\u4e24]+\\s*\u5b63|\u7279\u522b\u7bc7|\u7279\u5225\u7bc7|\u756a\u5916|\u7279\u5178)$")
+	embyYearSuffixRE                = regexp.MustCompile("\\s*[\\(\uFF08\\[]\\d{4}[\\)\uFF09\\]]\\s*$")
+	embyEpisodeTitleRE              = regexp.MustCompile("(?i)\\s*[-_ ]*s\\d{1,2}e\\d{1,3}.*$")
+	embyEpisodeOnlyTitleRE          = regexp.MustCompile("(?i)^\\s*(?:\\d{1,4}|e?p?\\.?\\s*\\d{1,4}|\u7b2c\\s*\\d{1,4}\\s*[\u96c6\u8bdd\u8a71])\\s*$")
+	embyReleaseSitePrefixRE         = regexp.MustCompile("^\u3010[^\u3011]*(?:\u53d1\u5e03|www|com|net|org|\u9ad8\u6e05|\u5267\u96c6)[^\u3011]*\u3011\\s*")
+	embySeriesTotalEpisodesSuffixRE = regexp.MustCompile("(?i)[\\s._-]*[\\[\\(\uFF08\u3010]?(?:\u5168\\s*\\d+\\s*[\u96c6\u8bdd\u8a71])[\\]\\)\uFF09\u3011]?(?:[\\s._-].*)?$")
+	embySeriesSeasonSuffixRE        = regexp.MustCompile("(?i)[\\s._-]*(?:\u7b2c\\s*[0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u96f6\u4e24]+\\s*\u5b63|season\\s*\\d+|s\\d{1,2})(?:[\\s._\\-\\[\\(\uFF08\u3010].*)?$")
+	embyChineseLeadingTitleRE       = regexp.MustCompile("^([\\p{Han}][\\p{Han}0-9A-Za-z\u00b7\u30fb:\uFF1A\u300a\u300b\uFF01!\uFF1F?\uFF0C,\u3002.\\s-]*[\\p{Han}])\\s+[A-Za-z][A-Za-z0-9 .'\\-:]*$")
 )
 
 type embyVisibilityCacheEntry struct {

@@ -65,6 +65,7 @@ func canonicalEmbySeriesName(raw string) string {
 	}
 	name = strings.ReplaceAll(name, "｜", " ")
 	name = strings.ReplaceAll(name, "|", " ")
+	name = strings.TrimSpace(embySeriesTotalEpisodesSuffixRE.ReplaceAllString(name, ""))
 	name = strings.TrimSpace(embySeriesSeasonSuffixRE.ReplaceAllString(name, ""))
 	name = strings.Trim(name, " ._-　")
 	name = strings.Join(strings.Fields(name), " ")
