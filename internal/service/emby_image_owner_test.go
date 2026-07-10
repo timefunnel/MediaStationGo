@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
@@ -23,14 +24,40 @@ func TestEmbyMoviePayloadIncludesImageOwnerFields(t *testing.T) {
 
 	item := svc.itemPayload(t.Context(), &media, false, 0)
 
-	if item["PrimaryImageItemId"] != media.ID || item["PrimaryImageTag"] != media.ID {
+	wantPrimary := embyImageTag(media.ID, "primary", media.PosterURL, media.UpdatedAt)
+	if item["PrimaryImageItemId"] != media.ID || item["PrimaryImageTag"] != wantPrimary {
 		t.Fatalf("primary image owner fields missing: %#v", item)
 	}
 	if item["BackdropImageItemId"] != media.ID || item["ParentBackdropItemId"] != media.ID {
 		t.Fatalf("backdrop owner fields missing: %#v", item)
 	}
-	if tags, ok := item["ParentBackdropImageTags"].([]string); !ok || len(tags) != 1 || tags[0] != media.ID+"-bd" {
+	wantBackdrop := embyImageTag(media.ID, "backdrop", media.BackdropURL, media.UpdatedAt)
+	if tags, ok := item["ParentBackdropImageTags"].([]string); !ok || len(tags) != 1 || tags[0] != wantBackdrop {
 		t.Fatalf("ParentBackdropImageTags = %#v", item["ParentBackdropImageTags"])
+	}
+}
+
+func TestEmbyImageTagChangesWithArtworkURLAndUpdatedAt(t *testing.T) {
+	svc := newTestEmbyService(t)
+	updatedAt := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	media := model.Media{
+		Base:      model.Base{ID: "movie-1", UpdatedAt: updatedAt},
+		Title:     "Movie",
+		Path:      `/media/movies/movie.mkv`,
+		PosterURL: `https://img.example/poster-old.jpg`,
+	}
+
+	oldTag := svc.itemPayload(t.Context(), &media, false, 0)["PrimaryImageTag"]
+	media.PosterURL = `https://img.example/poster-new.jpg`
+	newURLTag := svc.itemPayload(t.Context(), &media, false, 0)["PrimaryImageTag"]
+	if oldTag == newURLTag {
+		t.Fatalf("primary image tag should change when poster url changes: old=%#v new=%#v", oldTag, newURLTag)
+	}
+
+	media.UpdatedAt = updatedAt.Add(time.Minute)
+	newTimeTag := svc.itemPayload(t.Context(), &media, false, 0)["PrimaryImageTag"]
+	if newURLTag == newTimeTag {
+		t.Fatalf("primary image tag should change when updated_at changes: old=%#v new=%#v", newURLTag, newTimeTag)
 	}
 }
 
@@ -94,10 +121,15 @@ func TestEmbySeriesPayloadIncludesImageOwnerFields(t *testing.T) {
 	}
 	series := items[0]
 	seriesID, _ := series["Id"].(string)
-	if series["PrimaryImageItemId"] != seriesID || series["PrimaryImageTag"] != seriesID {
+	primaryTag, _ := series["PrimaryImageTag"].(string)
+	if series["PrimaryImageItemId"] != seriesID || primaryTag == "" || primaryTag == seriesID {
 		t.Fatalf("series primary owner fields missing: %#v", series)
 	}
 	if series["BackdropImageItemId"] != seriesID || series["ParentBackdropItemId"] != seriesID {
 		t.Fatalf("series backdrop owner fields missing: %#v", series)
+	}
+	backdropTags, _ := series["ParentBackdropImageTags"].([]string)
+	if len(backdropTags) != 1 || backdropTags[0] == seriesID || backdropTags[0] == seriesID+"-bd" {
+		t.Fatalf("series backdrop tags should be dynamic: %#v", series)
 	}
 }

@@ -204,7 +204,8 @@ func TestEmbyItemsKeepSpecialsInSeasonZero(t *testing.T) {
 	if episodeItems[0]["ParentIndexNumber"] != 0 || episodeItems[0]["SeasonId"] != seasonItems[0]["Id"] || episodeItems[0]["ParentId"] != seasonItems[0]["Id"] {
 		t.Fatalf("special episode linked to wrong season: %#v season=%#v", episodeItems[0], seasonItems[0])
 	}
-	if tags, ok := episodeItems[0]["ImageTags"].(map[string]string); !ok || tags["Primary"] != "sp-1" {
+	wantPrimary := embyImageTag(media.ID, "primary", media.PosterURL, media.UpdatedAt)
+	if tags, ok := episodeItems[0]["ImageTags"].(map[string]string); !ok || tags["Primary"] != wantPrimary {
 		t.Fatalf("episode still should be exposed as Primary image: %#v", episodeItems[0]["ImageTags"])
 	}
 }
@@ -230,7 +231,8 @@ func TestEmbyEpisodeStillIsPrimaryImageNotArt(t *testing.T) {
 	}
 
 	item := svc.itemPayload(t.Context(), &media, false, 0)
-	if tags, ok := item["ImageTags"].(map[string]string); !ok || tags["Primary"] != "ep-still" {
+	wantPrimary := embyImageTag(media.ID, "primary", media.BackdropURL, media.UpdatedAt)
+	if tags, ok := item["ImageTags"].(map[string]string); !ok || tags["Primary"] != wantPrimary {
 		t.Fatalf("episode should expose a primary image tag: %#v", item["ImageTags"])
 	}
 	if tags, ok := item["BackdropImageTags"].([]string); !ok || len(tags) != 0 {
@@ -293,6 +295,74 @@ func TestEmbyVirtualSeriesArtworkUsesListCache(t *testing.T) {
 	}
 	if backdrop != "/backdrop.jpg" {
 		t.Fatalf("backdrop = %q, want cached backdrop", backdrop)
+	}
+}
+
+func TestEmbySeriesNamePrefersScrapedTitleOverNoisyPath(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "TV", Path: `cloud://openlist/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:       model.Base{ID: "ep-scraped-title"},
+		LibraryID:  lib.ID,
+		Title:      "罚罪2",
+		Path:       `cloud://openlist/tv/FX S02/FX.S02E01.mkv`,
+		SeasonNum:  2,
+		EpisodeNum: 1,
+	}
+	if err := svc.repo.DB.Create(&media).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	root, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, Limit: 50})
+	if err != nil {
+		t.Fatalf("library items: %v", err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Name"] != "罚罪2" {
+		t.Fatalf("series card should prefer scraped title, got %#v", items)
+	}
+}
+
+func TestEmbySeriesNameNormalizesReleaseNoiseAcrossSeasons(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "TV", Path: `cloud://openlist/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	rows := []model.Media{
+		{
+			Base:       model.Base{ID: "orville-s1e1"},
+			LibraryID:  lib.ID,
+			Title:      "【高清剧集网发布 www bphdtv com】奥维尔号 the orville",
+			Path:       `cloud://openlist/tv/orville-s1/Orville.S01E01.mkv`,
+			SeasonNum:  1,
+			EpisodeNum: 1,
+		},
+		{
+			Base:       model.Base{ID: "orville-s2e1"},
+			LibraryID:  lib.ID,
+			Title:      "奥维尔号",
+			Path:       `cloud://openlist/tv/orville-s2/Orville.S02E01.mkv`,
+			SeasonNum:  2,
+			EpisodeNum: 1,
+		},
+	}
+	for _, media := range rows {
+		if err := svc.repo.DB.Create(&media).Error; err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+	}
+
+	root, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, Limit: 50})
+	if err != nil {
+		t.Fatalf("library items: %v", err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Name"] != "奥维尔号" || items[0]["RecursiveItemCount"] != 2 {
+		t.Fatalf("orville seasons should be grouped as one normalized series, got %#v", items)
 	}
 }
 

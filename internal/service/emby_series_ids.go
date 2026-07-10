@@ -28,17 +28,48 @@ func (e *EmbyService) seasonIDForMedia(m *model.Media) string {
 func (e *EmbyService) seriesNameForMedia(m *model.Media) string {
 	if strings.TrimSpace(m.SeriesID) != "" {
 		if series, err := e.repo.Series.FindByID(context.Background(), m.SeriesID); err == nil && series != nil && strings.TrimSpace(series.Title) != "" {
-			return series.Title
+			return strings.TrimSpace(series.Title)
 		}
+	}
+	if name := embySeriesTitleCandidate(m.Title); name != "" {
+		return name
+	}
+	if name := embySeriesTitleCandidate(m.OriginalName); name != "" {
+		return name
 	}
 	if name := inferSeriesNameFromPath(m.Path); name != "" {
 		return name
 	}
-	name := strings.TrimSpace(m.Title)
-	name = embyEpisodeTitleRE.ReplaceAllString(name, "")
-	name = embyYearSuffixRE.ReplaceAllString(name, "")
-	if name == "" {
-		name = strings.TrimSpace(m.OriginalName)
+	return strings.TrimSpace(m.Title)
+}
+
+func embySeriesTitleCandidate(raw string) string {
+	name := strings.TrimSpace(raw)
+	name = strings.TrimSpace(embyEpisodeTitleRE.ReplaceAllString(name, ""))
+	name = strings.TrimSpace(embyYearSuffixRE.ReplaceAllString(name, ""))
+	name = canonicalEmbySeriesName(name)
+	if name == "" || embyEpisodeOnlyTitleRE.MatchString(name) {
+		return ""
+	}
+	return name
+}
+
+func canonicalEmbySeriesName(raw string) string {
+	name := strings.TrimSpace(raw)
+	for {
+		next := strings.TrimSpace(embyReleaseSitePrefixRE.ReplaceAllString(name, ""))
+		if next == name {
+			break
+		}
+		name = next
+	}
+	name = strings.ReplaceAll(name, "｜", " ")
+	name = strings.ReplaceAll(name, "|", " ")
+	name = strings.TrimSpace(embySeriesSeasonSuffixRE.ReplaceAllString(name, ""))
+	name = strings.Trim(name, " ._-　")
+	name = strings.Join(strings.Fields(name), " ")
+	if match := embyChineseLeadingTitleRE.FindStringSubmatch(name); len(match) == 2 {
+		name = strings.TrimSpace(match[1])
 	}
 	return name
 }
@@ -56,6 +87,9 @@ func inferSeriesNameFromPath(path string) string {
 	}
 	base = strings.TrimSpace(embyYearSuffixRE.ReplaceAllString(base, ""))
 	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	if base = canonicalEmbySeriesName(base); base == "" || embyEpisodeOnlyTitleRE.MatchString(base) {
 		return ""
 	}
 	return base

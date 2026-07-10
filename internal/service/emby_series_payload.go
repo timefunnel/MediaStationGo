@@ -5,10 +5,10 @@ func (e *EmbyService) seriesPayload(group embySeriesGroup) map[string]any {
 	imageTags := map[string]string{}
 	backdropTags := []string{}
 	if group.PosterURL != "" {
-		imageTags["Primary"] = group.ID
+		imageTags["Primary"] = embyImageTag(group.ID, "primary", group.PosterURL, group.CreatedAt)
 	}
 	if group.BackdropURL != "" {
-		backdropTags = append(backdropTags, group.ID+"-bd")
+		backdropTags = append(backdropTags, embyImageTag(group.ID, "backdrop", group.BackdropURL, group.CreatedAt))
 	}
 	item := map[string]any{
 		"Id":                 group.ID,
@@ -44,10 +44,10 @@ func (e *EmbyService) seasonPayload(season embySeasonGroup) map[string]any {
 	imageTags := map[string]string{}
 	backdropTags := []string{}
 	if season.Series.PosterURL != "" {
-		imageTags["Primary"] = season.ID
+		imageTags["Primary"] = embyImageTag(season.ID, "primary", season.Series.PosterURL, season.Series.CreatedAt)
 	}
 	if season.Series.BackdropURL != "" {
-		backdropTags = append(backdropTags, season.ID+"-bd")
+		backdropTags = append(backdropTags, embyImageTag(season.ID, "backdrop", season.Series.BackdropURL, season.Series.CreatedAt))
 	}
 	item := map[string]any{
 		"Id":                season.ID,

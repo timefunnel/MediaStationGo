@@ -213,10 +213,10 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	primaryArtwork := e.mediaPrimaryArtwork(ctx, m)
 	backdropArtwork := e.mediaBackdropArtwork(ctx, m)
 	if primaryArtwork != "" {
-		imageTags["Primary"] = m.ID
+		imageTags["Primary"] = embyImageTag(m.ID, "primary", primaryArtwork, m.UpdatedAt)
 	}
 	if backdropArtwork != "" {
-		backdropTags = append(backdropTags, m.ID+"-bd")
+		backdropTags = append(backdropTags, embyImageTag(m.ID, "backdrop", backdropArtwork, m.UpdatedAt))
 	}
 
 	runTimeTicks := int64(m.DurationSec) * 10_000_000
