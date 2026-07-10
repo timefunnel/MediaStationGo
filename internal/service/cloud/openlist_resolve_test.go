@@ -181,7 +181,7 @@ func TestOpenListResolveWarmsParentWhenGetReportsMissing(t *testing.T) {
 	}
 }
 
-func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
+func TestOpenListResolveProxiesRawURLWhenHeadersAreRequired(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -195,13 +195,16 @@ func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err == nil || !strings.Contains(err.Error(), "refusing WebDAV/proxy fallback") || !strings.Contains(err.Error(), "Cookie") {
-		t.Fatalf("resolve error = %v, want pure 302 refusal with header names", err)
+	link, err := p.Resolve(context.Background(), "/Cloud/Movie.mkv")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if link.URL != srv.URL+"/dav/Cloud/Movie.mkv" || !link.Proxy || link.Headers["Cookie"] != "sid=abc" {
+		t.Fatalf("link = %#v, want proxied raw_url with required headers", link)
 	}
 }
 
-func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
+func TestOpenListResolveProxiesHostedRawURLWithoutCDNRedirect(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -223,12 +226,15 @@ func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err == nil || !strings.Contains(err.Error(), "OpenList-hosted raw_url") || !strings.Contains(err.Error(), "no CDN Location") {
-		t.Fatalf("resolve error = %v, want hosted raw_url refusal", err)
+	link, err := p.Resolve(context.Background(), "/Cloud/Movie.mkv")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
 	}
 	if !probeSeen {
 		t.Fatal("expected OpenList-hosted raw_url probe")
+	}
+	if link.URL != srv.URL+"/d/Cloud/Movie.mkv?sign=1" || !link.Proxy {
+		t.Fatalf("link = %#v, want OpenList-hosted raw_url proxy", link)
 	}
 }
 

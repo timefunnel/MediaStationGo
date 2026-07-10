@@ -37,7 +37,6 @@ var adultExcludedPrefixes = map[string]struct{}{
 var defaultAdultBases = []string{
 	"https://javdb.com",
 	"https://onejav.com",
-	"https://missav.live",
 	"https://javbus.sbs",
 	"https://www.javbus.com",
 	"https://www.cdnbus.cyou",
@@ -82,8 +81,6 @@ func (p *AdultProvider) Search(ctx context.Context, code string) (*Match, error)
 			match, err = p.scrapeJavBus(ctx, base, code)
 		case "onejav":
 			match, err = p.scrapeOneJav(ctx, base, code)
-		case "missav":
-			match, err = p.scrapeMissAV(ctx, base, code)
 		default:
 			match, err = p.scrapeJavDB(ctx, base, code)
 		}
@@ -209,57 +206,6 @@ func (p *AdultProvider) scrapeOneJav(ctx context.Context, base, code string) (*M
 			return nil, err
 		}
 		if match := parseOneJavDetailHTML(body, code, detail); match != nil {
-			return match, nil
-		}
-	}
-	return nil, nil
-}
-
-func (p *AdultProvider) scrapeMissAV(ctx context.Context, base, code string) (*Match, error) {
-	expected := adultCodeKey(code)
-	seen := map[string]struct{}{}
-	for _, slug := range missAVSlugs(code) {
-		seen[slug] = struct{}{}
-		detail := base + "/" + url.PathEscape(slug)
-		body, err := p.fetchText(ctx, detail, base)
-		if err != nil {
-			return nil, err
-		}
-		if match := parseMissAVDetailHTML(body, code, detail); match != nil {
-			return match, nil
-		}
-	}
-
-	body, err := p.fetchText(ctx, base+"/search/"+url.PathEscape(code), base)
-	if err != nil {
-		return nil, err
-	}
-	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
-		if len(found) < 3 {
-			continue
-		}
-		attrs := adultAttrs(found[1])
-		href := attrs["href"]
-		if href == "" {
-			continue
-		}
-		trimmed := strings.TrimRight(href, "/")
-		slug := strings.ToLower(trimmed[strings.LastIndex(trimmed, "/")+1:])
-		if slug == "" {
-			continue
-		}
-		if _, ok := seen[slug]; ok {
-			continue
-		}
-		if expected != "" && !strings.Contains(adultCodeKey(stripAdultHTML(found[2])+" "+slug), expected) {
-			continue
-		}
-		detail := absolutizeURL(base, href)
-		body, err := p.fetchText(ctx, detail, base)
-		if err != nil {
-			return nil, err
-		}
-		if match := parseMissAVDetailHTML(body, code, detail); match != nil {
 			return match, nil
 		}
 	}

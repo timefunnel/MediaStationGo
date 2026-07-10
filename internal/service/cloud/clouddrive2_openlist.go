@@ -177,27 +177,26 @@ func (p *cloudDrive2Provider) openListDirectLinkFromGet(ctx context.Context, fil
 	}
 	headers := normalizeOpenListPlaybackHeaders(decoded.Data.Header)
 	if len(headers) > 0 {
-		return nil, fmt.Errorf("%s: api get %s returned raw_url that requires headers (%s); refusing WebDAV/proxy fallback for pure 302 playback", p.name, fileRef, strings.Join(sortedHeaderNames(headers), ","))
+		return &DirectLink{URL: resolved, Headers: headers, Proxy: true}, nil
 	}
-	resolved, err = p.resolveOpenListCDNRedirect(ctx, fileRef, resolved)
-	if err != nil {
-		return nil, err
+	if directURL, ok := p.resolveOpenListCDNRedirect(ctx, resolved); ok {
+		return &DirectLink{URL: directURL, Headers: nil, Proxy: false}, nil
+	}
+	if sameURLHost(resolved, p.apiBase) {
+		return &DirectLink{URL: resolved, Headers: nil, Proxy: true}, nil
 	}
 	return &DirectLink{URL: resolved, Headers: nil, Proxy: false}, nil
 }
 
-func (p *cloudDrive2Provider) resolveOpenListCDNRedirect(ctx context.Context, fileRef, rawURL string) (string, error) {
+func (p *cloudDrive2Provider) resolveOpenListCDNRedirect(ctx context.Context, rawURL string) (string, bool) {
 	if p.apiBase == nil || !sameURLHost(rawURL, p.apiBase) {
-		return rawURL, nil
+		return rawURL, true
 	}
-	location, status, err := p.firstHTTPRedirectLocation(ctx, rawURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("%s: probe raw_url %s failed: %w", p.name, fileRef, err)
+	location, _, err := p.firstHTTPRedirectLocation(ctx, rawURL, nil)
+	if err == nil && location != "" {
+		return location, true
 	}
-	if location != "" {
-		return location, nil
-	}
-	return "", fmt.Errorf("%s: api get %s returned an OpenList-hosted raw_url with http %d and no CDN Location; refusing OpenList/WebDAV proxy fallback for pure 302 playback", p.name, fileRef, status)
+	return "", false
 }
 
 func (p *cloudDrive2Provider) openListAPIStatusError(action, target string, status int) error {
