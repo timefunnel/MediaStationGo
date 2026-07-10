@@ -1,0 +1,103 @@
+package service
+
+import (
+	"testing"
+
+	"github.com/ShukeBta/MediaStationGo/internal/model"
+)
+
+func TestEmbyMoviePayloadIncludesImageOwnerFields(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "Movies", Path: `/media/movies`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:        model.Base{ID: "movie-1"},
+		LibraryID:   lib.ID,
+		Title:       "Movie",
+		Path:        `/media/movies/movie.mkv`,
+		PosterURL:   `https://img.example/poster.jpg`,
+		BackdropURL: `https://img.example/backdrop.jpg`,
+	}
+
+	item := svc.itemPayload(t.Context(), &media, false, 0)
+
+	if item["PrimaryImageItemId"] != media.ID || item["PrimaryImageTag"] != media.ID {
+		t.Fatalf("primary image owner fields missing: %#v", item)
+	}
+	if item["BackdropImageItemId"] != media.ID || item["ParentBackdropItemId"] != media.ID {
+		t.Fatalf("backdrop owner fields missing: %#v", item)
+	}
+	if tags, ok := item["ParentBackdropImageTags"].([]string); !ok || len(tags) != 1 || tags[0] != media.ID+"-bd" {
+		t.Fatalf("ParentBackdropImageTags = %#v", item["ParentBackdropImageTags"])
+	}
+}
+
+func TestEmbyEpisodeWithoutArtworkUsesSeriesImageOwner(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "TV", Path: `/media/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:       model.Base{ID: "episode-1"},
+		LibraryID:  lib.ID,
+		Title:      "Show",
+		Path:       `/media/tv/Show/Season 01/Show - S01E01.mkv`,
+		SeasonNum:  1,
+		EpisodeNum: 1,
+	}
+
+	item := svc.itemPayload(t.Context(), &media, false, 0)
+	seriesID, _ := item["SeriesId"].(string)
+	if seriesID == "" {
+		t.Fatalf("episode payload missing SeriesId: %#v", item)
+	}
+	if item["PrimaryImageItemId"] != seriesID {
+		t.Fatalf("PrimaryImageItemId = %#v, want series id %q", item["PrimaryImageItemId"], seriesID)
+	}
+	if _, ok := item["PrimaryImageTag"]; ok {
+		t.Fatalf("episode without own image should not expose PrimaryImageTag: %#v", item)
+	}
+	if item["BackdropImageItemId"] != seriesID || item["ParentBackdropItemId"] != seriesID {
+		t.Fatalf("backdrop owner should fall back to series id: %#v", item)
+	}
+}
+
+func TestEmbySeriesPayloadIncludesImageOwnerFields(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "TV", Path: `/media/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:        model.Base{ID: "episode-1"},
+		LibraryID:   lib.ID,
+		Title:       "Show",
+		Path:        `/media/tv/Show/Season 01/Show - S01E01.mkv`,
+		PosterURL:   `https://img.example/poster.jpg`,
+		BackdropURL: `https://img.example/backdrop.jpg`,
+		SeasonNum:   1,
+		EpisodeNum:  1,
+	}
+	if err := svc.repo.DB.Create(&media).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+	root, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, Limit: 50})
+	if err != nil {
+		t.Fatalf("items: %v", err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+	series := items[0]
+	seriesID, _ := series["Id"].(string)
+	if series["PrimaryImageItemId"] != seriesID || series["PrimaryImageTag"] != seriesID {
+		t.Fatalf("series primary owner fields missing: %#v", series)
+	}
+	if series["BackdropImageItemId"] != seriesID || series["ParentBackdropItemId"] != seriesID {
+		t.Fatalf("series backdrop owner fields missing: %#v", series)
+	}
+}

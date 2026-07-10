@@ -263,5 +263,6 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	if premiered, ok := embyPremiereDate(m.ReleaseDate); ok {
 		item["PremiereDate"] = premiered
 	}
+	embyAttachImageOwnerIDs(item)
 	return item
 }

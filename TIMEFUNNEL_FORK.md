@@ -57,6 +57,9 @@ Priority 2 fixes:
 - maintenance branch pending release: adult media names in Emby payloads are
   normalized to display a canonical code prefix without relying on the external
   subtitle proxy JSON patch.
+- maintenance branch pending release: Emby media payloads now include image
+  owner fields (`PrimaryImageItemId`, `PrimaryImageTag`, and backdrop owner
+  ids), removing another subtitle-proxy JSON patch.
 
 ## Baseline Validation
 

@@ -35,6 +35,7 @@ func (e *EmbyService) seriesPayload(group embySeriesGroup) map[string]any {
 	if premiered, ok := embyPremiereDate(group.ReleaseDate); ok {
 		item["PremiereDate"] = premiered
 	}
+	embyAttachImageOwnerIDs(item)
 	return item
 }
 
@@ -48,7 +49,7 @@ func (e *EmbyService) seasonPayload(season embySeasonGroup) map[string]any {
 	if season.Series.BackdropURL != "" {
 		backdropTags = append(backdropTags, season.ID+"-bd")
 	}
-	return map[string]any{
+	item := map[string]any{
 		"Id":                season.ID,
 		"Name":              season.Name,
 		"ServerId":          embyServerID,
@@ -64,4 +65,6 @@ func (e *EmbyService) seasonPayload(season embySeasonGroup) map[string]any {
 		"BackdropImageTags": backdropTags,
 		"UserData":          emptyUserData(),
 	}
+	embyAttachImageOwnerIDs(item)
+	return item
 }
