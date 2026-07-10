@@ -26,32 +26,70 @@ const adultDerivedPosterStrategy = "adult-right-half-poster-v1"
 
 var adultDerivedPosterSize = image.Pt(600, 900)
 
+var errAdultPosterSourceNotLandscape = errors.New("adult poster source is not landscape")
+
 func (s *ScraperService) deriveAdultPosterIfNeeded(ctx context.Context, m *model.Media, lib *model.Library, match *Match) {
 	if s == nil || s.images == nil || match == nil || !adultScrapeNeedsDerivedPoster(lib, match) {
 		return
 	}
-	if strings.TrimSpace(match.PosterURL) != "" || strings.TrimSpace(match.BackdropURL) == "" {
+	posterURL := strings.TrimSpace(match.PosterURL)
+	backdropURL := strings.TrimSpace(match.BackdropURL)
+	sourceURL, data, ok := s.fetchAdultPosterDerivationSource(ctx, m, posterURL, backdropURL)
+	if !ok {
 		return
 	}
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	data, _, err := s.images.Fetch(fetchCtx, match.BackdropURL)
-	cancel()
+	posterPath, err := s.writeAdultPosterFromBackdrop(sourceURL, data)
 	if err != nil {
-		s.log.Warn("adult poster derivation skipped; backdrop fetch failed",
-			zap.String("media_id", mediaIDForLog(m)),
-			zap.String("backdrop", match.BackdropURL),
-			zap.Error(err))
-		return
-	}
-	posterPath, err := s.writeAdultPosterFromBackdrop(match.BackdropURL, data)
-	if err != nil {
+		if errors.Is(err, errAdultPosterSourceNotLandscape) {
+			return
+		}
 		s.log.Warn("adult poster derivation skipped; poster generation failed",
 			zap.String("media_id", mediaIDForLog(m)),
-			zap.String("backdrop", match.BackdropURL),
+			zap.String("source", sourceURL),
 			zap.Error(err))
 		return
 	}
 	match.PosterURL = posterPath
+}
+
+func (s *ScraperService) fetchAdultPosterDerivationSource(ctx context.Context, m *model.Media, posterURL, backdropURL string) (string, []byte, bool) {
+	if strings.TrimSpace(backdropURL) == "" {
+		return "", nil, false
+	}
+	if posterURL != "" && posterURL != backdropURL {
+		if data, err := s.fetchAdultPosterSource(ctx, posterURL); err == nil {
+			if imageDataIsLandscape(data) {
+				return posterURL, data, true
+			}
+			return "", nil, false
+		} else {
+			s.log.Warn("adult poster derivation source fetch failed; trying backdrop",
+				zap.String("media_id", mediaIDForLog(m)),
+				zap.String("source", posterURL),
+				zap.Error(err))
+		}
+	}
+	data, err := s.fetchAdultPosterSource(ctx, backdropURL)
+	if err != nil {
+		s.log.Warn("adult poster derivation skipped; backdrop fetch failed",
+			zap.String("media_id", mediaIDForLog(m)),
+			zap.String("backdrop", backdropURL),
+			zap.Error(err))
+		return "", nil, false
+	}
+	return backdropURL, data, true
+}
+
+func (s *ScraperService) fetchAdultPosterSource(ctx context.Context, sourceURL string) ([]byte, error) {
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	data, _, err := s.images.Fetch(fetchCtx, sourceURL)
+	return data, err
+}
+
+func imageDataIsLandscape(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	return err == nil && cfg.Width > cfg.Height
 }
 
 func adultScrapeNeedsDerivedPoster(lib *model.Library, match *Match) bool {
@@ -77,7 +115,7 @@ func (s *ScraperService) writeAdultPosterFromBackdrop(backdropURL string, data [
 		return "", errors.New("invalid image bounds")
 	}
 	if bounds.Dx() <= bounds.Dy() {
-		return "", errors.New("backdrop is not landscape")
+		return "", errAdultPosterSourceNotLandscape
 	}
 	crop := image.Rect(bounds.Min.X+bounds.Dx()/2, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)
 	targetRatio := float64(adultDerivedPosterSize.X) / float64(adultDerivedPosterSize.Y)
