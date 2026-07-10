@@ -68,6 +68,39 @@ The local Windows workstation currently does not have Go or Docker installed, so
 baseline validation should run in GitHub Actions or on a controlled remote build
 host.
 
+## Remote Test Workflow
+
+Use `scripts/timefunnel-remote-go-test.ps1` from this repository when local Go is
+not available. The helper keeps a reusable remote worktree and Go caches under
+`/opt/codex-build/mediastationgo`, reuses the existing `golang:1.25` Docker
+image, and refuses to start when the remote host is already busy or low on
+available memory. Do not place this test cache under `/data`; that disk is
+reserved for media service data and is already capacity constrained.
+
+Fast targeted validation:
+
+```powershell
+.\scripts\timefunnel-remote-go-test.ps1
+```
+
+Full Go validation, only when the server is idle and the wider change requires
+it:
+
+```powershell
+.\scripts\timefunnel-remote-go-test.ps1 -Full
+```
+
+Operational rules:
+
+1. Do not remove the `golang:1.25` image after every test; repeated pulls create
+   avoidable network, CPU, and disk I/O spikes.
+2. Keep Go module/build caches between test runs unless disk pressure requires a
+   manual cleanup.
+3. Prefer targeted package tests while iterating, then run `-Full` before a
+   release batch.
+4. Do not use remote tests for playback/OpenList/115 verification unless that is
+   explicitly required.
+
 ## Production Deployment Rule
 
 Production compose should only switch from upstream to the fork after:
