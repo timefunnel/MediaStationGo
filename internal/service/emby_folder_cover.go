@@ -71,7 +71,6 @@ func (e *EmbyService) folderCoverSeriesArtwork(ctx context.Context, libraryIDs [
 	var rows []model.Media
 	if err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("library_id IN ? AND deleted_at IS NULL", libraryIDs).
-		Where("season_num > 0 OR episode_num > 0").
 		Where("(poster_url <> '' OR backdrop_url <> '')").
 		Order("updated_at DESC, created_at DESC, id DESC").
 		Limit(embySeriesGroupingLimit).
