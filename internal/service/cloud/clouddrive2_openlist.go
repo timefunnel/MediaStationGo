@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -89,10 +90,31 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, file
 	if err != nil {
 		return nil, err
 	}
-	payload, _ := json.Marshal(map[string]string{"path": normalizeCloudDAVPath(fileRef), "password": ""})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/get"), bytes.NewReader(payload))
+	target := normalizeCloudDAVPath(fileRef)
+	decoded, err := p.openListAPIGet(ctx, token, target)
 	if err != nil {
 		return nil, err
+	}
+	if openListGetNeedsParentWarmup(decoded) {
+		if err := p.warmOpenListAPIParent(ctx, target); err != nil {
+			return nil, fmt.Errorf("%s: api get %s failed: %s; parent list warmup failed: %w", p.name, fileRef, openListAPIMessage(decoded.Code, decoded.Message), err)
+		}
+		decoded, err = p.openListAPIGet(ctx, token, target)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if decoded.Code != 0 && decoded.Code != 200 {
+		return nil, fmt.Errorf("%s: api get %s failed: %s", p.name, fileRef, openListAPIMessage(decoded.Code, decoded.Message))
+	}
+	return p.openListDirectLinkFromGet(ctx, fileRef, decoded)
+}
+
+func (p *cloudDrive2Provider) openListAPIGet(ctx context.Context, token, fileRef string) (openListGetResponse, error) {
+	payload, _ := json.Marshal(map[string]string{"path": fileRef, "password": ""})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/get"), bytes.NewReader(payload))
+	if err != nil {
+		return openListGetResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -102,23 +124,49 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, file
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/get"), err)
+		return openListGetResponse{}, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/get"), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, p.openListAPIStatusError("get", fileRef, resp.StatusCode)
+		return openListGetResponse{}, p.openListAPIStatusError("get", fileRef, resp.StatusCode)
 	}
 	var decoded openListGetResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("%s: decode api get: %w", p.name, err)
+		return openListGetResponse{}, fmt.Errorf("%s: decode api get: %w", p.name, err)
 	}
-	if decoded.Code != 0 && decoded.Code != 200 {
-		msg := strings.TrimSpace(decoded.Message)
-		if msg == "" {
-			msg = fmt.Sprintf("code %d", decoded.Code)
-		}
-		return nil, fmt.Errorf("%s: api get %s failed: %s", p.name, fileRef, msg)
+	return decoded, nil
+}
+
+func (p *cloudDrive2Provider) warmOpenListAPIParent(ctx context.Context, fileRef string) error {
+	parent := path.Dir(strings.TrimRight(normalizeCloudDAVPath(fileRef), "/"))
+	if parent == "." || parent == "" {
+		parent = "/"
 	}
+	_, err := p.listOpenListAPI(ctx, parent)
+	return err
+}
+
+func openListGetNeedsParentWarmup(decoded openListGetResponse) bool {
+	if decoded.Code == 0 || decoded.Code == 200 {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(decoded.Message))
+	return decoded.Code == 430004 ||
+		(decoded.Code == 500 && strings.Contains(msg, "430004")) ||
+		strings.Contains(msg, "文件不存在") ||
+		strings.Contains(msg, "不存在或已删除") ||
+		strings.Contains(msg, "not exist")
+}
+
+func openListAPIMessage(code int, msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		msg = fmt.Sprintf("code %d", code)
+	}
+	return msg
+}
+
+func (p *cloudDrive2Provider) openListDirectLinkFromGet(ctx context.Context, fileRef string, decoded openListGetResponse) (*DirectLink, error) {
 	raw := firstNonEmpty(decoded.Data.RawURL, decoded.Data.URL)
 	if raw == "" {
 		return nil, fmt.Errorf("%s: api get %s returned empty raw_url", p.name, fileRef)
