@@ -37,6 +37,9 @@ func embyItemImageHandler(svc *service.Container) gin.HandlerFunc {
 		imgType := strings.ToLower(c.Param("type"))
 		raw, err := svc.Emby.ImageURL(ctx, id, imgType)
 		if err != nil || raw == "" {
+			if serveEmbyFolderCoverImage(svc, c, id, imgType) {
+				return
+			}
 			embyServePlaceholderImage(c)
 			return
 		}

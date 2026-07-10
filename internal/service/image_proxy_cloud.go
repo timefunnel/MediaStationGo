@@ -89,6 +89,42 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 	return nil
 }
 
+func (p *ImageProxy) FetchCloudCached(stableKey string) ([]byte, string, bool) {
+	if p == nil {
+		return nil, "", false
+	}
+	_, cachePath, failPath := p.cloudImageCachePaths(stableKey)
+	p.removeUnusableImageCache(cachePath, failPath)
+	data, err := os.ReadFile(cachePath) // #nosec G304 -- cachePath is SHA-derived under cacheDir.
+	if err != nil || len(data) == 0 {
+		return nil, "", false
+	}
+	if freshNegativeImageCache(failPath) {
+		return nil, "", false
+	}
+	ctype := detectContentType(data)
+	if !isImageContentType(ctype) || isTransparentPlaceholderData(data) {
+		_ = os.Remove(cachePath)
+		_ = os.Remove(failPath)
+		return nil, "", false
+	}
+	return data, ctype, true
+}
+
+func (p *ImageProxy) FetchCloudResolved(ctx context.Context, stableKey string, link *cloud.DirectLink) ([]byte, string, error) {
+	if p == nil || link == nil || strings.TrimSpace(link.URL) == "" {
+		return nil, "", errors.New("missing cloud image link")
+	}
+	stableKey = strings.TrimSpace(stableKey)
+	if stableKey == "" {
+		stableKey = link.URL
+	}
+	if data, ctype, ok := p.FetchCloudCached(stableKey); ok {
+		return data, ctype, nil
+	}
+	return p.fetchAndCacheCloudImage(ctx, stableKey, link, "MediaStationGo/0.1")
+}
+
 // PrefetchCloudResolved downloads a cloud sidecar image into the local cache
 // without writing an HTTP response.
 func (p *ImageProxy) PrefetchCloudResolved(ctx context.Context, stableKey string, link *cloud.DirectLink) error {

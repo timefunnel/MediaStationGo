@@ -173,6 +173,9 @@ func (p *ImageProxy) fetchAndCacheRemoteImage(ctx context.Context, raw, host, ca
 
 // Fetch pulls a remote image and returns bytes plus Content-Type using cache.
 func (p *ImageProxy) Fetch(ctx context.Context, raw string) ([]byte, string, error) {
+	if isLocalImagePath(raw) {
+		return p.fetchLocalImage(raw)
+	}
 	u, err := p.validateURL(raw)
 	if err != nil {
 		return nil, "", err
@@ -195,6 +198,23 @@ func (p *ImageProxy) Fetch(ctx context.Context, raw string) ([]byte, string, err
 	}
 	data, ctype, _, err := p.fetchAndCacheRemoteImage(ctx, raw, host, cachePath, failPath)
 	return data, ctype, err
+}
+
+func (p *ImageProxy) fetchLocalImage(raw string) ([]byte, string, error) {
+	path := filepath.Clean(raw)
+	abs, err := filepath.Abs(path)
+	if err != nil || !p.isAllowedLocalPath(abs) {
+		return nil, "", errors.New("local image path is not allowed")
+	}
+	data, err := os.ReadFile(abs) // #nosec G304 -- abs is constrained to configured media/cache roots by isAllowedLocalPath.
+	if err != nil {
+		return nil, "", err
+	}
+	ctype := detectContentType(data)
+	if !isImageContentType(ctype) || isTransparentPlaceholderData(data) {
+		return nil, "", errors.New("local image is not usable")
+	}
+	return data, ctype, nil
 }
 
 func (p *ImageProxy) writeImageCache(cachePath, failPath, pattern string, data []byte) {

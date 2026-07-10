@@ -137,12 +137,12 @@ func (e *EmbyService) Views(ctx context.Context, userID string) (map[string]any,
 		if !e.libraryVisibleFromCachedVisibility(l, visibility) {
 			continue
 		}
-		items = append(items, e.libraryAsView(&l))
+		items = append(items, e.libraryAsView(ctx, &l))
 	}
 	return map[string]any{"Items": items, "TotalRecordCount": len(items), "StartIndex": 0}, nil
 }
 
-func (e *EmbyService) libraryAsView(l *model.Library) map[string]any {
+func (e *EmbyService) libraryAsView(ctx context.Context, l *model.Library) map[string]any {
 	collectionType := "movies"
 	switch l.Type {
 	case "tv":
@@ -154,7 +154,12 @@ func (e *EmbyService) libraryAsView(l *model.Library) map[string]any {
 	case "music":
 		collectionType = "music"
 	}
-	return map[string]any{
+	imageTags := map[string]string{}
+	primaryImageTag := e.FolderCoverTag(ctx, l.ID, "Primary")
+	if primaryImageTag != "" {
+		imageTags["Primary"] = primaryImageTag
+	}
+	view := map[string]any{
 		"Id":                       l.ID,
 		"Name":                     l.Name,
 		"CollectionType":           collectionType,
@@ -178,7 +183,7 @@ func (e *EmbyService) libraryAsView(l *model.Library) map[string]any {
 		"ProviderIds":              map[string]string{},
 		"Genres":                   []string{},
 		"Tags":                     []string{},
-		"ImageTags":                map[string]string{},
+		"ImageTags":                imageTags,
 		"BackdropImageTags":        []string{},
 		"UserData": map[string]any{
 			"PlaybackPositionTicks": 0,
@@ -188,4 +193,8 @@ func (e *EmbyService) libraryAsView(l *model.Library) map[string]any {
 			"UnplayedItemCount":     0,
 		},
 	}
+	if primaryImageTag != "" {
+		view["PrimaryImageTag"] = primaryImageTag
+	}
+	return view
 }

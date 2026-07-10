@@ -48,6 +48,9 @@ Priority 2 fixes:
 - `timefunnel-20260710-cloud-tombstone`: cloud media deleted from MSG is kept as
   a soft-deleted tombstone, and later scans skip that path instead of importing
   it again. Explicit restore from the recycle bin remains supported.
+- maintenance branch pending release: Emby library folder cover grids are
+  generated inside MSG from up to four child media posters, removing one of the
+  remaining subtitle-proxy responsibilities.
 
 ## Baseline Validation
 
