@@ -40,6 +40,12 @@ func adultSourceKind(base string) string {
 	if strings.Contains(host, "javdb") {
 		return "javdb"
 	}
+	if strings.Contains(host, "onejav") {
+		return "onejav"
+	}
+	if strings.Contains(host, "missav") {
+		return "missav"
+	}
 	for _, needle := range []string{"javbus", "cdnbus", "javsee", "busjav"} {
 		if strings.Contains(host, needle) {
 			return "javbus"

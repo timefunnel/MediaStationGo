@@ -113,6 +113,7 @@ func (s *ScraperService) applyProviderMatch(ctx context.Context, m *model.Media,
 }
 
 func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *model.Media, lib *model.Library, match *Match, options ScrapeOptions) error {
+	s.deriveAdultPosterIfNeeded(ctx, m, lib, match)
 	posterCandidate := match.PosterURL
 	backdropCandidate := match.BackdropURL
 	posterURL, removePoster := s.prepareScrapedArtworkURL(ctx, m.ID, "poster_url", m.PosterURL, posterCandidate)

@@ -140,3 +140,167 @@ func firstRatingInText(body string) float32 {
 	}
 	return 0
 }
+
+func parseOneJavDetailHTML(body, code, detailURL string) *Match {
+	expected := oneJavCodeKey(code)
+	if expected == "" || strings.TrimSpace(body) == "" {
+		return nil
+	}
+	if oneJavCodeKey(firstHTMLTitle(body)) != expected {
+		return nil
+	}
+	poster := firstAdultImage(body, "image")
+	if poster != "" {
+		poster = absolutizeURL(detailURL, poster)
+	}
+	pretty := oneJavPrettyCode(expected)
+	return &Match{
+		OriginalName: pretty,
+		MediaType:    "adult",
+		Title:        pretty,
+		PosterURL:    poster,
+		NSFW:         true,
+		Genres:       []string{"Adult", "onejav"},
+	}
+}
+
+func parseMissAVDetailHTML(body, code, detailURL string) *Match {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	expected := adultCodeKey(code)
+	title := firstAdultMetaContent(body, "og:title", "twitter:title")
+	if title == "" {
+		title = firstHTMLTitle(body)
+	}
+	title = stripAdultTitleSuffix(title)
+	check := title + " " + firstAdultMetaContent(body, "description", "og:description") + " " + detailURL
+	if expected != "" && !strings.Contains(adultCodeKey(check), expected) {
+		return nil
+	}
+	poster := firstAdultMetaContent(body, "twitter:image:src", "twitter:image")
+	if poster != "" {
+		poster = absolutizeURL(detailURL, poster)
+	}
+	backdrop := firstAdultMetaContent(body, "og:image", "og:image:url")
+	if backdrop == "" {
+		backdrop = firstAdultImage(body, "cover", "poster", "video")
+	}
+	if backdrop != "" {
+		backdrop = absolutizeURL(detailURL, backdrop)
+	}
+	if title == "" {
+		title = code
+	}
+	return &Match{
+		OriginalName: code,
+		MediaType:    "adult",
+		Title:        title,
+		PosterURL:    poster,
+		BackdropURL:  backdrop,
+		NSFW:         true,
+		Genres:       []string{"Adult", "missav"},
+		Year:         firstYearInText(body),
+		Rating:       firstRatingInText(body),
+	}
+}
+
+func firstAdultMetaContent(body string, keys ...string) string {
+	keySet := map[string]struct{}{}
+	for _, key := range keys {
+		keySet[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
+	}
+	for _, found := range regexp.MustCompile(`(?is)<meta\b([^>]*)>`).FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		name := strings.ToLower(strings.TrimSpace(attrs["property"]))
+		if name == "" {
+			name = strings.ToLower(strings.TrimSpace(attrs["name"]))
+		}
+		if _, ok := keySet[name]; ok && strings.TrimSpace(attrs["content"]) != "" {
+			return strings.TrimSpace(attrs["content"])
+		}
+	}
+	return ""
+}
+
+func firstHTMLTitle(body string) string {
+	m := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`).FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return stripAdultHTML(m[1])
+}
+
+func stripAdultTitleSuffix(value string) string {
+	value = strings.TrimSpace(stripAdultHTML(value))
+	for _, suffix := range []string{"| MissAV", "- MissAV", " - OneJAV.com - Free JAV Torrents", "- OneJAV.com - Free JAV Torrents"} {
+		if strings.HasSuffix(strings.ToLower(value), strings.ToLower(suffix)) {
+			value = strings.TrimSpace(value[:len(value)-len(suffix)])
+		}
+	}
+	return value
+}
+
+func adultCodeKey(value string) string {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return ""
+	}
+	if key := oneJavCodeKey(text); key != "" {
+		return key
+	}
+	if code := normalizeAdultCode(text); code != "" {
+		return asciiAlnumUpper(code)
+	}
+	return asciiAlnumUpper(text)
+}
+
+func oneJavCodeKey(value string) string {
+	if m := adultFC2Pattern.FindStringSubmatch(value); len(m) > 1 {
+		return "FC2PPV" + m[1]
+	}
+	normalized := asciiAlnumUpper(value)
+	if m := regexp.MustCompile(`FC2PPV(\d{5,10})`).FindStringSubmatch(normalized); len(m) > 1 {
+		return "FC2PPV" + m[1]
+	}
+	return ""
+}
+
+func oneJavPrettyCode(key string) string {
+	if m := regexp.MustCompile(`^FC2PPV(\d{5,10})$`).FindStringSubmatch(strings.ToUpper(key)); len(m) > 1 {
+		return "FC2-PPV-" + m[1]
+	}
+	return key
+}
+
+func oneJavSlugs(code string) []string {
+	if key := oneJavCodeKey(code); key != "" {
+		return []string{strings.ToLower(key)}
+	}
+	return nil
+}
+
+func missAVSlugs(code string) []string {
+	code = normalizeAdultCode(code)
+	if code == "" {
+		return nil
+	}
+	out := []string{strings.ToLower(strings.ReplaceAll(code, "_", "-"))}
+	if key := oneJavCodeKey(code); strings.HasPrefix(key, "FC2PPV") {
+		out = append(out, "fc2-ppv-"+strings.TrimPrefix(key, "FC2PPV"))
+	}
+	return dedupeStrings(out)
+}
+
+func asciiAlnumUpper(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(value) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

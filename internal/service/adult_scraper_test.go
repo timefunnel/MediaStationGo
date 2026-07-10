@@ -103,9 +103,11 @@ func TestAdultProviderUsesConfiguredMultipleSources(t *testing.T) {
 	}
 }
 
-func TestAdultSourceKindRecognizesJavBusMirrors(t *testing.T) {
+func TestAdultSourceKindRecognizesAdultSources(t *testing.T) {
 	cases := map[string]string{
 		"https://javdb.com":       "javdb",
+		"https://onejav.com":      "onejav",
+		"https://missav.live":     "missav",
 		"https://javbus.sbs":      "javbus",
 		"https://www.javbus.com":  "javbus",
 		"https://www.cdnbus.cyou": "javbus",
@@ -126,6 +128,8 @@ func TestAdultProviderDefaultBases(t *testing.T) {
 	got := provider.resolveBases(context.Background())
 	want := []string{
 		"https://javdb.com",
+		"https://onejav.com",
+		"https://missav.live",
 		"https://javbus.sbs",
 		"https://www.javbus.com",
 		"https://www.cdnbus.cyou",
@@ -139,5 +143,27 @@ func TestAdultProviderDefaultBases(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("resolveBases[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestParseOneJavDetailHTML(t *testing.T) {
+	html := `<html><title>FC2PPV4661145 - OneJAV.com - Free JAV Torrents</title><img class="image" src="/fc2.jpg"></html>`
+	got := parseOneJavDetailHTML(html, "FC2-PPV-4661145", "https://onejav.com/torrent/fc2ppv4661145")
+	if got == nil {
+		t.Fatal("parseOneJavDetailHTML returned nil")
+	}
+	if got.Title != "FC2-PPV-4661145" || got.OriginalName != "FC2-PPV-4661145" || got.PosterURL != "https://onejav.com/fc2.jpg" {
+		t.Fatalf("unexpected onejav match: %+v", got)
+	}
+}
+
+func TestParseMissAVDetailHTML(t *testing.T) {
+	html := `<html><head><title>MIDE-949 中文字幕 - MissAV</title><meta property="og:image" content="/cover.jpg"></head><body>MIDE-949</body></html>`
+	got := parseMissAVDetailHTML(html, "MIDE-949", "https://missav.live/mide-949")
+	if got == nil {
+		t.Fatal("parseMissAVDetailHTML returned nil")
+	}
+	if got.Title != "MIDE-949 中文字幕" || got.BackdropURL != "https://missav.live/cover.jpg" || got.PosterURL != "" {
+		t.Fatalf("unexpected missav match: %+v", got)
 	}
 }
