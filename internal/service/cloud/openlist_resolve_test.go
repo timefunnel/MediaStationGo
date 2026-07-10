@@ -123,65 +123,7 @@ func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
 	}
 }
 
-func TestOpenListResolveWarmsParentWhenGetReportsMissing(t *testing.T) {
-	var getCount int
-	var listSeen bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/fs/get":
-			getCount++
-			var body map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode get body: %v", err)
-			}
-			if body["path"] != "/Cloud/Movie.mkv" {
-				t.Fatalf("get path = %q", body["path"])
-			}
-			if getCount == 1 {
-				_, _ = w.Write([]byte(`{"code":500,"message":"failed to get obj: code: 430004, message: 文件（夹）不存在或已删除。"}`))
-				return
-			}
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=warm"}}`))
-		case "/api/fs/list":
-			listSeen = true
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode list body: %v", err)
-			}
-			if body["path"] != "/Cloud" {
-				t.Fatalf("list path = %#v, want /Cloud", body["path"])
-			}
-			if body["refresh"] != false {
-				t.Fatalf("list refresh = %#v, want false", body["refresh"])
-			}
-			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[{"name":"Movie.mkv","size":123,"is_dir":false}],"total":1}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	p, err := New(TypeOpenList, map[string]any{"server": srv.URL, "token": "alist-token"}, srv.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	link, err := p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if getCount != 2 {
-		t.Fatalf("get count = %d, want 2", getCount)
-	}
-	if !listSeen {
-		t.Fatal("expected parent directory list warmup")
-	}
-	if link.URL != "https://cdn.example.test/movie.mkv?sign=warm" || link.Proxy {
-		t.Fatalf("link = %#v, want warmed raw_url 302 playback", link)
-	}
-}
-
-func TestOpenListResolveProxiesRawURLWhenHeadersAreRequired(t *testing.T) {
+func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -195,16 +137,13 @@ func TestOpenListResolveProxiesRawURLWhenHeadersAreRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	link, err := p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if link.URL != srv.URL+"/dav/Cloud/Movie.mkv" || !link.Proxy || link.Headers["Cookie"] != "sid=abc" {
-		t.Fatalf("link = %#v, want proxied raw_url with required headers", link)
+	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
+	if err == nil || !strings.Contains(err.Error(), "refusing WebDAV/proxy fallback") || !strings.Contains(err.Error(), "Cookie") {
+		t.Fatalf("resolve error = %v, want pure 302 refusal with header names", err)
 	}
 }
 
-func TestOpenListResolveProxiesHostedRawURLWithoutCDNRedirect(t *testing.T) {
+func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -226,15 +165,12 @@ func TestOpenListResolveProxiesHostedRawURLWithoutCDNRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	link, err := p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
+	if err == nil || !strings.Contains(err.Error(), "OpenList-hosted raw_url") || !strings.Contains(err.Error(), "no CDN Location") {
+		t.Fatalf("resolve error = %v, want hosted raw_url refusal", err)
 	}
 	if !probeSeen {
 		t.Fatal("expected OpenList-hosted raw_url probe")
-	}
-	if link.URL != srv.URL+"/d/Cloud/Movie.mkv?sign=1" || !link.Proxy {
-		t.Fatalf("link = %#v, want OpenList-hosted raw_url proxy", link)
 	}
 }
 

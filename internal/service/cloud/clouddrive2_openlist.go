@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 )
 
@@ -90,31 +89,10 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, file
 	if err != nil {
 		return nil, err
 	}
-	target := normalizeCloudDAVPath(fileRef)
-	decoded, err := p.openListAPIGet(ctx, token, target)
-	if err != nil {
-		return nil, err
-	}
-	if openListGetNeedsParentWarmup(decoded) {
-		if err := p.warmOpenListAPIParent(ctx, target); err != nil {
-			return nil, fmt.Errorf("%s: api get %s failed: %s; parent list warmup failed: %w", p.name, fileRef, openListAPIMessage(decoded.Code, decoded.Message), err)
-		}
-		decoded, err = p.openListAPIGet(ctx, token, target)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if decoded.Code != 0 && decoded.Code != 200 {
-		return nil, fmt.Errorf("%s: api get %s failed: %s", p.name, fileRef, openListAPIMessage(decoded.Code, decoded.Message))
-	}
-	return p.openListDirectLinkFromGet(ctx, fileRef, decoded)
-}
-
-func (p *cloudDrive2Provider) openListAPIGet(ctx context.Context, token, fileRef string) (openListGetResponse, error) {
-	payload, _ := json.Marshal(map[string]string{"path": fileRef, "password": ""})
+	payload, _ := json.Marshal(map[string]string{"path": normalizeCloudDAVPath(fileRef), "password": ""})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/get"), bytes.NewReader(payload))
 	if err != nil {
-		return openListGetResponse{}, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -124,49 +102,23 @@ func (p *cloudDrive2Provider) openListAPIGet(ctx context.Context, token, fileRef
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return openListGetResponse{}, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/get"), err)
+		return nil, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/get"), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return openListGetResponse{}, p.openListAPIStatusError("get", fileRef, resp.StatusCode)
+		return nil, p.openListAPIStatusError("get", fileRef, resp.StatusCode)
 	}
 	var decoded openListGetResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&decoded); err != nil {
-		return openListGetResponse{}, fmt.Errorf("%s: decode api get: %w", p.name, err)
+		return nil, fmt.Errorf("%s: decode api get: %w", p.name, err)
 	}
-	return decoded, nil
-}
-
-func (p *cloudDrive2Provider) warmOpenListAPIParent(ctx context.Context, fileRef string) error {
-	parent := path.Dir(strings.TrimRight(normalizeCloudDAVPath(fileRef), "/"))
-	if parent == "." || parent == "" {
-		parent = "/"
+	if decoded.Code != 0 && decoded.Code != 200 {
+		msg := strings.TrimSpace(decoded.Message)
+		if msg == "" {
+			msg = fmt.Sprintf("code %d", decoded.Code)
+		}
+		return nil, fmt.Errorf("%s: api get %s failed: %s", p.name, fileRef, msg)
 	}
-	_, err := p.listOpenListAPI(ctx, parent)
-	return err
-}
-
-func openListGetNeedsParentWarmup(decoded openListGetResponse) bool {
-	if decoded.Code == 0 || decoded.Code == 200 {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(decoded.Message))
-	return decoded.Code == 430004 ||
-		(decoded.Code == 500 && strings.Contains(msg, "430004")) ||
-		strings.Contains(msg, "文件不存在") ||
-		strings.Contains(msg, "不存在或已删除") ||
-		strings.Contains(msg, "not exist")
-}
-
-func openListAPIMessage(code int, msg string) string {
-	msg = strings.TrimSpace(msg)
-	if msg == "" {
-		msg = fmt.Sprintf("code %d", code)
-	}
-	return msg
-}
-
-func (p *cloudDrive2Provider) openListDirectLinkFromGet(ctx context.Context, fileRef string, decoded openListGetResponse) (*DirectLink, error) {
 	raw := firstNonEmpty(decoded.Data.RawURL, decoded.Data.URL)
 	if raw == "" {
 		return nil, fmt.Errorf("%s: api get %s returned empty raw_url", p.name, fileRef)
@@ -177,26 +129,27 @@ func (p *cloudDrive2Provider) openListDirectLinkFromGet(ctx context.Context, fil
 	}
 	headers := normalizeOpenListPlaybackHeaders(decoded.Data.Header)
 	if len(headers) > 0 {
-		return &DirectLink{URL: resolved, Headers: headers, Proxy: true}, nil
+		return nil, fmt.Errorf("%s: api get %s returned raw_url that requires headers (%s); refusing WebDAV/proxy fallback for pure 302 playback", p.name, fileRef, strings.Join(sortedHeaderNames(headers), ","))
 	}
-	if directURL, ok := p.resolveOpenListCDNRedirect(ctx, resolved); ok {
-		return &DirectLink{URL: directURL, Headers: nil, Proxy: false}, nil
-	}
-	if sameURLHost(resolved, p.apiBase) {
-		return &DirectLink{URL: resolved, Headers: nil, Proxy: true}, nil
+	resolved, err = p.resolveOpenListCDNRedirect(ctx, fileRef, resolved)
+	if err != nil {
+		return nil, err
 	}
 	return &DirectLink{URL: resolved, Headers: nil, Proxy: false}, nil
 }
 
-func (p *cloudDrive2Provider) resolveOpenListCDNRedirect(ctx context.Context, rawURL string) (string, bool) {
+func (p *cloudDrive2Provider) resolveOpenListCDNRedirect(ctx context.Context, fileRef, rawURL string) (string, error) {
 	if p.apiBase == nil || !sameURLHost(rawURL, p.apiBase) {
-		return rawURL, true
+		return rawURL, nil
 	}
-	location, _, err := p.firstHTTPRedirectLocation(ctx, rawURL, nil)
-	if err == nil && location != "" {
-		return location, true
+	location, status, err := p.firstHTTPRedirectLocation(ctx, rawURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("%s: probe raw_url %s failed: %w", p.name, fileRef, err)
 	}
-	return "", false
+	if location != "" {
+		return location, nil
+	}
+	return "", fmt.Errorf("%s: api get %s returned an OpenList-hosted raw_url with http %d and no CDN Location; refusing OpenList/WebDAV proxy fallback for pure 302 playback", p.name, fileRef, status)
 }
 
 func (p *cloudDrive2Provider) openListAPIStatusError(action, target string, status int) error {
