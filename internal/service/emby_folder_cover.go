@@ -48,6 +48,7 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 	}
 	out := make([]EmbyFolderCoverArtwork, 0, limit)
 	seenMediaIDs := map[string]struct{}{}
+	seenArtworkURLs := map[string]struct{}{}
 	for _, preferredType := range folderCoverImageTypePreference(imageType) {
 		for i := range rows {
 			artwork, ok := folderCoverArtworkForMedia(&rows[i], preferredType)
@@ -57,7 +58,11 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 			if _, ok := seenMediaIDs[artwork.MediaID]; ok {
 				continue
 			}
+			if _, ok := seenArtworkURLs[artwork.URL]; ok {
+				continue
+			}
 			seenMediaIDs[artwork.MediaID] = struct{}{}
+			seenArtworkURLs[artwork.URL] = struct{}{}
 			out = append(out, artwork)
 			if len(out) >= limit {
 				return out, nil
@@ -80,6 +85,7 @@ func (e *EmbyService) folderCoverSeriesArtwork(ctx context.Context, libraryIDs [
 	groups := e.seriesGroupsFromMedia(rows)
 	out := make([]EmbyFolderCoverArtwork, 0, limit)
 	seenSeriesIDs := map[string]struct{}{}
+	seenArtworkURLs := map[string]struct{}{}
 	for _, preferredType := range folderCoverImageTypePreference(imageType) {
 		for i := range groups {
 			artwork, ok := folderCoverArtworkForSeries(&groups[i], preferredType)
@@ -89,7 +95,11 @@ func (e *EmbyService) folderCoverSeriesArtwork(ctx context.Context, libraryIDs [
 			if _, ok := seenSeriesIDs[artwork.MediaID]; ok {
 				continue
 			}
+			if _, ok := seenArtworkURLs[artwork.URL]; ok {
+				continue
+			}
 			seenSeriesIDs[artwork.MediaID] = struct{}{}
+			seenArtworkURLs[artwork.URL] = struct{}{}
 			out = append(out, artwork)
 			if len(out) >= limit {
 				return out, nil

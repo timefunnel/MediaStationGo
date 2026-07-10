@@ -122,7 +122,15 @@ func TestEmbyFolderCoverArtworkUsesSeriesForAnimeLibraries(t *testing.T) {
 			PosterURL: "https://img.example/anime-a.jpg",
 		},
 		{
-			Base:      model.Base{ID: "anime-b-1", CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute)},
+			Base:      model.Base{ID: "anime-c-1", CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute)},
+			LibraryID: lib.ID,
+			Title:     "Anime C",
+			Path:      "/media/anime/c-1.mkv",
+			SeriesID:  "series-c",
+			PosterURL: "https://img.example/anime-a.jpg",
+		},
+		{
+			Base:      model.Base{ID: "anime-b-1", CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute)},
 			LibraryID: lib.ID,
 			Title:     "Anime B",
 			Path:      "/media/anime/b-1.mkv",
