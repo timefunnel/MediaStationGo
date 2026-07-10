@@ -54,6 +54,9 @@ Priority 2 fixes:
 - maintenance branch pending release: external subtitle streams are exposed
   directly through Emby PlaybackInfo and `/emby/api/subtitles/...`, so Emby
   clients can discover MSG subtitles without the external subtitle proxy.
+- maintenance branch pending release: adult media names in Emby payloads are
+  normalized to display a canonical code prefix without relying on the external
+  subtitle proxy JSON patch.
 
 ## Baseline Validation
 

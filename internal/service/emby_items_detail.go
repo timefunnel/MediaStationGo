@@ -200,6 +200,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 			name = fmt.Sprintf("第 %d 集", m.EpisodeNum)
 		}
 	}
+	name = e.adultDisplayName(ctx, m, name)
 	imageTags := map[string]string{}
 	backdropTags := []string{}
 	primaryArtwork := e.mediaPrimaryArtwork(ctx, m)
