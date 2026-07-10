@@ -34,6 +34,9 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 	if len(libraryIDs) == 0 {
 		libraryIDs = []string{lib.ID}
 	}
+	if embyLibraryTypeIsEpisodic(lib.Type) {
+		return e.folderCoverSeriesArtwork(ctx, libraryIDs, imageType, limit)
+	}
 	var rows []model.Media
 	if err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("library_id IN ? AND deleted_at IS NULL", libraryIDs).
@@ -55,6 +58,39 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 				continue
 			}
 			seenMediaIDs[artwork.MediaID] = struct{}{}
+			out = append(out, artwork)
+			if len(out) >= limit {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
+}
+
+func (e *EmbyService) folderCoverSeriesArtwork(ctx context.Context, libraryIDs []string, imageType string, limit int) ([]EmbyFolderCoverArtwork, error) {
+	var rows []model.Media
+	if err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("library_id IN ? AND deleted_at IS NULL", libraryIDs).
+		Where("season_num > 0 OR episode_num > 0").
+		Where("(poster_url <> '' OR backdrop_url <> '')").
+		Order("updated_at DESC, created_at DESC, id DESC").
+		Limit(embySeriesGroupingLimit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	groups := e.seriesGroupsFromMedia(rows)
+	out := make([]EmbyFolderCoverArtwork, 0, limit)
+	seenSeriesIDs := map[string]struct{}{}
+	for _, preferredType := range folderCoverImageTypePreference(imageType) {
+		for i := range groups {
+			artwork, ok := folderCoverArtworkForSeries(&groups[i], preferredType)
+			if !ok {
+				continue
+			}
+			if _, ok := seenSeriesIDs[artwork.MediaID]; ok {
+				continue
+			}
+			seenSeriesIDs[artwork.MediaID] = struct{}{}
 			out = append(out, artwork)
 			if len(out) >= limit {
 				return out, nil
@@ -103,6 +139,28 @@ func folderCoverArtworkForMedia(m *model.Media, imageType string) (EmbyFolderCov
 	default:
 		if poster != "" {
 			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Primary", Tag: m.ID, URL: poster}, true
+		}
+		return EmbyFolderCoverArtwork{}, false
+	}
+}
+
+func folderCoverArtworkForSeries(series *embySeriesGroup, imageType string) (EmbyFolderCoverArtwork, bool) {
+	if series == nil {
+		return EmbyFolderCoverArtwork{}, false
+	}
+	poster := strings.TrimSpace(series.PosterURL)
+	backdrop := strings.TrimSpace(series.BackdropURL)
+	switch folderCoverImageTypeValue(imageType) {
+	case "Backdrop":
+		if backdrop != "" {
+			return EmbyFolderCoverArtwork{MediaID: series.ID, ImageType: "Backdrop", Tag: series.ID + "-bd", URL: backdrop}, true
+		}
+		return folderCoverArtworkForSeries(series, "Primary")
+	case "Thumb":
+		return folderCoverArtworkForSeries(series, "Primary")
+	default:
+		if poster != "" {
+			return EmbyFolderCoverArtwork{MediaID: series.ID, ImageType: "Primary", Tag: series.ID, URL: poster}, true
 		}
 		return EmbyFolderCoverArtwork{}, false
 	}

@@ -70,7 +70,7 @@ func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 
 func TestEmbyFolderCoverArtworkPrefersBackdropForBackdropRequests(t *testing.T) {
 	svc := newTestEmbyService(t)
-	lib := model.Library{Base: model.Base{ID: "lib-tv"}, Name: "剧集", Path: "/media/tv", Type: "tv", Enabled: true}
+	lib := model.Library{Base: model.Base{ID: "lib-backdrop"}, Name: "Backdrop", Path: "/media/backdrop", Type: "movie", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
@@ -94,5 +94,65 @@ func TestEmbyFolderCoverArtworkPrefersBackdropForBackdropRequests(t *testing.T) 
 	}
 	if artworks[0].ImageType != "Backdrop" || artworks[0].Tag != "media-1-bd" {
 		t.Fatalf("unexpected backdrop metadata: %#v", artworks[0])
+	}
+}
+
+func TestEmbyFolderCoverArtworkUsesSeriesForAnimeLibraries(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Base: model.Base{ID: "lib-anime"}, Name: "Anime", Path: "/media/anime", Type: "anime", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	base := time.Now()
+	rows := []model.Media{
+		{
+			Base:       model.Base{ID: "anime-a-1", CreatedAt: base.Add(4 * time.Minute), UpdatedAt: base.Add(4 * time.Minute)},
+			LibraryID:  lib.ID,
+			Title:      "Anime A",
+			Path:       "/media/anime/a-1.mkv",
+			SeriesID:   "series-a",
+			SeasonNum:  1,
+			EpisodeNum: 1,
+			PosterURL:  "https://img.example/anime-a.jpg",
+		},
+		{
+			Base:       model.Base{ID: "anime-a-2", CreatedAt: base.Add(3 * time.Minute), UpdatedAt: base.Add(3 * time.Minute)},
+			LibraryID:  lib.ID,
+			Title:      "Anime A",
+			Path:       "/media/anime/a-2.mkv",
+			SeriesID:   "series-a",
+			SeasonNum:  1,
+			EpisodeNum: 2,
+			PosterURL:  "https://img.example/anime-a.jpg",
+		},
+		{
+			Base:       model.Base{ID: "anime-b-1", CreatedAt: base.Add(2 * time.Minute), UpdatedAt: base.Add(2 * time.Minute)},
+			LibraryID:  lib.ID,
+			Title:      "Anime B",
+			Path:       "/media/anime/b-1.mkv",
+			SeriesID:   "series-b",
+			SeasonNum:  1,
+			EpisodeNum: 1,
+			PosterURL:  "https://img.example/anime-b.jpg",
+		},
+	}
+	for i := range rows {
+		if err := svc.repo.DB.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+	}
+
+	artworks, err := svc.FolderCoverArtwork(t.Context(), lib.ID, "Primary", 4)
+	if err != nil {
+		t.Fatalf("folder artworks: %v", err)
+	}
+	if len(artworks) != 2 {
+		t.Fatalf("anime folder artworks = %#v, want two series-level covers", artworks)
+	}
+	if artworks[0].MediaID != "series-a" || artworks[0].Tag != "series-a" || artworks[0].URL != "https://img.example/anime-a.jpg" {
+		t.Fatalf("unexpected first anime artwork: %#v", artworks[0])
+	}
+	if artworks[1].MediaID != "series-b" || artworks[1].Tag != "series-b" || artworks[1].URL != "https://img.example/anime-b.jpg" {
+		t.Fatalf("unexpected second anime artwork: %#v", artworks[1])
 	}
 }
