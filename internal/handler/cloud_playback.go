@@ -51,8 +51,12 @@ func cloudPlayHandler(svc *service.Container) gin.HandlerFunc {
 }
 
 func serveCloudResolvedLink(svc *service.Container, c *gin.Context, typ, ref string) {
+	serveCloudResolvedLinkWithCacheControl(svc, c, typ, ref, "")
+}
+
+func serveCloudResolvedLinkWithCacheControl(svc *service.Container, c *gin.Context, typ, ref, imageCacheControl string) {
 	if isCloudImageRef(ref) && svc != nil && svc.ImageProxy != nil {
-		if svc.ImageProxy.ServeCloudCached(c.Writer, c.Request, typ+":"+ref) {
+		if svc.ImageProxy.ServeCloudCachedWithCacheControl(c.Writer, c.Request, typ+":"+ref, imageCacheControl) {
 			return
 		}
 	}
@@ -70,13 +74,17 @@ func serveCloudResolvedLink(svc *service.Container, c *gin.Context, typ, ref str
 		return
 	}
 	if isCloudImageRef(ref) && svc.ImageProxy != nil {
-		if err := svc.ImageProxy.ServeCloudResolved(c.Request.Context(), c.Writer, c.Request, typ+":"+ref, link); err != nil {
+		if err := svc.ImageProxy.ServeCloudResolvedWithCacheControl(c.Request.Context(), c.Writer, c.Request, typ+":"+ref, link, imageCacheControl); err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		}
 		return
 	}
 	if isCloudImageRef(ref) {
-		c.Header("Cache-Control", "public, max-age=2592000, immutable")
+		if strings.TrimSpace(imageCacheControl) != "" {
+			c.Header("Cache-Control", imageCacheControl)
+		} else {
+			c.Header("Cache-Control", "public, max-age=2592000, immutable")
+		}
 	}
 	if !link.Proxy {
 		// Pure offload: send the client straight to the cloud CDN.

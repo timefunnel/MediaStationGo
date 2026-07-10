@@ -37,12 +37,20 @@ func (p *ImageProxy) CloudImageCached(stableKey string) bool {
 // the cloud provider for a fresh direct link. It returns true when it wrote a
 // response, including a fresh negative-cache placeholder.
 func (p *ImageProxy) ServeCloudCached(w http.ResponseWriter, r *http.Request, stableKey string) bool {
+	return p.ServeCloudCachedWithCacheControl(w, r, stableKey, imageBrowserCacheControl)
+}
+
+func (p *ImageProxy) ServeCloudCachedWithCacheControl(w http.ResponseWriter, r *http.Request, stableKey, cacheControl string) bool {
 	if p == nil {
 		return false
 	}
+	cacheControl = strings.TrimSpace(cacheControl)
+	if cacheControl == "" {
+		cacheControl = imageBrowserCacheControl
+	}
 	key, cachePath, failPath := p.cloudImageCachePaths(stableKey)
 	p.removeUnusableImageCache(cachePath, failPath)
-	if serveCachedImageFile(w, r, key, cachePath) {
+	if serveImageFile(w, r, key, cachePath, cacheControl) {
 		return true
 	}
 	if freshNegativeImageCache(failPath) {
@@ -55,9 +63,17 @@ func (p *ImageProxy) ServeCloudCached(w http.ResponseWriter, r *http.Request, st
 // ServeCloudResolved stores a cloud sidecar image in the same disk cache used
 // by remote posters, then serves it with long browser-cache headers.
 func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWriter, r *http.Request, stableKey string, link *cloud.DirectLink) error {
+	return p.ServeCloudResolvedWithCacheControl(ctx, w, r, stableKey, link, imageBrowserCacheControl)
+}
+
+func (p *ImageProxy) ServeCloudResolvedWithCacheControl(ctx context.Context, w http.ResponseWriter, r *http.Request, stableKey string, link *cloud.DirectLink, cacheControl string) error {
 	if p == nil || link == nil || strings.TrimSpace(link.URL) == "" {
 		servePlaceholder(w)
 		return nil
+	}
+	cacheControl = strings.TrimSpace(cacheControl)
+	if cacheControl == "" {
+		cacheControl = imageBrowserCacheControl
 	}
 	stableKey = strings.TrimSpace(stableKey)
 	if stableKey == "" {
@@ -65,7 +81,7 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 	}
 	key, cachePath, failPath := p.cloudImageCachePaths(stableKey)
 	p.removeUnusableImageCache(cachePath, failPath)
-	if serveCachedImageFile(w, r, key, cachePath) {
+	if serveImageFile(w, r, key, cachePath, cacheControl) {
 		return nil
 	}
 	if freshNegativeImageCache(failPath) {
@@ -79,7 +95,7 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 		return nil
 	}
 	w.Header().Set("Content-Type", ctype)
-	w.Header().Set("Cache-Control", imageBrowserCacheControl)
+	w.Header().Set("Cache-Control", cacheControl)
 	modTime := time.Now()
 	if stat, err := os.Stat(cachePath); err == nil && stat.Size() > 0 {
 		modTime = stat.ModTime()

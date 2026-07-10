@@ -53,6 +53,7 @@ func TestDeriveAdultPosterIfNeededFromBackdrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertJPEGJFIFHeader(t, data)
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,38 @@ func TestDeriveAdultPosterKeepsPortraitPoster(t *testing.T) {
 	}
 }
 
+func TestWriteAdultBackdropNormalizesJPEG(t *testing.T) {
+	cacheDir := t.TempDir()
+	backdropPath := filepath.Join(cacheDir, "dmm-backdrop.jpg")
+	writeAdultArtworkTestImage(t, backdropPath, 800, 534)
+	data, err := os.ReadFile(backdropPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: cacheDir}}, zap.NewNop())
+	scraper := &ScraperService{images: images, log: zap.NewNop()}
+
+	path, err := scraper.writeAdultBackdrop("https://pics.dmm.co.jp/digital/video/ssis00721/ssis00721jp-1.jpg", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "adult-backdrops") {
+		t.Fatalf("backdrop path should use adult-backdrops cache: %s", path)
+	}
+	out, _, err := images.Fetch(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJPEGJFIFHeader(t, out)
+	img, _, err := image.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 800 || img.Bounds().Dy() != 534 {
+		t.Fatalf("backdrop size = %dx%d, want 800x534", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
 func writeAdultArtworkTestImage(t *testing.T, path string, width, height int) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -118,6 +151,16 @@ func writeAdultArtworkTestImage(t *testing.T, path string, width, height int) {
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertJPEGJFIFHeader(t *testing.T, data []byte) {
+	t.Helper()
+	if len(data) < 11 {
+		t.Fatalf("poster data too short: %d bytes", len(data))
+	}
+	if data[0] != 0xff || data[1] != 0xd8 || data[2] != 0xff || data[3] != 0xe0 || string(data[6:11]) != "JFIF\x00" {
+		t.Fatalf("poster should start with JFIF JPEG header, got % x", data[:min(len(data), 16)])
 	}
 }
 
