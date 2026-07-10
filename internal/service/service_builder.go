@@ -127,6 +127,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.STRM = NewSTRMService(b.log, b.repos, b.cfg)
 	b.c.Scan.SetStorageConfig(b.c.StorageCfg)
 	b.c.Subtitle.SetStorageConfig(b.c.StorageCfg)
+	b.c.Emby.SetSubtitleService(b.c.Subtitle)
 	b.c.Emby.SetRuntimeCache(b.c.Cache)
 	b.c.Emby.SetCloudProbe(b.c.StorageCfg, b.c.FFprobe)
 	b.c.DownloadClients = NewDownloadClientService(b.log, b.repos)

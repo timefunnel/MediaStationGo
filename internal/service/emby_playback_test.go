@@ -1,11 +1,14 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
+	"go.uber.org/zap"
 )
 
 func TestEmbyRootItemsExposeLibraries(t *testing.T) {
@@ -58,6 +61,65 @@ func TestEmbyFolderItemQueryExposesLibrariesForHome(t *testing.T) {
 	}
 	if items[0]["Type"] != "CollectionFolder" || items[0]["IsFolder"] != true {
 		t.Fatalf("folder query should return collection folders, got %#v", items[0])
+	}
+}
+
+func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
+	svc := newTestEmbyService(t)
+	svc.SetSubtitleService(NewSubtitleService(zap.NewNop(), svc.repo))
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "Movie.mkv")
+	if err := os.WriteFile(filepath.Join(dir, "Movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\n你好\n"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	lib := model.Library{Name: "电影", Path: dir, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	if err := svc.repo.DB.Create(&model.Media{
+		Base:       model.Base{ID: "media-sub"},
+		LibraryID:  lib.ID,
+		Title:      "Movie",
+		Path:       mediaPath,
+		Container:  "mkv",
+		VideoCodec: "h264",
+		AudioCodec: "aac",
+	}).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	playback, err := svc.PlaybackInfo(t.Context(), "media-sub", "user-1")
+	if err != nil {
+		t.Fatalf("playback info: %v", err)
+	}
+	source := playback["MediaSources"].([]map[string]any)[0]
+	streams := source["MediaStreams"].([]map[string]any)
+	var subtitle map[string]any
+	for _, stream := range streams {
+		if stream["Type"] == "Subtitle" {
+			subtitle = stream
+			break
+		}
+	}
+	if subtitle == nil {
+		t.Fatalf("expected subtitle stream, got %#v", streams)
+	}
+	if subtitle["Codec"] != "webvtt" || subtitle["DeliveryUrl"] != "/emby/api/subtitles/media-sub/Stream.vtt?mp_track=0" {
+		t.Fatalf("unexpected subtitle stream: %#v", subtitle)
+	}
+	if source["DefaultSubtitleStreamIndex"] != subtitle["Index"] {
+		t.Fatalf("DefaultSubtitleStreamIndex should point to first external subtitle: %#v", source)
+	}
+
+	item, err := svc.Item(t.Context(), "media-sub", "user-1")
+	if err != nil {
+		t.Fatalf("item: %v", err)
+	}
+	embeddedStreams := item["MediaSources"].([]map[string]any)[0]["MediaStreams"].([]map[string]any)
+	for _, stream := range embeddedStreams {
+		if stream["Type"] == "Subtitle" {
+			t.Fatalf("embedded item payload should not discover subtitles: %#v", embeddedStreams)
+		}
 	}
 }
 

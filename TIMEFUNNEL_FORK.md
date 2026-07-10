@@ -51,6 +51,9 @@ Priority 2 fixes:
 - maintenance branch pending release: Emby library folder cover grids are
   generated inside MSG from up to four child media posters, removing one of the
   remaining subtitle-proxy responsibilities.
+- maintenance branch pending release: external subtitle streams are exposed
+  directly through Emby PlaybackInfo and `/emby/api/subtitles/...`, so Emby
+  clients can discover MSG subtitles without the external subtitle proxy.
 
 ## Baseline Validation
 

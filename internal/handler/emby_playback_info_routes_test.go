@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,6 +91,97 @@ func TestEmbyLowercasePlaybackInfoRouteReturnsJSON(t *testing.T) {
 	transcodeURL, _ := source["TranscodingUrl"].(string)
 	if transcodeURL != "" && !strings.Contains(transcodeURL, "api_key=") {
 		t.Fatalf("TranscodingUrl should carry api_key: %#v", source)
+	}
+}
+
+func TestEmbyPlaybackInfoSubtitleDeliveryURLServesVTT(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\n你好\n"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := repository.New(db)
+	if err := repos.User.Create(t.Context(), &model.User{
+		Base:         model.Base{ID: "user-1"},
+		Username:     "tester",
+		PasswordHash: "x",
+		Role:         "admin",
+		Tier:         "plus",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	lib := model.Library{Name: "电影", Path: dir, Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	if err := db.Create(&model.Media{
+		Base:       model.Base{ID: "media-sub"},
+		LibraryID:  lib.ID,
+		Title:      "Movie",
+		Path:       filepath.Join(dir, "Movie.mkv"),
+		Container:  "mkv",
+		VideoCodec: "h264",
+		AudioCodec: "aac",
+	}).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	const secret = "test-secret"
+	emby := service.NewEmbyService(&config.Config{}, zap.NewNop(), repos)
+	subtitle := service.NewSubtitleService(zap.NewNop(), repos)
+	emby.SetSubtitleService(subtitle)
+	router := gin.New()
+	registerEmbyRoutes(router, secret, &service.Container{
+		Repo:     repos,
+		Emby:     emby,
+		Subtitle: subtitle,
+	})
+
+	token := signedTestToken(t, secret)
+	req := httptest.NewRequest(http.MethodGet, "/emby/Items/media-sub/PlaybackInfo", nil)
+	req.Header.Set("X-Emby-Token", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected playback status: %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode playback info: %v", err)
+	}
+	source := body["MediaSources"].([]any)[0].(map[string]any)
+	streams := source["MediaStreams"].([]any)
+	var deliveryURL string
+	for _, raw := range streams {
+		stream := raw.(map[string]any)
+		if stream["Type"] == "Subtitle" {
+			deliveryURL, _ = stream["DeliveryUrl"].(string)
+			break
+		}
+	}
+	if deliveryURL == "" || !strings.Contains(deliveryURL, "api_key=") {
+		t.Fatalf("subtitle DeliveryUrl should carry api_key: %#v", streams)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, deliveryURL, nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected subtitle status: %d body=%s", w.Code, w.Body.String())
+	}
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/vtt") {
+		t.Fatalf("subtitle content type = %q", contentType)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "WEBVTT") || !strings.Contains(body, "你好") {
+		t.Fatalf("unexpected subtitle body: %q", body)
 	}
 }
 

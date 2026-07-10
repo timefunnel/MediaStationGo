@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -83,6 +84,21 @@ func embyAttachTokenToMediaSources(sources []map[string]any, token string) {
 			}
 			source[key] = embyAppendAPIKey(raw, token)
 		}
+		embyAttachTokenToMediaStreams(source, token)
+	}
+}
+
+func embyAttachTokenToMediaStreams(source map[string]any, token string) {
+	streams, ok := source["MediaStreams"].([]map[string]any)
+	if !ok {
+		return
+	}
+	for _, stream := range streams {
+		raw, ok := stream["DeliveryUrl"].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		stream["DeliveryUrl"] = embyAppendAPIKey(raw, token)
 	}
 }
 
@@ -193,6 +209,36 @@ func embyVideoStreamHandler(svc *service.Container, cloudMode string) gin.Handle
 			if !c.Writer.Written() {
 				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			}
+		}
+	}
+}
+
+func embySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uid := embyUserID(c)
+		item, err := svc.Emby.Item(c.Request.Context(), c.Param("id"), uid)
+		if err != nil || item == nil || svc.Subtitle == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		tracks, err := svc.Subtitle.Discover(c.Request.Context(), c.Param("id"))
+		if err != nil || len(tracks) == 0 {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		trackIndex, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("mp_track", "0")))
+		if err != nil || trackIndex < 0 || trackIndex >= len(tracks) {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Content-Type", "text/vtt; charset=utf-8")
+		c.Header("Cache-Control", "public, max-age=3600")
+		if c.Request.Method == http.MethodHead {
+			c.Status(http.StatusOK)
+			return
+		}
+		if err := svc.Subtitle.Serve(c.Request.Context(), c.Param("id"), tracks[trackIndex].Path, c.Writer); err != nil {
+			c.Status(http.StatusNotFound)
 		}
 	}
 }

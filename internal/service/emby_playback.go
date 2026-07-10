@@ -206,6 +206,9 @@ func (e *EmbyService) mediaSource(ctx context.Context, m *model.Media, asEmbedde
 		src["IsRemote"] = true
 		src["Path"] = playURL
 	}
+	if !asEmbedded {
+		e.attachExternalSubtitleStreams(ctx, m, src)
+	}
 	return src
 }
 

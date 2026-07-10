@@ -113,6 +113,97 @@ func (e *EmbyService) mediaVersionKey(ctx context.Context, m *model.Media) strin
 	return fmt.Sprintf("%s|title:%s|y:%d|s:%d|e:%d", libraryGroup, title, m.Year, m.SeasonNum, m.EpisodeNum)
 }
 
+func (e *EmbyService) attachExternalSubtitleStreams(ctx context.Context, m *model.Media, src map[string]any) {
+	if e == nil || e.subtitle == nil || m == nil || src == nil || strings.TrimSpace(m.ID) == "" {
+		return
+	}
+	tracks, err := e.subtitle.Discover(ctx, m.ID)
+	if err != nil || len(tracks) == 0 {
+		return
+	}
+	streams, ok := src["MediaStreams"].([]map[string]any)
+	if !ok {
+		return
+	}
+	nextIndex := nextMediaStreamIndex(streams)
+	firstSubtitleIndex := -1
+	for trackIndex, track := range tracks {
+		streamIndex := nextIndex + trackIndex
+		if firstSubtitleIndex < 0 {
+			firstSubtitleIndex = streamIndex
+		}
+		streams = append(streams, embyExternalSubtitleStream(m.ID, streamIndex, trackIndex, track))
+	}
+	src["MediaStreams"] = streams
+	if firstSubtitleIndex >= 0 {
+		src["DefaultSubtitleStreamIndex"] = firstSubtitleIndex
+	}
+}
+
+func nextMediaStreamIndex(streams []map[string]any) int {
+	next := 0
+	for _, stream := range streams {
+		index, ok := stream["Index"].(int)
+		if ok && index >= next {
+			next = index + 1
+		}
+	}
+	return next
+}
+
+func embyExternalSubtitleStream(mediaID string, streamIndex, trackIndex int, track SubtitleTrack) map[string]any {
+	label := strings.TrimSpace(firstNonEmpty(track.Label, track.Lang, "Subtitle"))
+	lang := strings.TrimSpace(firstNonEmpty(track.Lang, "und"))
+	localizedDefault := ""
+	if trackIndex == 0 {
+		localizedDefault = "Default"
+	}
+	return map[string]any{
+		"Index":                  streamIndex,
+		"Type":                   "Subtitle",
+		"Codec":                  "webvtt",
+		"Language":               lang,
+		"DisplayTitle":           embySubtitleDisplayTitle(label, "WEBVTT"),
+		"Title":                  label,
+		"IsExternal":             true,
+		"IsExternalUrl":          false,
+		"IsInterlaced":           false,
+		"IsForced":               false,
+		"IsDefault":              trackIndex == 0,
+		"IsTextSubtitleStream":   true,
+		"SupportsExternalStream": true,
+		"DeliveryMethod":         "External",
+		"DeliveryUrl":            embySubtitleDeliveryURL(mediaID, trackIndex),
+		"Path":                   track.Path,
+		"Protocol":               "File",
+		"LocalizedDefault":       localizedDefault,
+		"LocalizedForced":        "",
+		"LocalizedExternal":      "External",
+	}
+}
+
+func embySubtitleDisplayTitle(label, codecLabel string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = "Subtitle"
+	}
+	codecLabel = strings.TrimSpace(codecLabel)
+	if codecLabel == "" {
+		codecLabel = "WEBVTT"
+	}
+	upperLabel := strings.ToUpper(label)
+	if strings.Contains(strings.ToLower(label), "external") || strings.Contains(upperLabel, codecLabel) {
+		return label
+	}
+	return label + " - " + codecLabel + " - External"
+}
+
+func embySubtitleDeliveryURL(mediaID string, trackIndex int) string {
+	q := url.Values{}
+	q.Set("mp_track", fmt.Sprintf("%d", trackIndex))
+	return "/emby/api/subtitles/" + url.PathEscape(strings.TrimSpace(mediaID)) + "/Stream.vtt?" + q.Encode()
+}
+
 func preferMediaVersion(candidate, current model.Media) bool {
 	candidateCloud := strings.TrimSpace(candidate.STRMURL) != "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(candidate.Path)), "cloud://")
 	currentCloud := strings.TrimSpace(current.STRMURL) != "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(current.Path)), "cloud://")

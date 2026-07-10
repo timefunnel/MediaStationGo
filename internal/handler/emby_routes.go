@@ -195,6 +195,10 @@ func registerEmbyAuthenticatedPlaybackRoutes(auth *gin.RouterGroup, prefix strin
 	if prefix == "/emby" {
 		auth.GET("/api/stream/:id", embyVideoStreamHandler(svc, service.CloudPlaybackModeSTRM))
 		auth.HEAD("/api/stream/:id", embyVideoStreamHandler(svc, service.CloudPlaybackModeSTRM))
+		auth.GET("/api/subtitles/:id/Stream.vtt", embySubtitleStreamHandler(svc))
+		auth.HEAD("/api/subtitles/:id/Stream.vtt", embySubtitleStreamHandler(svc))
+		auth.GET("/api/subtitles/:id/stream.vtt", embySubtitleStreamHandler(svc))
+		auth.HEAD("/api/subtitles/:id/stream.vtt", embySubtitleStreamHandler(svc))
 	}
 	auth.GET("/Videos/:id/master.m3u8", embyVideoHLSPlaylistHandler(svc))
 	auth.HEAD("/Videos/:id/master.m3u8", embyVideoHLSPlaylistHandler(svc))
