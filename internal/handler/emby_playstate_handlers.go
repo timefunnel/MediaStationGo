@@ -117,3 +117,40 @@ func embyMarkPlayedHandler(svc *service.Container, played bool) gin.HandlerFunc 
 		c.JSON(http.StatusOK, gin.H{"Played": played})
 	}
 }
+
+func embyHideFromResumeHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uid := c.Param("userId")
+		if uid == "" {
+			uid = embyUserID(c)
+		}
+		mid := c.Param("itemId")
+		if mid == "" {
+			mid = c.Param("id")
+		}
+		if uid == "" || mid == "" {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		out, err := svc.Emby.Item(c.Request.Context(), mid, uid)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if out == nil {
+			embyError(c, http.StatusNotFound, "item not found")
+			return
+		}
+		if userData, ok := out["UserData"].(map[string]any); ok {
+			c.JSON(http.StatusOK, userData)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"PlaybackPositionTicks": 0,
+			"PlayCount":             0,
+			"IsFavorite":            false,
+			"Played":                false,
+			"PlayedPercentage":      0,
+		})
+	}
+}

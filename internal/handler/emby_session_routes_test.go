@@ -85,6 +85,83 @@ func TestEmbyMarkPlayedRefreshesPlaybackDevice(t *testing.T) {
 	}
 }
 
+func TestEmbyHideFromResumeReturnsUserDataWithoutClearingProgress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := repository.New(db)
+	if err := repos.User.Create(t.Context(), &model.User{
+		Base:         model.Base{ID: "user-1"},
+		Username:     "tester",
+		PasswordHash: "x",
+		Role:         "admin",
+		Tier:         "plus",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	lib := model.Library{Name: "Movies", Path: t.TempDir(), Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	if err := repos.DB.Create(&model.Media{
+		Base:        model.Base{ID: "media-1"},
+		LibraryID:   lib.ID,
+		Title:       "Resume Movie",
+		Path:        lib.Path + "/resume.mp4",
+		DurationSec: 120,
+	}).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+	if err := repos.History.Upsert(t.Context(), &model.PlaybackHistory{
+		UserID:     "user-1",
+		MediaID:    "media-1",
+		PositionMs: 30_000,
+		DurationMs: 120_000,
+		Completed:  false,
+	}); err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+
+	const secret = "test-secret"
+	router := gin.New()
+	registerEmbyRoutes(router, secret, &service.Container{
+		Repo: repos,
+		Emby: service.NewEmbyService(&config.Config{}, zap.NewNop(), repos),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/emby/Users/user-1/Items/media-1/HideFromResume?Hide=true", nil)
+	req.Header.Set("X-Emby-Token", signedTestToken(t, secret))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", w.Code, w.Body.String())
+	}
+	var userData map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &userData); err != nil {
+		t.Fatalf("decode user data: %v", err)
+	}
+	if got := int64(userData["PlaybackPositionTicks"].(float64)); got != 30_000*10_000 {
+		t.Fatalf("PlaybackPositionTicks = %d, want preserved progress", got)
+	}
+	var count int64
+	if err := db.Model(&model.PlaybackHistory{}).Where("user_id = ? AND media_id = ?", "user-1", "media-1").Count(&count).Error; err != nil {
+		t.Fatalf("count history: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("HideFromResume must not delete playback history, count=%d", count)
+	}
+}
+
 func TestEmbyCompatSessionAllowsSameClientRequestsWithoutToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

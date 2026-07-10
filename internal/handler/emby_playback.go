@@ -215,32 +215,62 @@ func embyVideoStreamHandler(svc *service.Container, cloudMode string) gin.Handle
 
 func embySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uid := embyUserID(c)
-		item, err := svc.Emby.Item(c.Request.Context(), c.Param("id"), uid)
-		if err != nil || item == nil || svc.Subtitle == nil {
-			c.Status(http.StatusNotFound)
-			return
-		}
-		tracks, err := svc.Subtitle.Discover(c.Request.Context(), c.Param("id"))
-		if err != nil || len(tracks) == 0 {
-			c.Status(http.StatusNotFound)
-			return
-		}
 		trackIndex, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("mp_track", "0")))
-		if err != nil || trackIndex < 0 || trackIndex >= len(tracks) {
+		if err != nil {
 			c.Status(http.StatusNotFound)
 			return
 		}
-		c.Header("Content-Type", "text/vtt; charset=utf-8")
-		c.Header("Cache-Control", "public, max-age=3600")
-		if c.Request.Method == http.MethodHead {
-			c.Status(http.StatusOK)
-			return
-		}
-		if err := svc.Subtitle.Serve(c.Request.Context(), c.Param("id"), tracks[trackIndex].Path, c.Writer); err != nil {
-			c.Status(http.StatusNotFound)
-		}
+		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex)
 	}
+}
+
+func embyLegacySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		trackIndex, err := strconv.Atoi(strings.TrimSpace(c.Query("mp_track")))
+		if err != nil {
+			streamIndex, streamErr := strconv.Atoi(strings.TrimSpace(c.Param("stream")))
+			if streamErr != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			trackIndex = maxInt(0, streamIndex-1)
+		}
+		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex)
+	}
+}
+
+func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID string, trackIndex int) {
+	uid := embyUserID(c)
+	item, err := svc.Emby.Item(c.Request.Context(), mediaID, uid)
+	if err != nil || item == nil || svc.Subtitle == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	tracks, err := svc.Subtitle.Discover(c.Request.Context(), mediaID)
+	if err != nil || len(tracks) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if trackIndex < 0 || trackIndex >= len(tracks) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Content-Type", "text/vtt; charset=utf-8")
+	c.Header("Cache-Control", "public, max-age=3600")
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+	if err := svc.Subtitle.Serve(c.Request.Context(), mediaID, tracks[trackIndex].Path, c.Writer); err != nil {
+		c.Status(http.StatusNotFound)
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func embyPlaybackRedirectToken(c *gin.Context, svc *service.Container) string {

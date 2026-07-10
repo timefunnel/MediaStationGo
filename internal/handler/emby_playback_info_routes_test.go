@@ -185,6 +185,72 @@ func TestEmbyPlaybackInfoSubtitleDeliveryURLServesVTT(t *testing.T) {
 	}
 }
 
+func TestEmbyLegacyVideoSubtitleRouteServesVTT(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := repository.New(db)
+	if err := repos.User.Create(t.Context(), &model.User{
+		Base:         model.Base{ID: "user-1"},
+		Username:     "tester",
+		PasswordHash: "x",
+		Role:         "admin",
+		Tier:         "plus",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	lib := model.Library{Name: "Movies", Path: dir, Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	if err := db.Create(&model.Media{
+		Base:       model.Base{ID: "media-sub"},
+		LibraryID:  lib.ID,
+		Title:      "Movie",
+		Path:       filepath.Join(dir, "Movie.mkv"),
+		Container:  "mkv",
+		VideoCodec: "h264",
+	}).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	const secret = "test-secret"
+	emby := service.NewEmbyService(&config.Config{}, zap.NewNop(), repos)
+	subtitle := service.NewSubtitleService(zap.NewNop(), repos)
+	emby.SetSubtitleService(subtitle)
+	router := gin.New()
+	registerEmbyRoutes(router, secret, &service.Container{
+		Repo:     repos,
+		Emby:     emby,
+		Subtitle: subtitle,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/emby/Videos/media-sub/media-sub/Subtitles/1/Stream.vtt?mp_track=0", nil)
+	req.Header.Set("X-Emby-Token", signedTestToken(t, secret))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected legacy subtitle status: %d body=%s", w.Code, w.Body.String())
+	}
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/vtt") {
+		t.Fatalf("legacy subtitle content type = %q", contentType)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "WEBVTT") || !strings.Contains(body, "hello") {
+		t.Fatalf("unexpected legacy subtitle body: %q", body)
+	}
+}
+
 func TestEmbyPlaybackInfoDoesNotExposeTokenInCloudPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

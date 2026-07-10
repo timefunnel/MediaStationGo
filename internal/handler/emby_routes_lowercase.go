@@ -62,6 +62,7 @@ func registerLowercaseEmbyPlaybackRoutes(auth *gin.RouterGroup, svc *service.Con
 	auth.POST("/users/:userId/items/:id/playbackinfo", embyPlaybackInfoHandler(svc))
 
 	registerEmbyVideoStreamRoutes(auth, svc, "/videos")
+	registerEmbyVideoSubtitleRoutes(auth, svc, "/videos")
 	auth.GET("/videos/:id/master.m3u8", embyVideoHLSPlaylistHandler(svc))
 	auth.HEAD("/videos/:id/master.m3u8", embyVideoHLSPlaylistHandler(svc))
 	auth.GET("/videos/:id/main.m3u8", embyVideoHLSPlaylistHandler(svc))
@@ -80,6 +81,7 @@ func registerLowercaseEmbyUserDataRoutes(auth *gin.RouterGroup, svc *service.Con
 	auth.DELETE("/users/:userId/favoriteitems/:itemId", embyFavoriteHandler(svc, false))
 	auth.POST("/users/:userId/playeditems/:itemId", embyMarkPlayedHandler(svc, true))
 	auth.DELETE("/users/:userId/playeditems/:itemId", embyMarkPlayedHandler(svc, false))
+	auth.POST("/users/:userId/items/:id/hidefromresume", embyHideFromResumeHandler(svc))
 }
 
 func registerLowercaseEmbySystemRoutes(auth *gin.RouterGroup, svc *service.Container) {

@@ -192,6 +192,7 @@ func registerEmbyAuthenticatedPlaybackRoutes(auth *gin.RouterGroup, prefix strin
 	auth.POST("/Users/:userId/Items/:id/PlaybackInfo", embyPlaybackInfoHandler(svc))
 
 	registerEmbyVideoStreamRoutes(auth, svc, "/Videos")
+	registerEmbyVideoSubtitleRoutes(auth, svc, "/Videos")
 	if prefix == "/emby" {
 		auth.GET("/api/stream/:id", embyVideoStreamHandler(svc, service.CloudPlaybackModeSTRM))
 		auth.HEAD("/api/stream/:id", embyVideoStreamHandler(svc, service.CloudPlaybackModeSTRM))
@@ -218,6 +219,14 @@ func registerEmbyVideoStreamRoutes(auth *gin.RouterGroup, svc *service.Container
 	}
 }
 
+func registerEmbyVideoSubtitleRoutes(auth *gin.RouterGroup, svc *service.Container, basePath string) {
+	for _, path := range []string{"/:id/:seg/Subtitles/:stream/Stream.:format"} {
+		fullPath := basePath + path
+		auth.GET(fullPath, embyLegacySubtitleStreamHandler(svc))
+		auth.HEAD(fullPath, embyLegacySubtitleStreamHandler(svc))
+	}
+}
+
 func registerEmbyAuthenticatedProgressRoutes(auth *gin.RouterGroup, svc *service.Container) {
 	auth.POST("/Sessions/Playing", embyPlayingProgressHandler(svc))
 	auth.POST("/Sessions/Playing/Progress", embyPlayingProgressHandler(svc))
@@ -229,6 +238,7 @@ func registerEmbyAuthenticatedUserDataRoutes(auth *gin.RouterGroup, svc *service
 	auth.DELETE("/Users/:userId/FavoriteItems/:itemId", embyFavoriteHandler(svc, false))
 	auth.POST("/Users/:userId/PlayedItems/:itemId", embyMarkPlayedHandler(svc, true))
 	auth.DELETE("/Users/:userId/PlayedItems/:itemId", embyMarkPlayedHandler(svc, false))
+	auth.POST("/Users/:userId/Items/:id/HideFromResume", embyHideFromResumeHandler(svc))
 }
 
 func registerEmbyAuthenticatedSystemRoutes(auth *gin.RouterGroup, svc *service.Container) {
