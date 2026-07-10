@@ -172,8 +172,6 @@ func (e *EmbyService) libraryAsView(ctx context.Context, l *model.Library) map[s
 		"CanDelete":                false,
 		"CanDownload":              false,
 		"DisplayPreferencesId":     l.ID,
-		"PrimaryImageItemId":       l.ID,
-		"PrimaryImageAspectRatio":  1.7777777777777777,
 		"RecursiveItemCount":       0,
 		"ChildCount":               0,
 		"SpecialFeatureCount":      0,
@@ -194,7 +192,7 @@ func (e *EmbyService) libraryAsView(ctx context.Context, l *model.Library) map[s
 		},
 	}
 	if primaryImageTag != "" {
-		view["PrimaryImageTag"] = primaryImageTag
+		view["PrimaryImageAspectRatio"] = 1.7777777777777777
 	}
 	return view
 }

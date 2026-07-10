@@ -40,6 +40,10 @@ func embyItemImageHandler(svc *service.Container) gin.HandlerFunc {
 			if serveEmbyFolderCoverImage(svc, c, id, imgType) {
 				return
 			}
+			if isEmbyLibraryImageRequest(ctx, svc, id) {
+				embyServeMissingFolderCover(c)
+				return
+			}
 			embyServePlaceholderImage(c)
 			return
 		}
@@ -72,4 +76,18 @@ func embyServePlaceholderImage(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "image/png", embyPlaceholderPNG)
+}
+
+func isEmbyLibraryImageRequest(ctx context.Context, svc *service.Container, id string) bool {
+	if svc == nil || svc.Repo == nil || svc.Repo.Library == nil || strings.TrimSpace(id) == "" {
+		return false
+	}
+	lib, err := svc.Repo.Library.FindByID(ctx, id)
+	return err == nil && lib != nil
+}
+
+func embyServeMissingFolderCover(c *gin.Context) {
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusNotFound)
 }

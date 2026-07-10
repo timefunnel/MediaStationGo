@@ -2,18 +2,21 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-const embyFolderCoverTagVersion = "timefunnel-folder-cover-v1"
+const embyFolderCoverTagVersion = "folder-cover-grid-v6-jellyfin-shape"
 
 type EmbyFolderCoverArtwork struct {
-	MediaID string
-	URL     string
+	MediaID   string
+	ImageType string
+	Tag       string
+	URL       string
 }
 
 func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType string, limit int) ([]EmbyFolderCoverArtwork, error) {
@@ -41,19 +44,21 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 		return nil, err
 	}
 	out := make([]EmbyFolderCoverArtwork, 0, limit)
-	seen := map[string]struct{}{}
-	for i := range rows {
-		raw := folderCoverArtworkURL(&rows[i], imageType)
-		if raw == "" {
-			continue
-		}
-		if _, ok := seen[raw]; ok {
-			continue
-		}
-		seen[raw] = struct{}{}
-		out = append(out, EmbyFolderCoverArtwork{MediaID: rows[i].ID, URL: raw})
-		if len(out) >= limit {
-			break
+	seenMediaIDs := map[string]struct{}{}
+	for _, preferredType := range folderCoverImageTypePreference(imageType) {
+		for i := range rows {
+			artwork, ok := folderCoverArtworkForMedia(&rows[i], preferredType)
+			if !ok {
+				continue
+			}
+			if _, ok := seenMediaIDs[artwork.MediaID]; ok {
+				continue
+			}
+			seenMediaIDs[artwork.MediaID] = struct{}{}
+			out = append(out, artwork)
+			if len(out) >= limit {
+				return out, nil
+			}
 		}
 	}
 	return out, nil
@@ -64,31 +69,67 @@ func (e *EmbyService) FolderCoverTag(ctx context.Context, id, imageType string) 
 	if err != nil || len(artworks) == 0 {
 		return ""
 	}
-	h := sha256.New()
-	h.Write([]byte(embyFolderCoverTagVersion))
-	h.Write([]byte{0})
-	h.Write([]byte(strings.ToLower(strings.TrimSpace(id))))
-	h.Write([]byte{0})
-	h.Write([]byte(strings.ToLower(strings.TrimSpace(imageType))))
-	for _, artwork := range artworks {
-		h.Write([]byte{0})
-		h.Write([]byte(artwork.MediaID))
-		h.Write([]byte{0})
-		h.Write([]byte(artwork.URL))
-	}
-	return hex.EncodeToString(h.Sum(nil))[:32]
+	return EmbyFolderCoverTag(id, artworks)
 }
 
-func folderCoverArtworkURL(m *model.Media, imageType string) string {
-	if m == nil {
+func EmbyFolderCoverTag(folderID string, covers []EmbyFolderCoverArtwork) string {
+	items := make([][]string, 0, len(covers))
+	for _, cover := range covers {
+		items = append(items, []string{cover.MediaID, cover.ImageType, cover.Tag})
+	}
+	payload := []any{embyFolderCoverTagVersion, strings.TrimSpace(folderID), items}
+	body, err := json.Marshal(payload)
+	if err != nil {
 		return ""
+	}
+	sum := sha1.Sum(body)
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+func folderCoverArtworkForMedia(m *model.Media, imageType string) (EmbyFolderCoverArtwork, bool) {
+	if m == nil {
+		return EmbyFolderCoverArtwork{}, false
 	}
 	poster := strings.TrimSpace(m.PosterURL)
 	backdrop := strings.TrimSpace(m.BackdropURL)
-	switch strings.ToLower(strings.TrimSpace(imageType)) {
-	case "backdrop", "art", "thumb":
-		return firstNonEmpty(backdrop, poster)
+	switch folderCoverImageTypeValue(imageType) {
+	case "Backdrop":
+		if backdrop != "" {
+			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Backdrop", Tag: m.ID + "-bd", URL: backdrop}, true
+		}
+		return folderCoverArtworkForMedia(m, "Primary")
+	case "Thumb":
+		return folderCoverArtworkForMedia(m, "Primary")
 	default:
-		return firstNonEmpty(poster, backdrop)
+		if poster != "" {
+			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Primary", Tag: m.ID, URL: poster}, true
+		}
+		return EmbyFolderCoverArtwork{}, false
+	}
+}
+
+func folderCoverImageTypePreference(imageType string) []string {
+	preferred := folderCoverImageTypeValue(imageType)
+	values := []string{preferred, "Primary", "Backdrop", "Thumb"}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func folderCoverImageTypeValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "backdrop":
+		return "Backdrop"
+	case "thumb":
+		return "Thumb"
+	default:
+		return "Primary"
 	}
 }

@@ -44,9 +44,12 @@ func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 	if len(artworks) != 2 || artworks[0].URL != "https://img.example/new.jpg" || artworks[1].URL != "https://img.example/old.jpg" {
 		t.Fatalf("unexpected folder artworks: %#v", artworks)
 	}
+	if artworks[0].ImageType != "Primary" || artworks[0].Tag != "media-new" {
+		t.Fatalf("unexpected first artwork metadata: %#v", artworks[0])
+	}
 	tag := svc.FolderCoverTag(t.Context(), lib.ID, "Primary")
-	if len(tag) != 32 {
-		t.Fatalf("folder tag = %q, want 32 hex chars", tag)
+	if tag != "633957117b943d361c7f31f9eeca792c" {
+		t.Fatalf("folder tag = %q, want legacy proxy tag", tag)
 	}
 
 	view := svc.libraryAsView(t.Context(), &lib)
@@ -54,8 +57,14 @@ func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 	if !ok || tags["Primary"] != tag {
 		t.Fatalf("library view ImageTags = %#v, want Primary %q", view["ImageTags"], tag)
 	}
-	if view["PrimaryImageTag"] != tag {
-		t.Fatalf("PrimaryImageTag = %#v, want %q", view["PrimaryImageTag"], tag)
+	if _, ok := view["PrimaryImageTag"]; ok {
+		t.Fatalf("PrimaryImageTag must not be set for generated folder cover: %#v", view["PrimaryImageTag"])
+	}
+	if _, ok := view["PrimaryImageItemId"]; ok {
+		t.Fatalf("PrimaryImageItemId must not be set for generated folder cover: %#v", view["PrimaryImageItemId"])
+	}
+	if view["PrimaryImageAspectRatio"] != 16.0/9.0 {
+		t.Fatalf("PrimaryImageAspectRatio = %#v, want 16/9", view["PrimaryImageAspectRatio"])
 	}
 }
 
@@ -82,5 +91,8 @@ func TestEmbyFolderCoverArtworkPrefersBackdropForBackdropRequests(t *testing.T) 
 	}
 	if len(artworks) != 1 || artworks[0].URL != "https://img.example/backdrop.jpg" {
 		t.Fatalf("unexpected backdrop artwork: %#v", artworks)
+	}
+	if artworks[0].ImageType != "Backdrop" || artworks[0].Tag != "media-1-bd" {
+		t.Fatalf("unexpected backdrop metadata: %#v", artworks[0])
 	}
 }

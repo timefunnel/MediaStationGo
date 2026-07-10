@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -54,11 +55,8 @@ func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, id, image
 	if err != nil {
 		return false
 	}
-	if tag := svc.Emby.FolderCoverTag(c.Request.Context(), id, imageType); tag != "" {
-		c.Header("ETag", `"`+tag+`"`)
-	}
-	c.Header("Content-Type", "image/png")
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+	tag := service.EmbyFolderCoverTag(id, artworks)
+	setEmbyFolderCoverHeaders(c, tag)
 	c.Header("Content-Length", strconv.Itoa(len(body)))
 	if c.Request.Method == http.MethodHead {
 		c.Status(http.StatusOK)
@@ -121,22 +119,24 @@ func buildEmbyFolderCoverGrid(images []image.Image, width, height int) ([]byte, 
 }
 
 func embyFolderCoverCellRects(width, height, count int) []image.Rectangle {
-	switch {
-	case count <= 1:
-		return []image.Rectangle{image.Rect(0, 0, width, height)}
-	case count == 2:
-		return []image.Rectangle{
-			image.Rect(0, 0, width/2, height),
-			image.Rect(width/2, 0, width, height),
-		}
-	default:
-		return []image.Rectangle{
-			image.Rect(0, 0, width/2, height/2),
-			image.Rect(width/2, 0, width, height/2),
-			image.Rect(0, height/2, width/2, height),
-			image.Rect(width/2, height/2, width, height),
-		}[:minInt(count, 4)]
+	columnCount := count
+	if columnCount > embyFolderCoverGridLimit {
+		columnCount = embyFolderCoverGridLimit
 	}
+	if columnCount < 1 {
+		columnCount = 1
+	}
+	rects := make([]image.Rectangle, 0, columnCount)
+	x := 0
+	for i := 0; i < columnCount; i++ {
+		nextX := width
+		if i != columnCount-1 {
+			nextX = int(math.Round(float64(width) * float64(i+1) / float64(columnCount)))
+		}
+		rects = append(rects, image.Rect(x, 0, nextX, height))
+		x = nextX
+	}
+	return rects
 }
 
 func drawCoverFit(dst draw.Image, rect image.Rectangle, src image.Image) {
@@ -175,35 +175,43 @@ func drawCoverFit(dst draw.Image, rect image.Rectangle, src image.Image) {
 }
 
 func embyFolderCoverDimensions(c *gin.Context) (int, int) {
-	width := queryPositiveInt(c, "maxWidth", "MaxWidth", "width", "Width")
-	height := queryPositiveInt(c, "maxHeight", "MaxHeight", "height", "Height")
-	if width <= 0 && height <= 0 {
+	width := queryMinPositiveInt(c, "maxWidth", "MaxWidth", "width", "Width")
+	maxHeight := queryMinPositiveInt(c, "maxHeight", "MaxHeight", "height", "Height")
+	if width <= 0 {
 		width = embyFolderCoverDefaultWidth
 	}
-	if width <= 0 {
-		width = int(math.Round(float64(height) * embyFolderCoverAspectRatio))
+	if maxHeight > 0 {
+		heightBoundedWidth := int(float64(maxHeight) * embyFolderCoverAspectRatio)
+		if heightBoundedWidth > 0 && heightBoundedWidth < width {
+			width = heightBoundedWidth
+		}
 	}
 	width = clampInt(width, embyFolderCoverMinWidth, embyFolderCoverMaxWidth)
-	derivedHeight := int(math.Round(float64(width) / embyFolderCoverAspectRatio))
-	if height > 0 && height < derivedHeight {
-		width = clampInt(int(math.Round(float64(height)*embyFolderCoverAspectRatio)), embyFolderCoverMinWidth, embyFolderCoverMaxWidth)
-		derivedHeight = int(math.Round(float64(width) / embyFolderCoverAspectRatio))
+	height := int(math.Round(float64(width) / embyFolderCoverAspectRatio))
+	if height < 1 {
+		height = 1
 	}
-	return width, derivedHeight
+	return width, height
 }
 
-func queryPositiveInt(c *gin.Context, keys ...string) int {
+func queryMinPositiveInt(c *gin.Context, keys ...string) int {
+	out := 0
 	for _, key := range keys {
-		value := strings.TrimSpace(c.Query(key))
-		if value == "" {
-			continue
-		}
-		n, err := strconv.Atoi(value)
-		if err == nil && n > 0 {
-			return n
+		for _, value := range c.QueryArray(key) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				continue
+			}
+			if out == 0 || n < out {
+				out = n
+			}
 		}
 	}
-	return 0
+	return out
 }
 
 func clampInt(value, minValue, maxValue int) int {
@@ -216,9 +224,16 @@ func clampInt(value, minValue, maxValue int) int {
 	return value
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
+func setEmbyFolderCoverHeaders(c *gin.Context, tag string) {
+	now := time.Now().UTC()
+	c.Header("Content-Type", "image/png")
+	c.Header("Cache-Control", "public, max-age=31536000")
+	if tag != "" {
+		c.Header("ETag", `"`+tag+`"`)
 	}
-	return b
+	c.Header("Last-Modified", now.Format(http.TimeFormat))
+	c.Header("Expires", now.Add(365*24*time.Hour).Format(http.TimeFormat))
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Cross-Origin-Resource-Policy", "cross-origin")
+	c.Header("Access-Control-Allow-Origin", "*")
 }
