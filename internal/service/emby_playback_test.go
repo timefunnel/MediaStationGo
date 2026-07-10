@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -320,6 +321,61 @@ func TestEmbyResumableItemsDefaultToDatePlayed(t *testing.T) {
 	}
 	if items[0]["Id"] != newWatchOldRelease.ID {
 		t.Fatalf("resumable items should default to DatePlayed order, got %#v", items)
+	}
+	userData := items[0]["UserData"].(map[string]any)
+	if userData["LastPlayedDate"] == "" {
+		t.Fatalf("resumable item should expose LastPlayedDate: %#v", items[0])
+	}
+}
+
+func TestEmbyResumeItemsDefaultsToTenAndIncludesLastPlayedDate(t *testing.T) {
+	svc := newTestEmbyService(t)
+	viewer := &model.User{Base: model.Base{ID: "user-1"}, Username: "viewer", Role: "user", Tier: "free", IsActive: true}
+	if err := svc.repo.User.Create(t.Context(), viewer); err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+	lib := model.Library{Name: "Movies", Path: `/media/movies`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	base := time.Now().UTC()
+	for i := 0; i < 12; i++ {
+		media := model.Media{
+			Base:        model.Base{ID: fmt.Sprintf("resume-%02d", i)},
+			LibraryID:   lib.ID,
+			Title:       fmt.Sprintf("Resume %02d", i),
+			Path:        fmt.Sprintf(`/media/movies/resume-%02d.mkv`, i),
+			DurationSec: 120,
+		}
+		if err := svc.repo.DB.Create(&media).Error; err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+		if err := svc.repo.DB.Create(&model.PlaybackHistory{
+			UserID:     viewer.ID,
+			MediaID:    media.ID,
+			PositionMs: 30_000,
+			DurationMs: 120_000,
+			WatchedAt:  base.Add(time.Duration(i) * time.Minute),
+			Completed:  false,
+		}).Error; err != nil {
+			t.Fatalf("create history: %v", err)
+		}
+	}
+
+	out, err := svc.ResumeItems(t.Context(), viewer.ID, 0)
+	if err != nil {
+		t.Fatalf("resume items: %v", err)
+	}
+	items := out["Items"].([]map[string]any)
+	if len(items) != 10 {
+		t.Fatalf("default resume item count = %d, want 10", len(items))
+	}
+	if items[0]["Id"] != "resume-11" {
+		t.Fatalf("resume items should be newest first, got %#v", items[0])
+	}
+	userData := items[0]["UserData"].(map[string]any)
+	if userData["LastPlayedDate"] == "" {
+		t.Fatalf("resume item should expose LastPlayedDate: %#v", items[0])
 	}
 }
 

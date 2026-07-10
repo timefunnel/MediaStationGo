@@ -31,14 +31,15 @@ import (
 
 // SubtitleService is the discovery + conversion entry point.
 type SubtitleService struct {
-	log     *zap.Logger
-	repo    *repository.Container
-	storage *StorageConfigService
+	log           *zap.Logger
+	repo          *repository.Container
+	storage       *StorageConfigService
+	localCacheDir string
 }
 
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
-	s := &SubtitleService{log: log, repo: repo}
+	s := &SubtitleService{log: log, repo: repo, localCacheDir: subtitleCacheDirFromEnv()}
 	if len(storage) > 0 {
 		s.storage = storage[0]
 	}
@@ -116,8 +117,9 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	if m == nil {
 		return nil, errors.New("media not found")
 	}
+	localTracks := discoverLocalCachedSubtitles(s, mediaID)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		return discoverCloudSubtitles(ctx, s, *m), nil
+		return mergeSubtitleTracks(discoverCloudSubtitles(ctx, s, *m), localTracks), nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))
@@ -150,16 +152,16 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 				// inside subs/ subdirs we accept anything.
 				continue
 			}
-			lang := detectLang(fullName, base)
+			lang, label := detectLangLabel(fullName, base)
 			tracks = append(tracks, SubtitleTrack{
 				Lang:  lang,
-				Label: lang,
+				Label: label,
 				Path:  filepath.Join(c, e.Name()),
 				Codec: codec,
 			})
 		}
 	}
-	return tracks, nil
+	return mergeSubtitleTracks(tracks, localTracks), nil
 }
 
 // langTag matches the .zh / .zh-cn / .chs language sub-extensions.
@@ -177,6 +179,24 @@ func detectLang(name, base string) string {
 	return strings.ToLower(suffix)
 }
 
+func detectLangLabel(name, base string) (string, string) {
+	lang := detectLang(name, base)
+	switch strings.ToLower(strings.ReplaceAll(lang, "_", "-")) {
+	case "sc", "chs", "zh-cn", "zh-hans", "zh-sg":
+		return "zh-Hans", "简体中文"
+	case "tc", "cht", "zh-tw", "zh-hant", "zh-hk":
+		return "zh-Hant", "繁体中文"
+	case "jp", "jpn", "ja":
+		return "ja", "日语"
+	case "en", "eng":
+		return "en", "English"
+	case "und", "":
+		return "und", "Subtitle"
+	default:
+		return lang, lang
+	}
+}
+
 // Serve writes the subtitle file as WebVTT (.vtt). SRT/SSA files are converted
 // minimally on the fly. Returns ErrSubtitleNotFound when the path is rejected.
 func (s *SubtitleService) Serve(ctx context.Context, mediaID, sub string, w io.Writer) error {
@@ -190,6 +210,9 @@ func (s *SubtitleService) ServeAs(ctx context.Context, mediaID, sub, format stri
 	m, err := s.repo.Media.FindByID(ctx, mediaID)
 	if err != nil || m == nil {
 		return errors.New("media not found")
+	}
+	if localMediaID, filename, ok := parseLocalSubtitlePath(sub); ok {
+		return serveLocalCachedSubtitle(s, mediaID, localMediaID, filename, format, w)
 	}
 	if typ, ref, name, ok := parseCloudSubtitlePath(sub); ok {
 		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, format, w)

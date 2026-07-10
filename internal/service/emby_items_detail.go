@@ -55,6 +55,7 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 	}
 	fav := false
 	pos := int64(0)
+	watchedAt := time.Time{}
 	if userID != "" {
 		var f model.Favorite
 		ferr := e.repo.DB.WithContext(ctx).Where("user_id = ? AND media_id = ?", userID, mediaID).First(&f).Error
@@ -66,9 +67,10 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 			Order("watched_at DESC, updated_at DESC, id DESC").First(&h).Error
 		if herr == nil {
 			pos = h.PositionMs
+			watchedAt = h.WatchedAt
 		}
 	}
-	return e.itemPayload(ctx, m, fav, pos), nil
+	return e.itemPayload(ctx, m, fav, pos, watchedAt), nil
 }
 
 // LatestItems 最近添加，全库或指定库。
@@ -143,8 +145,11 @@ func (e *EmbyService) latestSeriesItemsForLibrary(ctx context.Context, userID, l
 
 // ResumeItems 列出有未完成播放进度的媒体。
 func (e *EmbyService) ResumeItems(ctx context.Context, userID string, limit int) (map[string]any, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
 	}
 	var hist []model.PlaybackHistory
 	if err := e.repo.DB.WithContext(ctx).
@@ -157,9 +162,11 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, limit int)
 	}
 	ids := make([]string, 0, len(hist))
 	posByID := map[string]int64{}
+	watchedAtByID := map[string]time.Time{}
 	for _, h := range hist {
 		ids = append(ids, h.MediaID)
 		posByID[h.MediaID] = h.PositionMs
+		watchedAtByID[h.MediaID] = h.WatchedAt
 	}
 	var medias []model.Media
 	q := e.repo.DB.WithContext(ctx).Where("id IN ?", ids)
@@ -174,13 +181,13 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, limit int)
 	items := make([]map[string]any, 0, len(hist))
 	for _, h := range hist {
 		if m, ok := byID[h.MediaID]; ok {
-			items = append(items, e.itemPayload(ctx, m, false, posByID[h.MediaID]))
+			items = append(items, e.itemPayload(ctx, m, false, posByID[h.MediaID], watchedAtByID[h.MediaID]))
 		}
 	}
 	return map[string]any{"Items": items, "TotalRecordCount": len(items)}, nil
 }
 
-func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool, posMs int64) map[string]any {
+func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool, posMs int64, watchedAtValues ...time.Time) map[string]any {
 	itemType := "Movie"
 	name := m.Title
 	parentID := m.LibraryID
@@ -219,6 +226,16 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	if durationMs > 0 {
 		pct = float64(posMs) / float64(durationMs) * 100
 	}
+	userData := map[string]any{
+		"PlaybackPositionTicks": posMs * 10_000,
+		"PlayCount":             0,
+		"IsFavorite":            fav,
+		"Played":                played,
+		"PlayedPercentage":      pct,
+	}
+	if len(watchedAtValues) > 0 && !watchedAtValues[0].IsZero() {
+		userData["LastPlayedDate"] = watchedAtValues[0].UTC().Format(time.RFC3339Nano)
+	}
 
 	item := map[string]any{
 		"Id":                m.ID,
@@ -251,14 +268,13 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 			"Tmdb":    intToStr(m.TMDbID),
 			"Bangumi": intToStr(m.BangumiID),
 		},
-		"UserData": map[string]any{
-			"PlaybackPositionTicks": posMs * 10_000,
-			"PlayCount":             0,
-			"IsFavorite":            fav,
-			"Played":                played,
-			"PlayedPercentage":      pct,
-		},
+		"UserData":     userData,
 		"MediaSources": e.mediaSourcesForItem(ctx, m, true, false),
+	}
+	if itemType == "Movie" {
+		for _, key := range []string{"SeasonId", "SeasonName", "SeriesId", "SeriesName", "ParentIndexNumber", "IndexNumber"} {
+			delete(item, key)
+		}
 	}
 	if premiered, ok := embyPremiereDate(m.ReleaseDate); ok {
 		item["PremiereDate"] = premiered

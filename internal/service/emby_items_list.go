@@ -149,6 +149,7 @@ func (e *EmbyService) payloadsForMedia(ctx context.Context, rows []model.Media, 
 	rows = e.collapseMediaVersionRows(ctx, rows)
 	userFavs := map[string]bool{}
 	userPos := map[string]int64{}
+	userWatchedAt := map[string]time.Time{}
 	if userID != "" && len(rows) > 0 {
 		mediaIDs := make([]string, 0, len(rows))
 		for _, row := range rows {
@@ -172,13 +173,14 @@ func (e *EmbyService) payloadsForMedia(ctx context.Context, rows []model.Media, 
 		for _, h := range hist {
 			if _, exists := userPos[h.MediaID]; !exists {
 				userPos[h.MediaID] = h.PositionMs
+				userWatchedAt[h.MediaID] = h.WatchedAt
 			}
 		}
 	}
 
 	items := make([]map[string]any, 0, len(rows))
 	for _, m := range rows {
-		items = append(items, e.itemPayload(ctx, &m, userFavs[m.ID], userPos[m.ID]))
+		items = append(items, e.itemPayload(ctx, &m, userFavs[m.ID], userPos[m.ID], userWatchedAt[m.ID]))
 	}
 	return items, nil
 }

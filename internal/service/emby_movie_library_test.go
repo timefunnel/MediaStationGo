@@ -57,6 +57,11 @@ func TestEmbyMovieLibrarySeasonNumbersStayMovies(t *testing.T) {
 	if item["Type"] != "Movie" || item["ParentId"] != lib.ID {
 		t.Fatalf("direct item should stay Movie, got %#v", item)
 	}
+	for _, key := range []string{"SeasonId", "SeasonName", "SeriesId", "SeriesName", "ParentIndexNumber", "IndexNumber"} {
+		if _, ok := item[key]; ok {
+			t.Fatalf("movie item should not expose episodic field %s: %#v", key, item)
+		}
+	}
 
 	rootMovies, err := svc.Items(t.Context(), ItemsParams{IncludeItemTypes: []string{"Movie"}, Recursive: true, Limit: 50})
 	if err != nil {

@@ -69,10 +69,10 @@ func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, sub
 		if ref == "" {
 			continue
 		}
-		lang := detectLang(fullName, base)
+		lang, label := detectLangLabel(fullName, base)
 		tracks = append(tracks, SubtitleTrack{
 			Lang:  lang,
-			Label: lang,
+			Label: label,
 			Path:  buildCloudSubtitlePath(typ, ref, entry.Name),
 			Codec: codec,
 		})
