@@ -78,16 +78,6 @@ func (p *cloudDrive2Provider) Resolve(ctx context.Context, fileRef string) (*Dir
 	if ref == "/" {
 		return nil, fmt.Errorf("%s: file reference required", p.name)
 	}
-	if p.typ == TypeOpenList && isCloudVideoPlaybackCandidate(ref) {
-		if p.apiBase == nil {
-			return nil, fmt.Errorf("%s: pure 302 playback requires an OpenList API server address; configure server/api_url so /api/fs/get can return raw_url", p.name)
-		}
-		link, err := p.resolveOpenListAPIDirect(ctx, ref)
-		if err != nil {
-			return nil, fmt.Errorf("%s: pure 302 playback requires OpenList raw_url for %s: %w", p.name, ref, err)
-		}
-		return link, nil
-	}
 	if p.typ == TypeCloudDrive2 && isCloudVideoPlaybackCandidate(ref) {
 		link, err := p.resolveCloudDAVRedirectDirect(ctx, ref)
 		if err != nil {
