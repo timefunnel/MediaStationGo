@@ -63,6 +63,14 @@ func (p *AdultProvider) Enabled() bool {
 }
 
 func (p *AdultProvider) Search(ctx context.Context, code string) (*Match, error) {
+	matches, err := p.SearchAll(ctx, code)
+	if len(matches) > 0 {
+		return bestAdultMatch(matches), nil
+	}
+	return nil, err
+}
+
+func (p *AdultProvider) SearchAll(ctx context.Context, code string) ([]*Match, error) {
 	code = normalizeAdultCode(code)
 	if code == "" {
 		return nil, errors.New("empty adult code")
@@ -72,6 +80,8 @@ func (p *AdultProvider) Search(ctx context.Context, code string) (*Match, error)
 		return nil, nil
 	}
 	var lastErr error
+	out := make([]*Match, 0, len(bases))
+	seen := map[string]struct{}{}
 	for _, base := range bases {
 		base = strings.TrimRight(base, "/")
 		var match *Match
@@ -94,10 +104,80 @@ func (p *AdultProvider) Search(ctx context.Context, code string) (*Match, error)
 		if match != nil {
 			match.OriginalName = code
 			match.NSFW = true
-			return match, nil
+			key := adultMatchDedupeKey(match)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, match)
 		}
 	}
+	if len(out) > 0 {
+		return out, nil
+	}
 	return nil, lastErr
+}
+
+func bestAdultMatch(matches []*Match) *Match {
+	var best *Match
+	bestScore := -1
+	for _, match := range matches {
+		score := adultMatchScore(match)
+		if best == nil || score > bestScore {
+			best = match
+			bestScore = score
+		}
+	}
+	return best
+}
+
+func adultMatchScore(match *Match) int {
+	if match == nil {
+		return -1
+	}
+	score := 0
+	if strings.TrimSpace(match.Title) != "" && !strings.EqualFold(strings.TrimSpace(match.Title), strings.TrimSpace(match.OriginalName)) {
+		score += 20
+	}
+	if strings.TrimSpace(match.PosterURL) != "" {
+		score += 10
+	}
+	if strings.TrimSpace(match.BackdropURL) != "" {
+		score += 10
+	}
+	if match.Year > 0 {
+		score += 2
+	}
+	if match.Rating > 0 {
+		score += 1
+	}
+	return score
+}
+
+func adultMatchDedupeKey(match *Match) string {
+	if match == nil {
+		return ""
+	}
+	source := adultMatchSource(match)
+	for _, value := range []string{match.OriginalName, match.Title, match.PosterURL, match.BackdropURL} {
+		if key := adultCodeKey(value); key != "" {
+			return source + "\x00" + key + "\x00" + strings.ToUpper(strings.TrimSpace(match.Title))
+		}
+	}
+	return source + "\x00" + strings.ToUpper(strings.TrimSpace(match.Title+"\x00"+match.PosterURL+"\x00"+match.BackdropURL))
+}
+
+func adultMatchSource(match *Match) string {
+	if match == nil {
+		return ""
+	}
+	for _, genre := range match.Genres {
+		value := strings.ToLower(strings.TrimSpace(genre))
+		if value != "" && value != "adult" {
+			return value
+		}
+	}
+	return "adult"
 }
 
 func (p *AdultProvider) resolveBases(ctx context.Context) []string {

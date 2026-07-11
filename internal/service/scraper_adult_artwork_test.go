@@ -77,10 +77,11 @@ func TestDeriveAdultPosterIfPosterMatchesBackdrop(t *testing.T) {
 	if match.PosterURL == backdropPath {
 		t.Fatal("poster should be regenerated when poster and backdrop are the same landscape image")
 	}
-	if match.BackdropURL != backdropPath {
-		t.Fatalf("backdrop should stay unchanged: %s", match.BackdropURL)
+	if !strings.Contains(match.BackdropURL, "adult-backdrops") {
+		t.Fatalf("backdrop should be normalized to adult-backdrops cache: %s", match.BackdropURL)
 	}
 	assertAdultPosterSize(t, images, match.PosterURL)
+	assertAdultBackdropSize(t, images, match.BackdropURL, 800, 538)
 }
 
 func TestDeriveAdultPosterKeepsPortraitPoster(t *testing.T) {
@@ -98,6 +99,39 @@ func TestDeriveAdultPosterKeepsPortraitPoster(t *testing.T) {
 
 	if match.PosterURL != posterPath {
 		t.Fatalf("portrait poster should stay unchanged: %s", match.PosterURL)
+	}
+}
+
+func TestDeriveAdultPosterFallsBackToPosterForBadBackdrop(t *testing.T) {
+	cacheDir := t.TempDir()
+	landscapePath := filepath.Join(cacheDir, "landscape-cover.jpg")
+	badBackdropPath := filepath.Join(cacheDir, "tiny-backdrop.jpg")
+	writeAdultArtworkTestImage(t, landscapePath, 800, 538)
+	writeAdultArtworkTestImage(t, badBackdropPath, 90, 122)
+
+	images := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: cacheDir}}, zap.NewNop())
+	scraper := &ScraperService{images: images, log: zap.NewNop()}
+	match := &Match{MediaType: "adult", PosterURL: landscapePath, BackdropURL: badBackdropPath}
+
+	scraper.deriveAdultPosterIfNeeded(t.Context(), &model.Media{Base: model.Base{ID: "media-4"}}, &model.Library{Type: "adult"}, match)
+
+	if !strings.Contains(match.PosterURL, "adult-posters") {
+		t.Fatalf("poster should be regenerated from landscape source: %s", match.PosterURL)
+	}
+	if !strings.Contains(match.BackdropURL, "adult-backdrops") {
+		t.Fatalf("bad backdrop should be replaced with local landscape backdrop: %s", match.BackdropURL)
+	}
+	assertAdultPosterSize(t, images, match.PosterURL)
+	out, _, err := images.Fetch(t.Context(), match.BackdropURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 800 || img.Bounds().Dy() != 538 {
+		t.Fatalf("backdrop size = %dx%d, want 800x538", img.Bounds().Dx(), img.Bounds().Dy())
 	}
 }
 
@@ -176,5 +210,20 @@ func assertAdultPosterSize(t *testing.T, images *ImageProxy, path string) {
 	}
 	if img.Bounds().Dx() != 600 || img.Bounds().Dy() != 900 {
 		t.Fatalf("poster size = %dx%d, want 600x900", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func assertAdultBackdropSize(t *testing.T, images *ImageProxy, path string, width, height int) {
+	t.Helper()
+	data, _, err := images.Fetch(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != width || img.Bounds().Dy() != height {
+		t.Fatalf("backdrop size = %dx%d, want %dx%d", img.Bounds().Dx(), img.Bounds().Dy(), width, height)
 	}
 }

@@ -45,12 +45,22 @@ func (s *ScraperService) deriveAdultPosterIfNeeded(ctx context.Context, m *model
 	if s == nil || s.images == nil || match == nil || !adultScrapeNeedsDerivedPoster(lib, match) {
 		return
 	}
-	s.normalizeAdultBackdropIfNeeded(ctx, m, match)
+	backdropNormalized := s.normalizeAdultBackdropIfNeeded(ctx, m, match)
 	posterURL := strings.TrimSpace(match.PosterURL)
 	backdropURL := strings.TrimSpace(match.BackdropURL)
 	sourceURL, data, ok := s.fetchAdultPosterDerivationSource(ctx, m, posterURL, backdropURL)
 	if !ok {
 		return
+	}
+	if !backdropNormalized {
+		if backdropPath, err := s.writeAdultBackdrop(sourceURL, data); err == nil {
+			match.BackdropURL = backdropPath
+		} else if !errors.Is(err, errAdultPosterSourceNotLandscape) {
+			s.log.Warn("adult backdrop fallback skipped; backdrop generation failed",
+				zap.String("media_id", mediaIDForLog(m)),
+				zap.String("source", sourceURL),
+				zap.Error(err))
+		}
 	}
 	posterPath, err := s.writeAdultPosterFromBackdrop(sourceURL, data)
 	if err != nil {
@@ -66,13 +76,13 @@ func (s *ScraperService) deriveAdultPosterIfNeeded(ctx context.Context, m *model
 	match.PosterURL = posterPath
 }
 
-func (s *ScraperService) normalizeAdultBackdropIfNeeded(ctx context.Context, m *model.Media, match *Match) {
+func (s *ScraperService) normalizeAdultBackdropIfNeeded(ctx context.Context, m *model.Media, match *Match) bool {
 	if s == nil || s.images == nil || match == nil {
-		return
+		return false
 	}
 	backdropURL := strings.TrimSpace(match.BackdropURL)
 	if backdropURL == "" || !isHTTPish(backdropURL) {
-		return
+		return false
 	}
 	data, err := s.fetchAdultPosterSource(ctx, backdropURL)
 	if err != nil {
@@ -80,7 +90,7 @@ func (s *ScraperService) normalizeAdultBackdropIfNeeded(ctx context.Context, m *
 			zap.String("media_id", mediaIDForLog(m)),
 			zap.String("backdrop", backdropURL),
 			zap.Error(err))
-		return
+		return false
 	}
 	backdropPath, err := s.writeAdultBackdrop(backdropURL, data)
 	if err != nil {
@@ -88,9 +98,10 @@ func (s *ScraperService) normalizeAdultBackdropIfNeeded(ctx context.Context, m *
 			zap.String("media_id", mediaIDForLog(m)),
 			zap.String("backdrop", backdropURL),
 			zap.Error(err))
-		return
+		return false
 	}
 	match.BackdropURL = backdropPath
+	return true
 }
 
 func (s *ScraperService) fetchAdultPosterDerivationSource(ctx context.Context, m *model.Media, posterURL, backdropURL string) (string, []byte, bool) {
@@ -130,7 +141,7 @@ func (s *ScraperService) fetchAdultPosterSource(ctx context.Context, sourceURL s
 
 func imageDataIsLandscape(data []byte) bool {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	return err == nil && cfg.Width > cfg.Height
+	return err == nil && cfg.Width > cfg.Height && cfg.Width >= 320 && cfg.Height >= 180
 }
 
 func adultScrapeNeedsDerivedPoster(lib *model.Library, match *Match) bool {
@@ -155,7 +166,7 @@ func (s *ScraperService) writeAdultBackdrop(backdropURL string, data []byte) (st
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
 		return "", errors.New("invalid image bounds")
 	}
-	if bounds.Dx() <= bounds.Dy() {
+	if bounds.Dx() <= bounds.Dy() || bounds.Dx() < 320 || bounds.Dy() < 180 {
 		return "", errAdultPosterSourceNotLandscape
 	}
 	sum := sha1.Sum([]byte(adultNormalizedBackdropStrategy + "\n" + backdropURL + "\n" + hex.EncodeToString(sha1Bytes(data))))
@@ -192,7 +203,7 @@ func (s *ScraperService) writeAdultPosterFromBackdrop(backdropURL string, data [
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
 		return "", errors.New("invalid image bounds")
 	}
-	if bounds.Dx() <= bounds.Dy() {
+	if bounds.Dx() <= bounds.Dy() || bounds.Dx() < 320 || bounds.Dy() < 180 {
 		return "", errAdultPosterSourceNotLandscape
 	}
 	crop := image.Rect(bounds.Min.X+bounds.Dx()/2, bounds.Min.Y, bounds.Max.X, bounds.Max.Y)

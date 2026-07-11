@@ -521,6 +521,77 @@ func TestMediaSearchFilteredSupportsChineseFuzzyTerms(t *testing.T) {
 	}
 }
 
+func TestMediaSearchFilteredMatchesCaseInsensitiveTermsAcrossFields(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := New(db)
+	lib := model.Library{Name: "TV", Path: "/media/tv", Type: "tv", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	rows := []model.Media{
+		{
+			Base:         model.Base{ID: "taxi"},
+			LibraryID:    lib.ID,
+			Title:        "Taxi Driver",
+			OriginalName: "Model Taxi",
+			Path:         "/media/tv/taxi/Season2/S02E01.mkv",
+			RelativePath: "taxi/Season2/S02E01.mkv",
+			Overview:     "A detective pilot case",
+			Genres:       "Crime,Action",
+		},
+		{
+			Base:         model.Base{ID: "dune"},
+			LibraryID:    lib.ID,
+			Title:        "Dune",
+			OriginalName: "DUNE PART TWO",
+			Path:         "/media/movie/dune.mkv",
+		},
+	}
+	for i := range rows {
+		if err := repos.Media.Upsert(t.Context(), &rows[i]); err != nil {
+			t.Fatalf("upsert media: %v", err)
+		}
+	}
+
+	items, err := repos.Media.SearchFiltered(t.Context(), "TAXI season2", 10, MediaQueryFilter{IncludeNSFW: true})
+	if err != nil {
+		t.Fatalf("search mixed-case split terms: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "taxi" {
+		t.Fatalf("mixed-case split search should match taxi only: %#v", items)
+	}
+
+	items, err = repos.Media.SearchFiltered(t.Context(), "pilot crime", 10, MediaQueryFilter{IncludeNSFW: true})
+	if err != nil {
+		t.Fatalf("search overview and genre terms: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "taxi" {
+		t.Fatalf("overview/genre split search should match taxi only: %#v", items)
+	}
+
+	items, err = repos.Media.SearchFiltered(t.Context(), "dune part", 10, MediaQueryFilter{IncludeNSFW: true})
+	if err != nil {
+		t.Fatalf("search original name terms: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "dune" {
+		t.Fatalf("original-name split search should match dune only: %#v", items)
+	}
+
+	items, err = repos.Media.SearchFiltered(t.Context(), "taxi dune", 10, MediaQueryFilter{IncludeNSFW: true})
+	if err != nil {
+		t.Fatalf("search unrelated combined terms: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("split search should require every term, got %#v", items)
+	}
+}
+
 func TestMediaSearchIndexBackfillRunsInBatches(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

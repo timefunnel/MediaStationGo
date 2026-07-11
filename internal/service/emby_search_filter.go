@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"unicode"
 
 	"gorm.io/gorm"
 
@@ -10,12 +11,13 @@ import (
 
 type embyMediaSearch struct {
 	term       string
+	terms      []string
 	startsWith bool
 }
 
 func embySearchFromParams(p ItemsParams) embyMediaSearch {
-	if term := strings.ToLower(strings.TrimSpace(p.SearchTerm)); term != "" {
-		return embyMediaSearch{term: term}
+	if terms := embySearchTerms(p.SearchTerm); len(terms) > 0 {
+		return embyMediaSearch{term: strings.Join(terms, " "), terms: terms}
 	}
 	if term := strings.ToLower(strings.TrimSpace(p.NameStartsWith)); term != "" {
 		return embyMediaSearch{term: term, startsWith: true}
@@ -33,14 +35,17 @@ func applyEmbyMediaSearch(q *gorm.DB, p ItemsParams) *gorm.DB {
 		return q
 	}
 	if search.startsWith {
-		pattern := search.term + "%"
-		return q.Where("(LOWER(media.title) LIKE ? OR LOWER(media.original_name) LIKE ?)", pattern, pattern)
+		pattern := escapeEmbyLike(search.term) + "%"
+		return q.Where("(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\')", pattern, pattern)
 	}
-	pattern := "%" + search.term + "%"
-	return q.Where(
-		"(LOWER(media.title) LIKE ? OR LOWER(media.original_name) LIKE ? OR LOWER(media.path) LIKE ? OR LOWER(media.relative_path) LIKE ?)",
-		pattern, pattern, pattern, pattern,
-	)
+	for _, term := range search.terms {
+		pattern := "%" + escapeEmbyLike(term) + "%"
+		q = q.Where(
+			"(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.genres, '')) LIKE ? ESCAPE '\\')",
+			pattern, pattern, pattern, pattern, pattern, pattern,
+		)
+	}
+	return q
 }
 
 func embyMediaMatchesSearch(row model.Media, p ItemsParams) bool {
@@ -60,11 +65,55 @@ func embyMediaMatchesSearch(row model.Media, p ItemsParams) bool {
 		}
 		return false
 	}
-	values = append(values, strings.ToLower(row.Path), strings.ToLower(row.RelativePath))
-	for _, value := range values {
-		if strings.Contains(value, search.term) {
-			return true
+	values = append(values,
+		strings.ToLower(row.Path),
+		strings.ToLower(row.RelativePath),
+		strings.ToLower(row.Overview),
+		strings.ToLower(row.Genres),
+	)
+	for _, term := range search.terms {
+		matched := false
+		for _, value := range values {
+			if strings.Contains(value, term) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func embySearchTerms(query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r)
+	})
+	out := make([]string, 0, len(fields))
+	seen := map[string]struct{}{}
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		lower := strings.ToLower(field)
+		if _, ok := seen[lower]; ok {
+			continue
+		}
+		seen[lower] = struct{}{}
+		out = append(out, lower)
+	}
+	return out
+}
+
+func escapeEmbyLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	value = strings.ReplaceAll(value, `_`, `\_`)
+	return value
 }

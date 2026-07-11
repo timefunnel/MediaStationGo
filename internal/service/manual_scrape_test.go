@@ -454,6 +454,8 @@ func TestManualTMDbCandidatesSkipOtherProviderIDs(t *testing.T) {
 }
 
 func TestManualSearchIncludesAdultProvider(t *testing.T) {
+	withAdultDefaultBases(t, nil)
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search":

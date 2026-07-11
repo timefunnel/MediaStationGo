@@ -32,6 +32,15 @@ func TestEmbySearchTermMatchesCaseInsensitiveTitleAndPath(t *testing.T) {
 		t.Fatalf("SearchTerm should match title ignoring case, got %#v", items)
 	}
 
+	out, err = svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, SearchTerm: "mide 949", Limit: 50})
+	if err != nil {
+		t.Fatalf("items by split title terms: %v", err)
+	}
+	items = out["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Id"] != "mide-949" {
+		t.Fatalf("SearchTerm should split title terms, got %#v", items)
+	}
+
 	out, err = svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, SearchTerm: "fc2-ppv-926114", Limit: 50})
 	if err != nil {
 		t.Fatalf("items by path: %v", err)
@@ -39,6 +48,15 @@ func TestEmbySearchTermMatchesCaseInsensitiveTitleAndPath(t *testing.T) {
 	items = out["Items"].([]map[string]any)
 	if len(items) != 1 || items[0]["Id"] != "fc2" {
 		t.Fatalf("SearchTerm should match path ignoring case, got %#v", items)
+	}
+
+	out, err = svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, SearchTerm: "FC2 926114", Limit: 50})
+	if err != nil {
+		t.Fatalf("items by split path terms: %v", err)
+	}
+	items = out["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Id"] != "fc2" {
+		t.Fatalf("SearchTerm should split path terms ignoring case, got %#v", items)
 	}
 }
 

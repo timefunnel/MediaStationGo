@@ -66,7 +66,18 @@ func TestParseAdultDetailHTMLDerivesDMMPoster(t *testing.T) {
 	}
 }
 
+func withAdultDefaultBases(t *testing.T, bases []string) {
+	t.Helper()
+	original := defaultAdultBases
+	defaultAdultBases = append([]string(nil), bases...)
+	t.Cleanup(func() {
+		defaultAdultBases = original
+	})
+}
+
 func TestAdultProviderUsesConfiguredMultipleSources(t *testing.T) {
+	withAdultDefaultBases(t, nil)
+
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "temporary failure", http.StatusInternalServerError)
 	}))
@@ -100,6 +111,56 @@ func TestAdultProviderUsesConfiguredMultipleSources(t *testing.T) {
 	}
 	if match == nil || match.Title != "多源命中标题" || match.OriginalName != "SSIS-001" || !match.NSFW {
 		t.Fatalf("multi-source adult match = %+v", match)
+	}
+}
+
+func TestAdultProviderSearchAllReturnsMultipleSourceMatches(t *testing.T) {
+	withAdultDefaultBases(t, nil)
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a class="box" href="/v/adn093"><strong>ADN-093 第一源</strong></a>`))
+		case "/v/adn093":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<h2 class="title"><strong>ADN-093 第一源标题</strong></h2><img class="video-cover" src="/cover1.jpg">`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<a class="box" href="/v/adn093"><strong>ADN-093 第二源</strong></a>`))
+		case "/v/adn093":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<h2 class="title"><strong>ADN-093 第二源标题</strong></h2><img class="video-cover" src="/cover2.jpg">`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer second.Close()
+
+	db := newServiceTestDB(t, &model.APIConfig{})
+	apiConfig := NewAPIConfigService(zap.NewNop(), repository.New(db), NewCryptoService("", zap.NewNop()))
+	baseURL := first.URL + "\n" + second.URL
+	if _, err := apiConfig.Update(context.Background(), "adult", APIConfigPatch{BaseURL: &baseURL}); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := NewAdultProvider(zap.NewNop(), apiConfig)
+	matches, err := provider.SearchAll(context.Background(), "ADN-093")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches len = %d, want 2: %+v", len(matches), matches)
+	}
+	if matches[0].Title != "第一源标题" || matches[1].Title != "第二源标题" {
+		t.Fatalf("unexpected multi-source titles: %+v", matches)
 	}
 }
 

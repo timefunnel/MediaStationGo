@@ -109,18 +109,19 @@ func (r *MediaRepository) searchFilteredLIKE(ctx context.Context, query string, 
 	for _, term := range terms {
 		like := "%" + escapeLike(term) + "%"
 		q = q.Where(
-			"(title LIKE ? ESCAPE '\\' OR original_name LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\' OR genres LIKE ? ESCAPE '\\')",
-			like, like, like, like,
+			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\')",
+			like, like, like, like, like, like,
 		)
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if query != "" {
-		prefix := escapeLike(query) + "%"
-		exact := query
+		normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+		prefix := escapeLike(normalizedQuery) + "%"
+		exact := normalizedQuery
 		q = q.Order(gorm.Expr(
-			"CASE WHEN title = ? THEN 0 WHEN original_name = ? THEN 1 WHEN title LIKE ? ESCAPE '\\' THEN 2 WHEN original_name LIKE ? ESCAPE '\\' THEN 3 ELSE 4 END, created_at desc",
+			"CASE WHEN LOWER(COALESCE(title, '')) = ? THEN 0 WHEN LOWER(COALESCE(original_name, '')) = ? THEN 1 WHEN LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' THEN 2 WHEN LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' THEN 3 ELSE 4 END, created_at desc",
 			exact, exact, prefix, prefix,
 		))
 	} else {
@@ -178,7 +179,7 @@ func mediaSearchTerms(query string) []string {
 			continue
 		}
 		seen[lower] = struct{}{}
-		out = append(out, field)
+		out = append(out, lower)
 	}
 	return out
 }
