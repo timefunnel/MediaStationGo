@@ -370,22 +370,14 @@ func TestEmbyResumeItemsDefaultsToTenAndIncludesLastPlayedDate(t *testing.T) {
 	if len(items) != 10 {
 		t.Fatalf("default resume item count = %d, want 10", len(items))
 	}
-	if out["TotalRecordCount"] != 12 {
-		t.Fatalf("resume total = %#v, want 12", out["TotalRecordCount"])
+	if out["TotalRecordCount"] != 10 {
+		t.Fatalf("resume total = %#v, want fixed 10", out["TotalRecordCount"])
 	}
 	if out["StartIndex"] != 0 {
 		t.Fatalf("resume start index = %#v, want 0", out["StartIndex"])
 	}
 	if items[0]["Id"] != "resume-11" {
 		t.Fatalf("resume items should be newest first, got %#v", items[0])
-	}
-	out, err = svc.ResumeItems(t.Context(), viewer.ID)
-	if err != nil {
-		t.Fatalf("resume items with fixed limit: %v", err)
-	}
-	items = out["Items"].([]map[string]any)
-	if len(items) != 10 {
-		t.Fatalf("resume item count with fixed backend limit = %d, want 10", len(items))
 	}
 	userData := items[0]["UserData"].(map[string]any)
 	if userData["LastPlayedDate"] == "" {
@@ -452,14 +444,6 @@ func TestEmbyResumeItemsSkipsInvalidHistoryBeforePaging(t *testing.T) {
 		t.Fatalf("resume duplicate media should use newest history ticks = %#v", got)
 	}
 
-	out, err = svc.ResumeItems(t.Context(), viewer.ID, 1)
-	if err != nil {
-		t.Fatalf("resume page 2: %v", err)
-	}
-	items = out["Items"].([]map[string]any)
-	if len(items) != 1 || items[0]["Id"] != "valid-old" {
-		t.Fatalf("resume start index should page visible items, got %#v", items)
-	}
 }
 
 func TestEmbyUserPolicyDisablesDownloadsForViewers(t *testing.T) {

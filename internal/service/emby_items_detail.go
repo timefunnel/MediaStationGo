@@ -146,15 +146,8 @@ func (e *EmbyService) latestSeriesItemsForLibrary(ctx context.Context, userID, l
 }
 
 // ResumeItems 列出有未完成播放进度的媒体。
-func (e *EmbyService) ResumeItems(ctx context.Context, userID string, startIndexValues ...int) (map[string]any, error) {
+func (e *EmbyService) ResumeItems(ctx context.Context, userID string) (map[string]any, error) {
 	limit := embyResumeItemsLimit
-	startIndex := 0
-	if len(startIndexValues) > 0 {
-		startIndex = startIndexValues[0]
-	}
-	if startIndex < 0 {
-		startIndex = 0
-	}
 	var hist []model.PlaybackHistory
 	if err := e.repo.DB.WithContext(ctx).
 		Where("user_id = ? AND completed = ? AND position_ms > 0", userID, false).
@@ -162,7 +155,7 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, startIndex
 		return nil, err
 	}
 	if len(hist) == 0 {
-		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": startIndex}, nil
+		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": 0}, nil
 	}
 	ids := make([]string, 0, len(hist))
 	histByID := map[string]model.PlaybackHistory{}
@@ -178,7 +171,7 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, startIndex
 		histByID[mediaID] = h
 	}
 	if len(ids) == 0 {
-		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": startIndex}, nil
+		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": 0}, nil
 	}
 	var medias []model.Media
 	q := e.repo.DB.WithContext(ctx).Where("id IN ?", ids)
@@ -196,13 +189,13 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, startIndex
 			visibleIDs = append(visibleIDs, id)
 		}
 	}
-	pageIDs := pageSlice(visibleIDs, startIndex, limit)
+	pageIDs := pageSlice(visibleIDs, 0, limit)
 	items := make([]map[string]any, 0, len(pageIDs))
 	for _, id := range pageIDs {
 		h := histByID[id]
 		items = append(items, e.itemPayload(ctx, byID[id], false, h.PositionMs, h.WatchedAt))
 	}
-	return map[string]any{"Items": items, "TotalRecordCount": len(visibleIDs), "StartIndex": startIndex}, nil
+	return map[string]any{"Items": items, "TotalRecordCount": len(items), "StartIndex": 0}, nil
 }
 
 func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool, posMs int64, watchedAtValues ...time.Time) map[string]any {

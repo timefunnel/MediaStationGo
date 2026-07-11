@@ -134,8 +134,7 @@ func embyResumeItemsHandler(svc *service.Container) gin.HandlerFunc {
 		if uid == "" {
 			uid = embyUserID(c)
 		}
-		startIndex, _ := strconv.Atoi(embyFirstNonEmptyString(firstQueryValue(c, "StartIndex", "startIndex", "startindex"), "0"))
-		out, err := svc.Emby.ResumeItems(c.Request.Context(), uid, startIndex)
+		out, err := svc.Emby.ResumeItems(c.Request.Context(), uid)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
