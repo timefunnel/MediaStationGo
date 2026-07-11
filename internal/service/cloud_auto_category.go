@@ -10,7 +10,10 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-const cloudAutoCategoryQueryKey = "auto_category"
+const (
+	cloudAutoCategoryQueryKey          = "auto_category"
+	cloudAutoCategoryEnabledSettingKey = "cloud.auto_category_enabled"
+)
 
 func BuildCloudAutoCategoryLibraryPath(provider, displayDir string) string {
 	return BuildCloudAutoCategoryLibraryPathWithScanDir(provider, "", displayDir)
@@ -107,6 +110,9 @@ type cloudAutoCategoryTarget struct {
 }
 
 func (s *ScannerService) ensureCloudAutoCategoryTarget(ctx context.Context, rootLib *model.Library, provider, displayDir, scanDir string) (cloudAutoCategoryTarget, error) {
+	if !s.cloudAutoCategoryEnabled(ctx) {
+		return cloudAutoCategoryTarget{Library: rootLib}, nil
+	}
 	displayDir = normalizeCloudMountDir(provider, displayDir)
 	scanDir = normalizeCloudMountDir(provider, firstNonEmpty(scanDir, displayDir))
 	if s == nil || s.repo == nil || s.repo.DB == nil || rootLib == nil || provider == "" || displayDir == "" {
@@ -260,12 +266,23 @@ func (s *ScannerService) migrateCloudAutoCategoryLibrary(ctx context.Context, so
 	}
 }
 
+func (s *ScannerService) cloudAutoCategoryEnabled(ctx context.Context) bool {
+	if s == nil || s.repo == nil || s.repo.Setting == nil {
+		return false
+	}
+	value, err := s.repo.Setting.Get(ctx, cloudAutoCategoryEnabledSettingKey)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return false
+	}
+	return parseBoolSetting(value, false)
+}
+
 func (s *ScannerService) cloudScanLibraryScopeIDs(ctx context.Context, lib *model.Library, mount CloudMountInfo) []string {
 	if lib == nil {
 		return nil
 	}
 	ids := []string{lib.ID}
-	if !cloudRootMountNeedsAutoCategory(mount) || s == nil || s.repo == nil || s.repo.Library == nil {
+	if !cloudRootMountNeedsAutoCategory(mount) || !s.cloudAutoCategoryEnabled(ctx) || s == nil || s.repo == nil || s.repo.Library == nil {
 		return ids
 	}
 	libs, err := s.repo.Library.List(ctx)

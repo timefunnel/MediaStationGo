@@ -58,7 +58,7 @@ func (s *ScannerService) scanCloudLibraryWithRoot(ctx context.Context, lib *mode
 	typ := mount.Provider
 	rootDir := mount.ScanDir
 	rootDisplayDir := mount.DisplayDir
-	autoCategoryRoot := cloudRootMountNeedsAutoCategory(mount)
+	autoCategoryRoot := cloudRootMountNeedsAutoCategory(mount) && s.cloudAutoCategoryEnabled(ctx)
 	scopeIDs := s.cloudScanLibraryScopeIDs(ctx, lib, mount)
 	progress := newCloudScanProgressState()
 	progress.publish(s, lib.ID, res, "listing", true)
