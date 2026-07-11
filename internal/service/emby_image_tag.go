@@ -22,3 +22,27 @@ func embyImageTag(itemID, kind, raw string, updatedAt time.Time) string {
 	encoded := hex.EncodeToString(sum[:])
 	return itemID + "-" + encoded[:12]
 }
+
+func embyItemETag(itemID string, updatedAt time.Time, parts ...string) string {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return ""
+	}
+	stamp := ""
+	if !updatedAt.IsZero() {
+		stamp = updatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	h := sha1.New()
+	_, _ = h.Write([]byte(itemID))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(stamp))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(part))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}

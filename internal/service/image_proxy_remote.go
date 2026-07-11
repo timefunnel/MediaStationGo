@@ -55,34 +55,26 @@ func (p *ImageProxy) RemoveFailed(raw string) error {
 // Serve writes the requested image to w. Caller is expected to validate
 // the JWT before invoking it.
 func (p *ImageProxy) Serve(ctx context.Context, w http.ResponseWriter, r *http.Request, raw string) error {
-	return p.ServeWithCacheControl(ctx, w, r, raw, imageBrowserCacheControl)
-}
-
-func (p *ImageProxy) ServeWithCacheControl(ctx context.Context, w http.ResponseWriter, r *http.Request, raw, cacheControl string) error {
-	cacheControl = strings.TrimSpace(cacheControl)
-	if cacheControl == "" {
-		cacheControl = imageBrowserCacheControl
-	}
 	if isLocalImagePath(raw) {
-		return p.serveLocalImage(w, r, raw, cacheControl)
+		return p.serveLocalImage(w, r, raw)
 	}
-	return p.serveRemoteImage(ctx, w, r, raw, cacheControl)
+	return p.serveRemoteImage(ctx, w, r, raw)
 }
 
-func (p *ImageProxy) serveLocalImage(w http.ResponseWriter, r *http.Request, raw, cacheControl string) error {
+func (p *ImageProxy) serveLocalImage(w http.ResponseWriter, r *http.Request, raw string) error {
 	path := filepath.Clean(raw)
 	abs, err := filepath.Abs(path)
 	if err != nil || !p.isAllowedLocalPath(abs) {
 		servePlaceholder(w)
 		return nil
 	}
-	if !serveImageFile(w, r, filepath.Base(abs), abs, cacheControl) {
+	if !serveImageFile(w, r, filepath.Base(abs), abs, imageBrowserCacheControl) {
 		servePlaceholder(w)
 	}
 	return nil
 }
 
-func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter, r *http.Request, raw, cacheControl string) error {
+func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter, r *http.Request, raw string) error {
 	u, err := p.validateURL(raw)
 	if err != nil {
 		return err
@@ -91,7 +83,7 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 	key, cachePath, failPath := p.remoteImageCachePathsForValidated(raw)
 	forceRefresh := r.URL.Query().Get("refresh") != ""
 	p.removeUnusableImageCache(cachePath, failPath)
-	if !forceRefresh && serveImageFile(w, r, key, cachePath, cacheControl) {
+	if !forceRefresh && serveCachedImageFile(w, r, key, cachePath) {
 		return nil
 	}
 	if !forceRefresh && p.serveFreshRemoteFailure(w, failPath) {
@@ -99,7 +91,7 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 	}
 	data, ctype, contentLength, err := p.fetchAndCacheRemoteImage(ctx, raw, host, cachePath, failPath)
 	if err != nil {
-		if forceRefresh && serveImageFile(w, r, key, cachePath, cacheControl) {
+		if forceRefresh && serveCachedImageFile(w, r, key, cachePath) {
 			return nil
 		}
 		if errors.Is(err, errImageProxyRequestSetup) {
@@ -118,7 +110,7 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 		modTime = stat.ModTime()
 		w.Header().Set("ETag", imageFileETag(key, stat))
 	}
-	w.Header().Set("Cache-Control", cacheControl)
+	w.Header().Set("Cache-Control", imageBrowserCacheControl)
 	http.ServeContent(w, r, key, modTime, bytes.NewReader(data))
 	return nil
 }

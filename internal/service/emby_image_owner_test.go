@@ -61,6 +61,31 @@ func TestEmbyImageTagChangesWithArtworkURLAndUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestEmbyItemPayloadIncludesCacheMetadata(t *testing.T) {
+	svc := newTestEmbyService(t)
+	createdAt := time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	media := model.Media{
+		Base:        model.Base{ID: "movie-1", CreatedAt: createdAt, UpdatedAt: updatedAt},
+		Title:       "Movie",
+		Path:        `/media/movies/movie.mkv`,
+		PosterURL:   `https://img.example/poster.jpg`,
+		BackdropURL: `https://img.example/backdrop.jpg`,
+	}
+
+	item := svc.itemPayload(t.Context(), &media, false, 0)
+
+	if item["DateModified"] != updatedAt {
+		t.Fatalf("DateModified = %#v, want %s", item["DateModified"], updatedAt)
+	}
+	if item["Etag"] == "" {
+		t.Fatalf("Etag missing: %#v", item)
+	}
+	if item["PrimaryImageAspectRatio"] != 2.0/3.0 {
+		t.Fatalf("PrimaryImageAspectRatio = %#v, want 2/3", item["PrimaryImageAspectRatio"])
+	}
+}
+
 func TestEmbyEpisodeWithoutArtworkUsesSeriesImageOwner(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "TV", Path: `/media/tv`, Type: "tv", Enabled: true}

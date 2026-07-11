@@ -24,8 +24,6 @@ var embyPlaceholderPNG = []byte{
 	0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 }
 
-const embyDynamicImageCacheControl = "public, max-age=0, must-revalidate"
-
 // embyItemImageHandler 把 /Items/{id}/Images/Primary 等请求直接输出为图片。
 // Emby 客户端缓存图片 URL 时经常不会继续携带 token；如果重定向到受保护的
 // /api/img 会变成 401，所以这里复用 ImageProxy 但不再走 /api 路由。
@@ -51,14 +49,14 @@ func embyItemImageHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		if typ, ref, ok := service.ParseCloudArtworkURL(raw); ok {
 			c.Request = req
-			serveCloudResolvedLinkWithCacheControl(svc, c, typ, ref, embyDynamicImageCacheControl)
+			serveCloudResolvedLink(svc, c, typ, ref)
 			return
 		}
 		if svc.ImageProxy == nil {
 			embyServePlaceholderImage(c)
 			return
 		}
-		if err := svc.ImageProxy.ServeWithCacheControl(ctx, c.Writer, req, raw, embyDynamicImageCacheControl); err != nil {
+		if err := svc.ImageProxy.Serve(ctx, c.Writer, req, raw); err != nil {
 			embyServePlaceholderImage(c)
 		}
 	}

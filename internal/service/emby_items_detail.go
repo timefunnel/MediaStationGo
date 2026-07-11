@@ -218,6 +218,10 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	if backdropArtwork != "" {
 		backdropTags = append(backdropTags, embyImageTag(m.ID, "backdrop", backdropArtwork, m.UpdatedAt))
 	}
+	modifiedAt := m.UpdatedAt
+	if modifiedAt.IsZero() {
+		modifiedAt = m.CreatedAt
+	}
 
 	runTimeTicks := int64(m.DurationSec) * 10_000_000
 	durationMs := int64(m.DurationSec) * 1000
@@ -255,6 +259,8 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"Width":             m.Width,
 		"Height":            m.Height,
 		"DateCreated":       m.CreatedAt,
+		"DateModified":      modifiedAt,
+		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path),
 		"Path":              m.Path,
 		"ParentId":          parentID,
 		"SeasonId":          seasonID,
@@ -271,6 +277,9 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"UserData":     userData,
 		"MediaSources": e.mediaSourcesForItem(ctx, m, true, false),
 	}
+	if ratio, ok := e.primaryImageAspectRatio(ctx, m, primaryArtwork); ok {
+		item["PrimaryImageAspectRatio"] = ratio
+	}
 	if itemType == "Movie" {
 		for _, key := range []string{"SeasonId", "SeasonName", "SeriesId", "SeriesName", "ParentIndexNumber", "IndexNumber"} {
 			delete(item, key)
@@ -281,4 +290,17 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	}
 	embyAttachImageOwnerIDs(item)
 	return item
+}
+
+func (e *EmbyService) primaryImageAspectRatio(ctx context.Context, m *model.Media, primaryArtwork string) (float64, bool) {
+	if m == nil || strings.TrimSpace(primaryArtwork) == "" {
+		return 0, false
+	}
+	if e.mediaShouldBeEpisode(ctx, m) && strings.TrimSpace(m.BackdropURL) != "" {
+		if m.Width > 0 && m.Height > 0 {
+			return float64(m.Width) / float64(m.Height), true
+		}
+		return 16.0 / 9.0, true
+	}
+	return 2.0 / 3.0, true
 }

@@ -81,8 +81,8 @@ func TestEmbyItemImageServesWithoutAPIAuth(t *testing.T) {
 	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "image/png") {
 		t.Fatalf("expected png content type, got %q", contentType)
 	}
-	if got := w.Header().Get("Cache-Control"); got != embyDynamicImageCacheControl {
-		t.Fatalf("image Cache-Control = %q, want %q", got, embyDynamicImageCacheControl)
+	if got := w.Header().Get("Cache-Control"); got != "public, max-age=2592000, immutable" {
+		t.Fatalf("image Cache-Control = %q, want long browser cache", got)
 	}
 	if got := w.Header().Get("Pragma"); got != "" {
 		t.Fatalf("image Pragma = %q, want empty", got)
@@ -144,8 +144,8 @@ func TestEmbyItemImageServesCachedCloudArtworkWithoutResolve(t *testing.T) {
 	if location := w.Header().Get("Location"); location != "" {
 		t.Fatalf("expected direct cached image response, got redirect to %q", location)
 	}
-	if got := w.Header().Get("Cache-Control"); got != embyDynamicImageCacheControl {
-		t.Fatalf("image Cache-Control = %q, want %q", got, embyDynamicImageCacheControl)
+	if got := w.Header().Get("Cache-Control"); got != "public, max-age=2592000, immutable" {
+		t.Fatalf("image Cache-Control = %q, want long browser cache", got)
 	}
 }
 
