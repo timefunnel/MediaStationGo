@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,10 +15,12 @@ import (
 )
 
 type cloudResolveCacheEntry struct {
-	link      *cloud.DirectLink
-	expiresAt time.Time
-	hits      int
-	lastHit   time.Time
+	link         *cloud.DirectLink
+	expiresAt    time.Time
+	staleUntil   time.Time
+	refreshAfter time.Time
+	hits         int
+	lastHit      time.Time
 }
 
 type cloudResolveCall struct {
@@ -28,6 +32,10 @@ type cloudResolveCall struct {
 const (
 	cloudResolveHotHitThreshold      = 3
 	cloudResolveBackgroundRefreshMax = 30 * time.Second
+	cloudResolveRefreshMinInterval   = 30 * time.Second
+	cloudResolveRetryAttempts        = 2
+	cloudResolveRetryDelay           = 300 * time.Millisecond
+	cloudResolveRetryMaxAttemptDur   = 2 * time.Second
 )
 
 // CloudResolve resolves a cloud file reference to a direct link.
@@ -64,7 +72,7 @@ func (s *StorageConfigService) CloudResolve(ctx context.Context, typ, fileRef, c
 			call.err = err
 			return nil, err
 		}
-		link, err := p.Resolve(ctx, fileRef)
+		link, err := s.resolveCloudDirectLinkWithRetry(ctx, p, fileRef)
 		if err != nil {
 			call.err = err
 			return nil, err
@@ -88,7 +96,13 @@ func (s *StorageConfigService) cachedResolve(key, typ string) (*cloud.DirectLink
 	}
 	entry, ok := s.resolveCache[key]
 	now := time.Now()
-	if !ok || now.After(entry.expiresAt) {
+	if !ok {
+		return nil, false, false
+	}
+	if entry.staleUntil.IsZero() {
+		entry.staleUntil = entry.expiresAt
+	}
+	if now.After(entry.staleUntil) {
 		if ok {
 			delete(s.resolveCache, key)
 		}
@@ -96,11 +110,18 @@ func (s *StorageConfigService) cachedResolve(key, typ string) (*cloud.DirectLink
 	}
 	entry.hits++
 	entry.lastHit = now
-	s.resolveCache[key] = entry
+	fresh := !now.After(entry.expiresAt)
 	refreshWindow := cloudResolveHotRefreshWindow(cloudResolveCacheTTL(typ))
-	shouldRefresh := entry.hits >= cloudResolveHotHitThreshold &&
+	shouldRefresh := !fresh || (entry.hits >= cloudResolveHotHitThreshold &&
 		refreshWindow > 0 &&
-		now.Add(refreshWindow).After(entry.expiresAt)
+		now.Add(refreshWindow).After(entry.expiresAt))
+	if shouldRefresh && !entry.refreshAfter.IsZero() && now.Before(entry.refreshAfter) {
+		shouldRefresh = false
+	}
+	if shouldRefresh {
+		entry.refreshAfter = now.Add(cloudResolveRefreshMinInterval)
+	}
+	s.resolveCache[key] = entry
 	return cloneDirectLink(entry.link), true, shouldRefresh
 }
 
@@ -147,7 +168,7 @@ func (s *StorageConfigService) refreshResolveInBackground(key, typ, fileRef, cli
 			}
 			return
 		}
-		link, err := p.Resolve(ctx, fileRef)
+		link, err := s.resolveCloudDirectLinkWithRetry(ctx, p, fileRef)
 		if err != nil {
 			call.err = err
 			if s.log != nil {
@@ -164,7 +185,7 @@ func (s *StorageConfigService) storeResolvedLink(key, typ string, link *cloud.Di
 	if link == nil || strings.TrimSpace(link.URL) == "" {
 		return
 	}
-	ttl := cloudResolveCacheTTL(typ)
+	ttl, staleTTL := cloudResolveCacheDurations(typ, link)
 	if ttl <= 0 {
 		return
 	}
@@ -178,7 +199,12 @@ func (s *StorageConfigService) storeResolvedLink(key, typ string, link *cloud.Di
 	if existing, ok := s.resolveCache[key]; ok {
 		hits = existing.hits
 	}
-	s.resolveCache[key] = cloudResolveCacheEntry{link: cloneDirectLink(link), expiresAt: now.Add(ttl), hits: hits, lastHit: now}
+	expiresAt := now.Add(ttl)
+	staleUntil := now.Add(staleTTL)
+	if staleUntil.Before(expiresAt) {
+		staleUntil = expiresAt
+	}
+	s.resolveCache[key] = cloudResolveCacheEntry{link: cloneDirectLink(link), expiresAt: expiresAt, staleUntil: staleUntil, hits: hits, lastHit: now}
 }
 
 func cloudResolveHotRefreshWindow(ttl time.Duration) time.Duration {
@@ -202,6 +228,106 @@ func cloudResolveCacheTTL(typ string) time.Duration {
 	default:
 		return 5 * time.Minute
 	}
+}
+
+func cloudResolveCacheDurations(typ string, link *cloud.DirectLink) (time.Duration, time.Duration) {
+	ttl := cloudResolveCacheTTL(typ)
+	staleTTL := ttl
+	if link == nil {
+		return ttl, staleTTL
+	}
+	expiry, ok := cloudResolve115DirectLinkExpiry(link.URL)
+	if !ok {
+		return ttl, staleTTL
+	}
+	untilExpiry := time.Until(expiry)
+	if untilExpiry <= time.Minute {
+		return ttl, staleTTL
+	}
+	usable := untilExpiry - time.Minute
+	if usable > staleTTL {
+		staleTTL = minDuration(usable, 50*time.Minute)
+	}
+	if staleTTL > ttl {
+		ttl = minDuration(staleTTL, 30*time.Minute)
+	}
+	return ttl, staleTTL
+}
+
+func cloudResolve115DirectLinkExpiry(raw string) (time.Time, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil || !strings.Contains(strings.ToLower(u.Host), "115cdn.net") {
+		return time.Time{}, false
+	}
+	rawT := strings.TrimSpace(u.Query().Get("t"))
+	if rawT == "" {
+		return time.Time{}, false
+	}
+	n, err := strconv.ParseInt(rawT, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if len(rawT) >= 13 {
+		n /= 1000
+	}
+	expiry := time.Unix(n, 0)
+	if !expiry.After(time.Now()) {
+		return time.Time{}, false
+	}
+	return expiry, true
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (s *StorageConfigService) resolveCloudDirectLinkWithRetry(ctx context.Context, p cloud.Provider, fileRef string) (*cloud.DirectLink, error) {
+	var lastErr error
+	for attempt := 0; attempt < cloudResolveRetryAttempts; attempt++ {
+		start := time.Now()
+		link, err := p.Resolve(ctx, fileRef)
+		if err == nil {
+			return link, nil
+		}
+		lastErr = err
+		if attempt == cloudResolveRetryAttempts-1 || ctx.Err() != nil || !cloudResolveErrorRetryable(err) || time.Since(start) > cloudResolveRetryMaxAttemptDur {
+			break
+		}
+		timer := time.NewTimer(cloudResolveRetryDelay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
+}
+
+func cloudResolveErrorRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"timeout",
+		"tls handshake",
+		"connection reset",
+		"connection refused",
+		"temporary",
+		"eof",
+		"failed get link",
+		"bad gateway",
+		"returned http 5",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneDirectLink(link *cloud.DirectLink) *cloud.DirectLink {
