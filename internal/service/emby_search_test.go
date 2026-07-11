@@ -95,3 +95,79 @@ func TestEmbyNameStartsWithMatchesTitlePrefixOnly(t *testing.T) {
 		t.Fatalf("NameStartsWith should not behave like contains search, got %#v", items)
 	}
 }
+
+func TestEmbyGlobalSearchIgnoresClientItemTypeHints(t *testing.T) {
+	svc := newTestEmbyService(t)
+	movieLib := model.Library{Name: "电影", Path: `/media/movie`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &movieLib); err != nil {
+		t.Fatalf("create movie library: %v", err)
+	}
+	tvLib := model.Library{Name: "剧集", Path: `/media/tv`, Type: "tv", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &tvLib); err != nil {
+		t.Fatalf("create tv library: %v", err)
+	}
+	rows := []model.Media{
+		{Base: model.Base{ID: "mermaid-movie"}, LibraryID: movieLib.ID, Title: "美人鱼", Path: `/media/movie/美人鱼.mkv`},
+		{Base: model.Base{ID: "mermaid-series-ep1"}, LibraryID: tvLib.ID, Title: "美人鱼剧集", Path: `/media/tv/美人鱼剧集/Season 1/E01.mkv`, SeasonNum: 1, EpisodeNum: 1},
+	}
+	for i := range rows {
+		if err := svc.repo.DB.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+	}
+
+	out, err := svc.Items(t.Context(), ItemsParams{
+		UserID:           "user-1",
+		SearchTerm:       "美人鱼",
+		IncludeItemTypes: []string{"Movie", "Series"},
+		Recursive:        true,
+		Limit:            20,
+	})
+	if err != nil {
+		t.Fatalf("items by global search with client item type hints: %v", err)
+	}
+	items := out["Items"].([]map[string]any)
+	if len(items) != 2 {
+		t.Fatalf("global search should ignore client Movie,Series hints and include matching media rows, got %#v", items)
+	}
+	typesByID := map[string]any{}
+	for _, item := range items {
+		if id, ok := item["Id"].(string); ok {
+			typesByID[id] = item["Type"]
+		}
+	}
+	if typesByID["mermaid-movie"] != "Movie" {
+		t.Fatalf("global search with client hints dropped Movie result: %#v", items)
+	}
+	if typesByID["mermaid-series-ep1"] != "Episode" {
+		t.Fatalf("global search with client hints dropped episodic result: %#v", items)
+	}
+}
+
+func TestNormalizeEmbyGlobalSearchParamsIgnoresClientItemTypeHints(t *testing.T) {
+	cases := []struct {
+		name string
+		in   ItemsParams
+		want []string
+	}{
+		{name: "default search", in: ItemsParams{SearchTerm: "美人鱼"}, want: nil},
+		{name: "movie only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie"}}, want: nil},
+		{name: "series only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Series"}}, want: nil},
+		{name: "movie and series global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie", "Series"}}, want: nil},
+		{name: "movie and series without search", in: ItemsParams{IncludeItemTypes: []string{"Movie", "Series"}}, want: []string{"Movie", "Series"}},
+		{name: "library scoped search keeps hints", in: ItemsParams{ParentID: "library-1", SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie", "Series"}}, want: []string{"Movie", "Series"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeEmbyGlobalSearchParams(tc.in).IncludeItemTypes
+			if len(got) != len(tc.want) {
+				t.Fatalf("IncludeItemTypes len = %d, want %d: %#v", len(got), len(tc.want), got)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("IncludeItemTypes = %#v, want %#v", got, tc.want)
+				}
+			}
+		})
+	}
+}

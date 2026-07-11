@@ -153,6 +153,7 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 	if len(p.IncludeItemTypes) > 0 && !containsSupportedEmbyItemType(p.IncludeItemTypes) {
 		return emptyItemsEnvelope(p.StartIndex), nil
 	}
+	p = normalizeEmbyGlobalSearchParams(p)
 
 	if len(p.IDs) > 0 {
 		items := make([]map[string]any, 0, len(p.IDs))
@@ -212,7 +213,7 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 		}
 	}
 
-	if containsItemType(p.IncludeItemTypes, "Series") && !containsItemType(p.IncludeItemTypes, "Episode") {
+	if containsItemType(p.IncludeItemTypes, "Series") && !containsItemType(p.IncludeItemTypes, "Movie") && !containsItemType(p.IncludeItemTypes, "Episode") {
 		return e.seriesItemsForLibrary(ctx, p.ParentID, p)
 	}
 

@@ -362,7 +362,7 @@ func TestEmbyResumeItemsDefaultsToTenAndIncludesLastPlayedDate(t *testing.T) {
 		}
 	}
 
-	out, err := svc.ResumeItems(t.Context(), viewer.ID, 0)
+	out, err := svc.ResumeItems(t.Context(), viewer.ID)
 	if err != nil {
 		t.Fatalf("resume items: %v", err)
 	}
@@ -370,12 +370,95 @@ func TestEmbyResumeItemsDefaultsToTenAndIncludesLastPlayedDate(t *testing.T) {
 	if len(items) != 10 {
 		t.Fatalf("default resume item count = %d, want 10", len(items))
 	}
+	if out["TotalRecordCount"] != 12 {
+		t.Fatalf("resume total = %#v, want 12", out["TotalRecordCount"])
+	}
+	if out["StartIndex"] != 0 {
+		t.Fatalf("resume start index = %#v, want 0", out["StartIndex"])
+	}
 	if items[0]["Id"] != "resume-11" {
 		t.Fatalf("resume items should be newest first, got %#v", items[0])
+	}
+	out, err = svc.ResumeItems(t.Context(), viewer.ID)
+	if err != nil {
+		t.Fatalf("resume items with fixed limit: %v", err)
+	}
+	items = out["Items"].([]map[string]any)
+	if len(items) != 10 {
+		t.Fatalf("resume item count with fixed backend limit = %d, want 10", len(items))
 	}
 	userData := items[0]["UserData"].(map[string]any)
 	if userData["LastPlayedDate"] == "" {
 		t.Fatalf("resume item should expose LastPlayedDate: %#v", items[0])
+	}
+}
+
+func TestEmbyResumeItemsSkipsInvalidHistoryBeforePaging(t *testing.T) {
+	svc := newTestEmbyService(t)
+	viewer := &model.User{Base: model.Base{ID: "user-1"}, Username: "viewer", Role: "user", Tier: "free", IsActive: true}
+	if err := svc.repo.User.Create(t.Context(), viewer); err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+	lib := model.Library{Name: "Movies", Path: `/media/movies`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	base := time.Now().UTC()
+	validRows := []model.Media{
+		{Base: model.Base{ID: "valid-new"}, LibraryID: lib.ID, Title: "Valid New", Path: `/media/movies/valid-new.mkv`, DurationSec: 120},
+		{Base: model.Base{ID: "valid-old"}, LibraryID: lib.ID, Title: "Valid Old", Path: `/media/movies/valid-old.mkv`, DurationSec: 120},
+	}
+	for i := range validRows {
+		if err := svc.repo.DB.Create(&validRows[i]).Error; err != nil {
+			t.Fatalf("create valid media: %v", err)
+		}
+	}
+	deleted := model.Media{Base: model.Base{ID: "deleted-media"}, LibraryID: lib.ID, Title: "Deleted", Path: `/media/movies/deleted.mkv`, DurationSec: 120}
+	if err := svc.repo.DB.Create(&deleted).Error; err != nil {
+		t.Fatalf("create deleted media: %v", err)
+	}
+	if err := svc.repo.DB.Delete(&deleted).Error; err != nil {
+		t.Fatalf("soft delete media: %v", err)
+	}
+	histories := []model.PlaybackHistory{
+		{UserID: viewer.ID, MediaID: "missing-media", PositionMs: 50_000, DurationMs: 120_000, WatchedAt: base.Add(5 * time.Minute), Completed: false},
+		{UserID: viewer.ID, MediaID: deleted.ID, PositionMs: 40_000, DurationMs: 120_000, WatchedAt: base.Add(4 * time.Minute), Completed: false},
+		{UserID: viewer.ID, MediaID: "valid-new", PositionMs: 10_000, DurationMs: 120_000, WatchedAt: base.Add(3 * time.Minute), Completed: false},
+		{UserID: viewer.ID, MediaID: "valid-new", PositionMs: 30_000, DurationMs: 120_000, WatchedAt: base.Add(2 * time.Minute), Completed: false},
+		{UserID: viewer.ID, MediaID: "valid-old", PositionMs: 20_000, DurationMs: 120_000, WatchedAt: base.Add(time.Minute), Completed: false},
+	}
+	for i := range histories {
+		if err := svc.repo.DB.Create(&histories[i]).Error; err != nil {
+			t.Fatalf("create history: %v", err)
+		}
+	}
+
+	out, err := svc.ResumeItems(t.Context(), viewer.ID)
+	if err != nil {
+		t.Fatalf("resume items: %v", err)
+	}
+	items := out["Items"].([]map[string]any)
+	if len(items) != 2 {
+		t.Fatalf("resume item count = %d, want 2: %#v", len(items), items)
+	}
+	if out["TotalRecordCount"] != 2 {
+		t.Fatalf("resume total = %#v, want 2", out["TotalRecordCount"])
+	}
+	if items[0]["Id"] != "valid-new" || items[1]["Id"] != "valid-old" {
+		t.Fatalf("resume items should skip invalid history before paging and keep order, got %#v", items)
+	}
+	userData := items[0]["UserData"].(map[string]any)
+	if got := userData["PlaybackPositionTicks"]; got != int64(10_000*10_000) {
+		t.Fatalf("resume duplicate media should use newest history ticks = %#v", got)
+	}
+
+	out, err = svc.ResumeItems(t.Context(), viewer.ID, 1)
+	if err != nil {
+		t.Fatalf("resume page 2: %v", err)
+	}
+	items = out["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Id"] != "valid-old" {
+		t.Fatalf("resume start index should page visible items, got %#v", items)
 	}
 }
 

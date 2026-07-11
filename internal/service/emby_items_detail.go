@@ -9,6 +9,8 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
+const embyResumeItemsLimit = 10
+
 // Item 单条目详情。
 func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[string]any, error) {
 	if lib, err := e.repo.Library.FindByID(ctx, mediaID); err != nil {
@@ -144,29 +146,39 @@ func (e *EmbyService) latestSeriesItemsForLibrary(ctx context.Context, userID, l
 }
 
 // ResumeItems 列出有未完成播放进度的媒体。
-func (e *EmbyService) ResumeItems(ctx context.Context, userID string, limit int) (map[string]any, error) {
-	if limit <= 0 {
-		limit = 10
+func (e *EmbyService) ResumeItems(ctx context.Context, userID string, startIndexValues ...int) (map[string]any, error) {
+	limit := embyResumeItemsLimit
+	startIndex := 0
+	if len(startIndexValues) > 0 {
+		startIndex = startIndexValues[0]
 	}
-	if limit > 100 {
-		limit = 100
+	if startIndex < 0 {
+		startIndex = 0
 	}
 	var hist []model.PlaybackHistory
 	if err := e.repo.DB.WithContext(ctx).
 		Where("user_id = ? AND completed = ? AND position_ms > 0", userID, false).
-		Order("watched_at DESC, updated_at DESC, id DESC").Limit(limit).Find(&hist).Error; err != nil {
+		Order("watched_at DESC, updated_at DESC, id DESC").Find(&hist).Error; err != nil {
 		return nil, err
 	}
 	if len(hist) == 0 {
-		return map[string]any{"Items": []any{}, "TotalRecordCount": 0}, nil
+		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": startIndex}, nil
 	}
 	ids := make([]string, 0, len(hist))
-	posByID := map[string]int64{}
-	watchedAtByID := map[string]time.Time{}
+	histByID := map[string]model.PlaybackHistory{}
 	for _, h := range hist {
-		ids = append(ids, h.MediaID)
-		posByID[h.MediaID] = h.PositionMs
-		watchedAtByID[h.MediaID] = h.WatchedAt
+		mediaID := strings.TrimSpace(h.MediaID)
+		if mediaID == "" {
+			continue
+		}
+		if _, exists := histByID[mediaID]; exists {
+			continue
+		}
+		ids = append(ids, mediaID)
+		histByID[mediaID] = h
+	}
+	if len(ids) == 0 {
+		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": startIndex}, nil
 	}
 	var medias []model.Media
 	q := e.repo.DB.WithContext(ctx).Where("id IN ?", ids)
@@ -178,13 +190,19 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string, limit int)
 	for i := range medias {
 		byID[medias[i].ID] = &medias[i]
 	}
-	items := make([]map[string]any, 0, len(hist))
-	for _, h := range hist {
-		if m, ok := byID[h.MediaID]; ok {
-			items = append(items, e.itemPayload(ctx, m, false, posByID[h.MediaID], watchedAtByID[h.MediaID]))
+	visibleIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := byID[id]; ok {
+			visibleIDs = append(visibleIDs, id)
 		}
 	}
-	return map[string]any{"Items": items, "TotalRecordCount": len(items)}, nil
+	pageIDs := pageSlice(visibleIDs, startIndex, limit)
+	items := make([]map[string]any, 0, len(pageIDs))
+	for _, id := range pageIDs {
+		h := histByID[id]
+		items = append(items, e.itemPayload(ctx, byID[id], false, h.PositionMs, h.WatchedAt))
+	}
+	return map[string]any{"Items": items, "TotalRecordCount": len(visibleIDs), "StartIndex": startIndex}, nil
 }
 
 func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool, posMs int64, watchedAtValues ...time.Time) map[string]any {
