@@ -189,6 +189,11 @@ func (s *PipelineMaintenanceService) RepairEpisodeVisibility(ctx context.Context
 		}
 
 		updates := pipelineBuildEpisodeVisibilityUpdates(rows, rootCloudPath)
+		if len(updates) > 0 {
+			if err := pipelineAllowCloudMediaMaintenanceUpdates(tx); err != nil {
+				return err
+			}
+		}
 		for _, update := range updates {
 			if err := tx.Model(&model.Media{}).Where("id = ?", update.ID).Updates(map[string]any{
 				"relative_path": update.RelativePath,
@@ -347,6 +352,13 @@ func (s *PipelineMaintenanceService) resolveTarget(ctx context.Context, target P
 		rootOpenListPath = pipelineCloudPathToOpenListPath(root.Path)
 	}
 	return pipelineResolvedTarget{Category: category, LibraryID: root.LibraryID, RootID: root.ID, RootOpenListPath: rootOpenListPath}, nil
+}
+
+func pipelineAllowCloudMediaMaintenanceUpdates(tx *gorm.DB) error {
+	if tx == nil || tx.Dialector == nil || tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return tx.Exec("SELECT set_config('media_pipeline.allow_cloud_media_migration', 'on', true)").Error
 }
 
 func pipelineLoadEpisodeVisibilityRowsForUpdate(tx *gorm.DB, target pipelineResolvedTarget, mediaID string) ([]model.Media, error) {
