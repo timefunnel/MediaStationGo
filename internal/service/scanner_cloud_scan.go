@@ -80,6 +80,7 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 			provider:         typ,
 			rootDir:          target.scanDir,
 			rootDisplayDir:   target.displayDir,
+			refreshRoot:      true,
 			autoCategoryRoot: autoCategoryRoot,
 			progress:         progress,
 			result:           res,
@@ -290,7 +291,7 @@ func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []c
 
 func (s *ScannerService) warmCloudScanTargetAncestors(ctx context.Context, provider, rootDir, targetDir string) error {
 	for _, dir := range cloudScanTargetAncestorDirs(rootDir, targetDir) {
-		if _, err := s.storage.CloudList(ctx, provider, dir); err != nil {
+		if _, err := s.storage.CloudListRefresh(ctx, provider, dir); err != nil {
 			return err
 		}
 	}

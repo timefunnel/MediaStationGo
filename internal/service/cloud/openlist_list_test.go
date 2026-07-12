@@ -116,6 +116,47 @@ func TestOpenListListUsesAPIUsernamePasswordWithoutWebDAVFallback(t *testing.T) 
 	}
 }
 
+func TestOpenListListRefreshUsesAPIRefreshFlag(t *testing.T) {
+	refreshValues := []bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fs/list" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body struct {
+			Path    string `json:"path"`
+			Refresh bool   `json:"refresh"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode list body: %v", err)
+		}
+		if body.Path != "/115/adult" {
+			t.Fatalf("path = %q, want /115/adult", body.Path)
+		}
+		refreshValues = append(refreshValues, body.Refresh)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
+	}))
+	defer srv.Close()
+
+	p, err := New(TypeOpenList, map[string]any{"server": srv.URL, "token": "alist-token"}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.List(context.Background(), "/115/adult"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	refresher, ok := p.(RefreshableProvider)
+	if !ok {
+		t.Fatal("openlist should support refreshable provider")
+	}
+	if _, err := refresher.ListRefresh(context.Background(), "/115/adult"); err != nil {
+		t.Fatalf("refresh list: %v", err)
+	}
+	if len(refreshValues) != 2 || refreshValues[0] || !refreshValues[1] {
+		t.Fatalf("refresh flags = %#v, want [false true]", refreshValues)
+	}
+}
+
 func TestOpenListMutableProviderUsesAPI(t *testing.T) {
 	var mkdirPath, renamePath, renameName, moveSrcDir, moveDstDir string
 	var moveNames []string

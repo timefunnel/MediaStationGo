@@ -70,6 +70,13 @@ type Provider interface {
 	Resolve(ctx context.Context, fileRef string) (*DirectLink, error)
 }
 
+// RefreshableProvider can force-refresh a directory listing from the upstream
+// source instead of reusing the bridge cache.
+type RefreshableProvider interface {
+	Provider
+	ListRefresh(ctx context.Context, dirID string) ([]FileEntry, error)
+}
+
 // MutableProvider is implemented by cloud bridges that support safe folder
 // management through their official API or standard WebDAV methods.
 type MutableProvider interface {

@@ -16,6 +16,7 @@ type cloudScanCandidateRequest struct {
 	provider         string
 	rootDir          string
 	rootDisplayDir   string
+	refreshRoot      bool
 	autoCategoryRoot bool
 	progress         *cloudScanProgressState
 	result           *ScanResult
@@ -89,7 +90,12 @@ func (c *cloudScanCandidateCollector) walk(dirID, displayDir string, inheritedMe
 	}
 	defer release()
 
-	entries, err := c.scanner.storage.CloudList(c.ctx, c.req.provider, dirID)
+	var entries []cloud.FileEntry
+	if c.req.refreshRoot && dirID == c.req.rootDir {
+		entries, err = c.scanner.storage.CloudListRefresh(c.ctx, c.req.provider, dirID)
+	} else {
+		entries, err = c.scanner.storage.CloudList(c.ctx, c.req.provider, dirID)
+	}
 	if err != nil {
 		return c.handleListError(dirID, err)
 	}
@@ -172,10 +178,10 @@ func (c *cloudScanCandidateCollector) addFileCandidate(displayDir string, entry 
 	displayPath := joinCloudDisplayPath(displayDir, entry.Name)
 	path := cloudMediaPath(c.req.provider, displayPath)
 	candidate := cloudCandidate{
-		ref:       ref,
-		name:      entry.Name,
-		size:      entry.Size,
-		path:      path,
+		ref:  ref,
+		name: entry.Name,
+		size: entry.Size,
+		path: path,
 	}
 	if c.req.autoCategoryRoot {
 		candidate.categoryDisplayDir, candidate.categoryScanDir = cloudAutoCategoryDirsForMediaPath(path)

@@ -12,6 +12,23 @@ import (
 )
 
 func (p *cloudDrive2Provider) listOpenListAPI(ctx context.Context, dir string) ([]FileEntry, error) {
+	return p.listOpenListAPIWithRefresh(ctx, dir, false)
+}
+
+func (p *cloudDrive2Provider) ListRefresh(ctx context.Context, dir string) ([]FileEntry, error) {
+	if err := p.validate(); err != nil {
+		return nil, err
+	}
+	if p.typ != TypeOpenList {
+		return p.List(ctx, dir)
+	}
+	if p.apiBase == nil || !p.hasOpenListAPICredentials() {
+		return nil, fmt.Errorf("%s: api credentials are required to refresh OpenList directory %s", p.name, normalizeCloudDAVPath(dir))
+	}
+	return p.listOpenListAPIWithRefresh(ctx, dir, true)
+}
+
+func (p *cloudDrive2Provider) listOpenListAPIWithRefresh(ctx context.Context, dir string, refresh bool) ([]FileEntry, error) {
 	token, err := p.openListAPIToken(ctx)
 	if err != nil {
 		return nil, err
@@ -25,7 +42,7 @@ func (p *cloudDrive2Provider) listOpenListAPI(ctx context.Context, dir string) (
 			"password": "",
 			"page":     pageNum,
 			"per_page": pageSize,
-			"refresh":  false,
+			"refresh":  refresh,
 		}
 		body, _ := json.Marshal(payload)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/list"), bytes.NewReader(body))

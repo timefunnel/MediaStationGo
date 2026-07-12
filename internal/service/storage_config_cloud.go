@@ -38,6 +38,20 @@ func (s *StorageConfigService) CloudList(ctx context.Context, typ, dirID string)
 	return p.List(ctx, dirID)
 }
 
+// CloudListRefresh lists entries while explicitly refreshing the upstream cache
+// when the provider supports it.
+func (s *StorageConfigService) CloudListRefresh(ctx context.Context, typ, dirID string) ([]cloud.FileEntry, error) {
+	p, err := s.CloudProvider(ctx, typ)
+	if err != nil {
+		return nil, err
+	}
+	refresher, ok := p.(cloud.RefreshableProvider)
+	if !ok {
+		return nil, fmt.Errorf("%s storage does not support refresh list", typ)
+	}
+	return refresher.ListRefresh(ctx, dirID)
+}
+
 func (s *StorageConfigService) CloudMkdir(ctx context.Context, typ, parentDir, name string) (*cloud.FileEntry, error) {
 	p, err := s.CloudProvider(ctx, typ)
 	if err != nil {
