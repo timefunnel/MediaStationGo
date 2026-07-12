@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShukeBta/MediaStationGo/internal/config"
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 	"go.uber.org/zap"
@@ -46,6 +47,71 @@ func TestPipelineIngestFindsMediaByTargetPath(t *testing.T) {
 	}
 	if job.Result.Media == nil || job.Result.Media.ID != main.ID || job.Result.Media.MatchMode != "path" {
 		t.Fatalf("unexpected media result: %#v", job.Result.Media)
+	}
+}
+
+func TestPipelineIngestScansOnlyTargetOpenListPath(t *testing.T) {
+	requested := []string{}
+	upstream := newOpenListAPIServer(t, func(path string, page, perPage int) ([]openListTestEntry, int) {
+		requested = append(requested, path)
+		switch path {
+		case "/115/adult":
+			return []openListTestEntry{{Name: "EBWH-285", IsDir: true}, {Name: "OTHER-001", IsDir: true}}, 2
+		case "/115/adult/EBWH-285":
+			return []openListTestEntry{{Name: "EBWH-285.mp4", Size: 5000}}, 1
+		case "/115/adult/OTHER-001":
+			t.Fatalf("targeted ingest should not recursively scan sibling directory %q", path)
+			return nil, 0
+		default:
+			t.Fatalf("unexpected openlist path %q", path)
+			return nil, 0
+		}
+	})
+	defer upstream.Close()
+
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.Setting{}, &model.StorageConfig{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "openlist-token"}}); err != nil {
+		t.Fatal(err)
+	}
+	libPath := BuildCloudLibraryPath("openlist", "/115/adult", "/115/adult")
+	lib := model.Library{Name: "Adult", Path: libPath, Type: "adult", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	root := model.LibraryRoot{LibraryID: lib.ID, Name: "Adult", Path: libPath, Enabled: true}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	scanner := NewScannerService(&config.Config{}, log, repos, NewHub(log), nil, nil)
+	scanner.SetStorageConfig(storage)
+	maintenance := NewPipelineMaintenanceService(log, repos)
+	svc := NewPipelineIngestService(log, repos, scanner, maintenance, nil)
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "adult", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/adult"},
+		Title:                     "EBWH-285",
+		TargetOpenListPaths:       []string{"/115/adult/EBWH-285"},
+		RequireTargetPath:         true,
+		Scan:                      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusCompleted {
+		t.Fatalf("job status=%s error=%s", job.Status, job.Error)
+	}
+	if job.Result.Scan == nil || job.Result.Scan.Visited != 1 || job.Result.Scan.Added != 1 {
+		t.Fatalf("scan result = %#v, want visited=1 added=1", job.Result.Scan)
+	}
+	if job.Result.Media == nil || job.Result.Media.MatchMode != "path" || job.Result.Media.Path != "cloud://openlist/115/adult/EBWH-285/EBWH-285.mp4" {
+		t.Fatalf("unexpected media result: %#v", job.Result.Media)
+	}
+	if len(requested) != 2 || requested[0] != "/115/adult" || requested[1] != "/115/adult/EBWH-285" {
+		t.Fatalf("openlist paths requested = %#v, want parent then target only", requested)
 	}
 }
 

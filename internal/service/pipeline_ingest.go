@@ -203,15 +203,19 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		if s.scanner == nil {
 			return errors.New("scanner service unavailable")
 		}
-		s.updateJob(id, "scan", "scanning library root", nil)
+		scanMessage := "scanning library root"
+		if len(req.TargetOpenListPaths) > 0 {
+			scanMessage = "scanning target path"
+		}
+		s.updateJob(id, "scan", scanMessage, nil)
 		if task != nil {
-			task.Update(TaskUpdate{Stage: "scan", Message: "scanning library root"})
+			task.Update(TaskUpdate{Stage: "scan", Message: scanMessage})
 		}
 		finish, ok := s.scanner.TryBeginLocalScan("pipeline-ingest:" + target.LibraryID + ":" + target.RootID)
 		if !ok {
 			return errors.New("library root scan already running")
 		}
-		scanResult, scanErr := s.scanner.ScanLibraryRoot(ctx, target.LibraryID, target.RootID)
+		scanResult, scanErr := s.scanForPipelineIngest(ctx, target, req)
 		finish()
 		if scanResult != nil {
 			summary := pipelineIngestScanSummary(scanResult)
@@ -261,6 +265,16 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		})
 	}
 	return nil
+}
+
+func (s *PipelineIngestService) scanForPipelineIngest(ctx context.Context, target pipelineResolvedTarget, req PipelineIngestRequest) (*ScanResult, error) {
+	if len(req.TargetOpenListPaths) > 0 {
+		res, handled, err := s.scanner.ScanLibraryRootOpenListTargets(ctx, target.LibraryID, target.RootID, req.TargetOpenListPaths)
+		if handled || err != nil {
+			return res, err
+		}
+	}
+	return s.scanner.ScanLibraryRoot(ctx, target.LibraryID, target.RootID)
 }
 
 func (s *PipelineIngestService) findMedia(ctx context.Context, target pipelineResolvedTarget, req PipelineIngestRequest) (model.Media, string, string, error) {

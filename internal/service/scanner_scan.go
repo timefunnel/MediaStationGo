@@ -38,6 +38,33 @@ func (s *ScannerService) ScanLibraryRoot(ctx context.Context, libraryID, rootID 
 	return s.scanLocalLibraryRoot(ctx, lib, root, true)
 }
 
+func (s *ScannerService) ScanLibraryRootOpenListTargets(ctx context.Context, libraryID, rootID string, openListPaths []string) (*ScanResult, bool, error) {
+	lib, err := s.repo.Library.FindByID(ctx, libraryID)
+	if err != nil {
+		return nil, false, err
+	}
+	if lib == nil {
+		return nil, false, errors.New("library not found")
+	}
+	root, err := s.repo.Library.FindRootByID(ctx, libraryID, rootID)
+	if err != nil {
+		return nil, false, err
+	}
+	if root == nil {
+		return nil, false, errors.New("library root not found")
+	}
+	mount, ok := ParseCloudLibraryMount(root.Path)
+	if !ok || mount.Provider != "openlist" {
+		return nil, false, nil
+	}
+	targets := cloudScanTargetsForOpenListPaths(mount, openListPaths)
+	if len(targets) == 0 {
+		return nil, false, nil
+	}
+	res, err := s.scanCloudLibraryRootTargets(ctx, lib, root, mount, targets, true)
+	return res, true, err
+}
+
 // ScanLibraryWithoutAutoScrape walks a library without kicking off online
 // metadata enrichment. Cloud mounts can contain very large trees; keeping mount
 // scans import-only prevents scraper bursts from overwhelming small NAS boxes.
