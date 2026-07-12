@@ -34,6 +34,12 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	if dmmPoster := adultDMMPosterFromSampleURL(match.BackdropURL); dmmPoster != "" {
 		match.PosterURL = dmmPoster
 	}
+	if mgPoster, mgBackdrop := adultMGStageArtworkFromSampleURL(match.BackdropURL); mgPoster != "" {
+		match.PosterURL = mgPoster
+		if mgBackdrop != "" {
+			match.BackdropURL = mgBackdrop
+		}
+	}
 	match.Year = firstYearInText(body)
 	match.Rating = firstRatingInText(body)
 	return match
@@ -95,6 +101,29 @@ func adultDMMPosterFromSampleURL(raw string) string {
 		}
 	}
 	return ""
+}
+
+func adultMGStageArtworkFromSampleURL(raw string) (string, string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || !strings.Contains(strings.ToLower(u.Host), "image.mgstage.com") {
+		return "", ""
+	}
+	lastSlash := strings.LastIndex(u.Path, "/")
+	file := u.Path
+	dir := ""
+	if lastSlash >= 0 {
+		dir = u.Path[:lastSlash]
+		file = u.Path[lastSlash+1:]
+	}
+	lowerFile := strings.ToLower(file)
+	const prefix = "cap_e_0_"
+	if !strings.HasPrefix(lowerFile, prefix) || !strings.HasSuffix(lowerFile, ".jpg") {
+		return "", ""
+	}
+	poster := u.String()
+	backdropURL := *u
+	backdropURL.Path = strings.TrimRight(dir, "/") + "/pb_e_" + file[len(prefix):]
+	return poster, backdropURL.String()
 }
 
 func adultAttrs(raw string) map[string]string {

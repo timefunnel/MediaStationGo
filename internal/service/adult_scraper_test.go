@@ -53,9 +53,9 @@ func TestParseAdultDetailHTML(t *testing.T) {
 
 func TestParseAdultDetailHTMLDerivesDMMPoster(t *testing.T) {
 	html := `<html>
-<h3>NACR-833 测试标题</h3>
-<a class="sample-box" href="https://pics.dmm.co.jp/digital/video/h_237nacr00833/h_237nacr00833jp-1.jpg"></a>
-</html>`
+	<h3>NACR-833 测试标题</h3>
+	<a class="sample-box" href="https://pics.dmm.co.jp/digital/video/h_237nacr00833/h_237nacr00833jp-1.jpg"></a>
+	</html>`
 
 	got := parseAdultDetailHTML(html, "NACR-833", "javbus", "https://www.javbus.com/NACR-833")
 	if got == nil {
@@ -63,6 +63,25 @@ func TestParseAdultDetailHTMLDerivesDMMPoster(t *testing.T) {
 	}
 	if got.PosterURL != "https://pics.dmm.co.jp/digital/video/h_237nacr00833/h_237nacr00833pl.jpg" {
 		t.Fatalf("PosterURL = %q", got.PosterURL)
+	}
+}
+
+func TestParseAdultDetailHTMLClassifiesMGStageArtwork(t *testing.T) {
+	html := `<html>
+	<h3>ABF-246 测试标题</h3>
+	<a class="bigImage" href="https://www.javbus.com/pics/cover/bima_b.jpg"></a>
+	<a class="sample-box" href="https://image.mgstage.com/images/prestige/abf/246/cap_e_0_abf-246.jpg"></a>
+	</html>`
+
+	got := parseAdultDetailHTML(html, "ABF-246", "javbus", "https://www.javbus.com/ABF-246")
+	if got == nil {
+		t.Fatal("parseAdultDetailHTML returned nil")
+	}
+	if got.PosterURL != "https://image.mgstage.com/images/prestige/abf/246/cap_e_0_abf-246.jpg" {
+		t.Fatalf("PosterURL = %q", got.PosterURL)
+	}
+	if got.BackdropURL != "https://image.mgstage.com/images/prestige/abf/246/pb_e_abf-246.jpg" {
+		t.Fatalf("BackdropURL = %q", got.BackdropURL)
 	}
 }
 
