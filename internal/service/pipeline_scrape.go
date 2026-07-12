@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
@@ -31,12 +33,13 @@ type PipelineScrapeRequest struct {
 }
 
 type PipelineScrapeResult struct {
-	Mode       string               `json:"mode"`
-	Query      string               `json:"query,omitempty"`
-	MatchCount int                  `json:"match_count,omitempty"`
-	Match      *ExternalMediaResult `json:"match,omitempty"`
-	MediaID    string               `json:"media_id"`
-	MediaTitle string               `json:"media_title,omitempty"`
+	Mode         string               `json:"mode"`
+	Query        string               `json:"query,omitempty"`
+	MatchCount   int                  `json:"match_count,omitempty"`
+	Match        *ExternalMediaResult `json:"match,omitempty"`
+	MediaID      string               `json:"media_id"`
+	MediaTitle   string               `json:"media_title,omitempty"`
+	AppliedCount int                  `json:"applied_count,omitempty"`
 }
 
 func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req PipelineScrapeRequest) (PipelineScrapeResult, error) {
@@ -83,6 +86,11 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 			}
 			if refreshed != nil {
 				result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
+				propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
+				if err != nil {
+					return PipelineScrapeResult{}, err
+				}
+				result.AppliedCount = 1 + propagated
 			}
 			return result, nil
 		}
@@ -95,8 +103,87 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 	result := PipelineScrapeResult{Mode: PipelineScrapeModeSmart, MediaID: mediaID}
 	if refreshed != nil {
 		result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
+		propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
+		if err != nil {
+			return PipelineScrapeResult{}, err
+		}
+		result.AppliedCount = 1 + propagated
 	}
 	return result, nil
+}
+
+func (s *PipelineScrapeService) propagateEpisodeMatch(ctx context.Context, media *model.Media, refreshed *model.Media, req PipelineScrapeRequest) (int, error) {
+	category := normalizePipelineCategory(req.Category)
+	if category != "tv" && category != "anime" {
+		return 0, nil
+	}
+	if s == nil || s.repos == nil || s.repos.DB == nil || media == nil || refreshed == nil || refreshed.ScrapeStatus != "matched" {
+		return 0, nil
+	}
+	folder := pipelineScrapeParentPath(media.Path)
+	if folder == "" || folder == "/" {
+		return 0, nil
+	}
+	updates := map[string]any{
+		"title":         refreshed.Title,
+		"overview":      refreshed.Overview,
+		"poster_url":    refreshed.PosterURL,
+		"backdrop_url":  refreshed.BackdropURL,
+		"rating":        refreshed.Rating,
+		"year":          refreshed.Year,
+		"scrape_status": refreshed.ScrapeStatus,
+		"updated_at":    time.Now(),
+	}
+	if refreshed.OriginalName != "" {
+		updates["original_name"] = refreshed.OriginalName
+	}
+	if refreshed.ReleaseDate != "" {
+		updates["release_date"] = refreshed.ReleaseDate
+	}
+	if refreshed.TMDbID > 0 {
+		updates["tm_db_id"] = refreshed.TMDbID
+	}
+	if refreshed.BangumiID > 0 {
+		updates["bangumi_id"] = refreshed.BangumiID
+	}
+	if refreshed.DoubanID != "" {
+		updates["douban_id"] = refreshed.DoubanID
+	}
+	if refreshed.TheTVDBID != "" {
+		updates["thetvdb_id"] = refreshed.TheTVDBID
+	}
+	if refreshed.Languages != "" {
+		updates["languages"] = refreshed.Languages
+	}
+	if refreshed.Countries != "" {
+		updates["countries"] = refreshed.Countries
+	}
+	if refreshed.Genres != "" {
+		updates["genres"] = refreshed.Genres
+	}
+	if refreshed.NSFW {
+		updates["nsfw"] = refreshed.NSFW
+	}
+	query := s.repos.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("library_id = ? AND id <> ?", media.LibraryID, media.ID).
+		Where("path LIKE ?", folder+"/%")
+	if strings.TrimSpace(media.LibraryRootID) != "" {
+		query = query.Where("library_root_id = ?", media.LibraryRootID)
+	}
+	res := query.Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return int(res.RowsAffected), nil
+}
+
+func pipelineScrapeParentPath(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	idx := strings.LastIndex(value, "/")
+	if idx <= 0 {
+		return ""
+	}
+	return value[:idx]
 }
 
 func pipelineScrapeOptions() ScrapeOptions {

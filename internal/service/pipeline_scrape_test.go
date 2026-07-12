@@ -11,6 +11,54 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestPipelineScrapePropagatesEpisodeMetadataToSiblingRows(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	svc := NewPipelineScrapeService(repos, nil)
+
+	lib := model.Library{Name: "TV", Path: "cloud://openlist/115/剧集", Type: "tv", Enabled: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := model.LibraryRoot{LibraryID: lib.ID, Name: "TV", Path: "cloud://openlist/115/剧集", Enabled: true}
+	if err := repos.DB.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Noisy", Path: "cloud://openlist/115/剧集/低智商犯罪/S01E01.mkv", SeasonNum: 1, EpisodeNum: 1, EpisodeTitle: "第1集", ScrapeStatus: "pending"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "低智商犯罪", Path: "cloud://openlist/115/剧集/低智商犯罪/S01E02.mkv", SeasonNum: 1, EpisodeNum: 2, EpisodeTitle: "第2集", ScrapeStatus: "matched", TMDbID: 272432, PosterURL: "/cache/poster.jpg", BackdropURL: "/cache/backdrop.jpg"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Noisy", Path: "cloud://openlist/115/剧集/低智商犯罪/S01E03.mkv", SeasonNum: 1, EpisodeNum: 3, EpisodeTitle: "第3集", ScrapeStatus: "pending"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Other", Path: "cloud://openlist/115/剧集/其他剧/S01E01.mkv", SeasonNum: 1, EpisodeNum: 1, ScrapeStatus: "pending"},
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.propagateEpisodeMatch(t.Context(), &rows[1], &rows[1], PipelineScrapeRequest{Category: "tv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != 2 {
+		t.Fatalf("updated=%d, want 2 sibling rows", updated)
+	}
+
+	var got []model.Media
+	if err := repos.DB.Where("library_id = ?", lib.ID).Order("path").Find(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range got[:3] {
+		if row.Title != "低智商犯罪" || row.ScrapeStatus != "matched" || row.TMDbID != 272432 || row.PosterURL != "/cache/poster.jpg" {
+			t.Fatalf("episode metadata not propagated: %#v", row)
+		}
+		if row.EpisodeNum <= 0 || row.EpisodeTitle == "" {
+			t.Fatalf("episode identity should be preserved: %#v", row)
+		}
+	}
+	if got[3].Title != "Other" || got[3].ScrapeStatus != "pending" {
+		t.Fatalf("unrelated row changed: %#v", got[3])
+	}
+}
+
 func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 	withAdultDefaultBases(t, nil)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
