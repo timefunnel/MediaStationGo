@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
-	"go.uber.org/zap"
 )
 
 const (
@@ -15,14 +14,12 @@ const (
 )
 
 type PipelineScrapeService struct {
-	log       *zap.Logger
-	repos     *repository.Container
-	scraper   *ScraperService
-	organizer *OrganizerService
+	repos   *repository.Container
+	scraper *ScraperService
 }
 
-func NewPipelineScrapeService(log *zap.Logger, repos *repository.Container, scraper *ScraperService, organizer *OrganizerService) *PipelineScrapeService {
-	return &PipelineScrapeService{log: log, repos: repos, scraper: scraper, organizer: organizer}
+func NewPipelineScrapeService(repos *repository.Container, scraper *ScraperService) *PipelineScrapeService {
+	return &PipelineScrapeService{repos: repos, scraper: scraper}
 }
 
 type PipelineScrapeRequest struct {
@@ -34,13 +31,12 @@ type PipelineScrapeRequest struct {
 }
 
 type PipelineScrapeResult struct {
-	Mode         string               `json:"mode"`
-	Query        string               `json:"query,omitempty"`
-	MatchCount   int                  `json:"match_count,omitempty"`
-	Match        *ExternalMediaResult `json:"match,omitempty"`
-	MediaID      string               `json:"media_id"`
-	MediaTitle   string               `json:"media_title,omitempty"`
-	Reclassified int                  `json:"reclassified,omitempty"`
+	Mode       string               `json:"mode"`
+	Query      string               `json:"query,omitempty"`
+	MatchCount int                  `json:"match_count,omitempty"`
+	Match      *ExternalMediaResult `json:"match,omitempty"`
+	MediaID    string               `json:"media_id"`
+	MediaTitle string               `json:"media_title,omitempty"`
 }
 
 func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req PipelineScrapeRequest) (PipelineScrapeResult, error) {
@@ -88,7 +84,6 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 			if refreshed != nil {
 				result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
 			}
-			result.Reclassified = s.reclassify(ctx, mediaID, manualReq.MediaType)
 			return result, nil
 		}
 	}
@@ -101,7 +96,6 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 	if refreshed != nil {
 		result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
 	}
-	result.Reclassified = s.reclassify(ctx, mediaID, "")
 	return result, nil
 }
 
@@ -133,22 +127,4 @@ func pipelineManualScrapeRequestFromMatch(match ExternalMediaResult) ManualScrap
 		NSFW:          match.NSFW,
 		EpisodeImages: &episodeArtwork,
 	}
-}
-
-func (s *PipelineScrapeService) reclassify(ctx context.Context, mediaID, mediaType string) int {
-	if s == nil || s.organizer == nil {
-		return 0
-	}
-	options := MediaCategoryReclassifyOptions{MediaIDs: []string{mediaID}}
-	if strings.TrimSpace(mediaType) != "" {
-		options.MediaTypeHints = map[string]string{mediaID: strings.TrimSpace(mediaType)}
-	}
-	result, err := s.organizer.ReclassifyMisclassifiedMedia(ctx, options)
-	if err != nil {
-		if s.log != nil {
-			s.log.Warn("pipeline scrape reclassify media failed", zap.String("media_id", mediaID), zap.Error(err))
-		}
-		return 0
-	}
-	return result.Reclassified
 }

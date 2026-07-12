@@ -36,7 +36,7 @@ func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 	}
 	log := zap.NewNop()
 	scraper := NewScraperService(&config.Config{}, log, repos, nil, nil, nil, nil, NewHub(log), NewAdultProvider(log, apiConfig))
-	svc := NewPipelineScrapeService(log, repos, scraper, NewOrganizerService(&config.Config{}, log, repos))
+	svc := NewPipelineScrapeService(repos, scraper)
 
 	lib := model.Library{Name: "Adult", Path: "cloud://openlist/115/adult", Type: "adult", Enabled: true}
 	if err := repos.DB.Create(&lib).Error; err != nil {
