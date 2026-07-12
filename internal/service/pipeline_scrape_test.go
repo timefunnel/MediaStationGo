@@ -20,7 +20,7 @@ func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 			_, _ = w.Write([]byte(`<a class="box" href="/v/mide949"><strong>MIDE-949 manual candidate</strong></a>`))
 		case "/v/mide949":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte(`<h2 class="title"><strong>MIDE-949 correct title</strong></h2><img class="video-cover" src="/cover.jpg">`))
+			_, _ = w.Write([]byte(`<h2 class="title"><strong>correct title</strong></h2><img class="video-cover" src="/cover.jpg">`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -65,7 +65,7 @@ func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 	if err := repos.DB.First(&got, "id = ?", media.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if got.Title != "MIDE-949 correct title" || got.ScrapeStatus != "matched" {
+	if got.Title != "correct title" || got.ScrapeStatus != "matched" {
 		t.Fatalf("manual match was not applied: title=%q status=%q", got.Title, got.ScrapeStatus)
 	}
 }
