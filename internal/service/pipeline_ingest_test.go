@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +116,49 @@ func TestPipelineIngestScansOnlyTargetOpenListPath(t *testing.T) {
 	}
 	if !requested[0].Refresh || !requested[1].Refresh {
 		t.Fatalf("openlist refresh flags = %#v, want parent and target refreshed", requested)
+	}
+}
+
+func TestPipelineIngestRejectsUnhandledTargetOpenListPaths(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	lib := model.Library{Name: "Local", Path: "/media/local", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	root := model.LibraryRoot{LibraryID: lib.ID, Name: "Local", Path: "/media/local", Enabled: true}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	scanner := NewScannerService(&config.Config{}, log, repos, NewHub(log), nil, nil)
+	maintenance := NewPipelineMaintenanceService(log, repos)
+	svc := NewPipelineIngestService(log, repos, scanner, maintenance, nil)
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{
+			Category:         "movie",
+			LibraryID:        lib.ID,
+			RootID:           root.ID,
+			RootOpenListPath: "/115/movie",
+		},
+		Title:               "Movie",
+		TargetOpenListPaths: []string{"/115/movie/Movie"},
+		RequireTargetPath:   true,
+		Scan:                true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusFailed {
+		t.Fatalf("job status=%s error=%s, want failed", job.Status, job.Error)
+	}
+	if !strings.Contains(job.Error, "target_openlist_paths") {
+		t.Fatalf("job error = %q, want target_openlist_paths error", job.Error)
+	}
+	if job.Result.Scan != nil {
+		t.Fatalf("scan result = %#v, want no fallback root scan", job.Result.Scan)
 	}
 }
 

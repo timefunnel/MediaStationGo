@@ -273,6 +273,7 @@ func (s *PipelineIngestService) scanForPipelineIngest(ctx context.Context, targe
 		if handled || err != nil {
 			return res, err
 		}
+		return nil, errors.New("target_openlist_paths were provided but could not be handled by the OpenList target scanner")
 	}
 	return s.scanner.ScanLibraryRoot(ctx, target.LibraryID, target.RootID)
 }
