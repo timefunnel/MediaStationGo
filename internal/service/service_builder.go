@@ -114,6 +114,7 @@ func (b *serviceContainerBuilder) initContentServices() {
 	b.c.Media = NewMediaService(b.cfg, b.log, b.repos).SetRuntimeCache(b.c.Cache)
 	b.c.PipelineMaintenance = NewPipelineMaintenanceService(b.log, b.repos)
 	b.c.PipelineIngest = NewPipelineIngestService(b.log, b.repos, b.c.Scan, b.c.PipelineMaintenance, b.c.Tasks)
+	b.c.PipelineScrape = NewPipelineScrapeService(b.log, b.repos, b.c.Scraper, b.c.Organizer)
 	b.c.Stream = NewStreamService(b.cfg, b.log, b.repos, b.c.Transcoder)
 	b.c.Playback = NewPlaybackService(b.log, b.repos)
 	b.c.Subtitle = NewSubtitleService(b.log, b.repos)
