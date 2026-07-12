@@ -76,6 +76,7 @@ type Container struct {
 	Sessions            *SessionTrackerService
 	RecognitionWords    *RecognitionWordsService
 	PipelineMaintenance *PipelineMaintenanceService
+	PipelineIngest      *PipelineIngestService
 
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
