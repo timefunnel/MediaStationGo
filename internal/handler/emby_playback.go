@@ -18,7 +18,7 @@ func embyPlaybackInfoHandler(svc *service.Container) gin.HandlerFunc {
 		if uid == "" {
 			uid = embyUserID(c)
 		}
-		out, err := svc.Emby.PlaybackInfo(c.Request.Context(), c.Param("id"), uid)
+		out, err := svc.Emby.PlaybackInfoForClient(c.Request.Context(), c.Param("id"), uid, c.Request.UserAgent())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

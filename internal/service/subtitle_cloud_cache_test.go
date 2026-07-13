@@ -113,6 +113,38 @@ func TestCloudSubtitleDiscoveryCacheCollapsesConcurrentLoads(t *testing.T) {
 	}
 }
 
+func TestCloudSubtitleWarmupStartsOneBackgroundLoadPerMedia(t *testing.T) {
+	var loads atomic.Int32
+	release := make(chan struct{})
+	cache := newCloudSubtitleDiscoveryCache(time.Hour)
+	cache.load = func(context.Context, *SubtitleService, model.Media) ([]SubtitleTrack, error) {
+		loads.Add(1)
+		<-release
+		return []SubtitleTrack{}, nil
+	}
+	svc := &SubtitleService{cloudCache: cache}
+	media := testCloudSubtitleMedia("media-warm", "openlist")
+	first := svc.warmCloudSubtitles(media)
+	second := svc.warmCloudSubtitles(media)
+	if first != second {
+		t.Fatal("concurrent warmups should share one completion channel")
+	}
+	deadline := time.Now().Add(time.Second)
+	for loads.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if loads.Load() != 1 {
+		close(release)
+		t.Fatalf("loads=%d, want 1", loads.Load())
+	}
+	close(release)
+	select {
+	case <-first:
+	case <-time.After(time.Second):
+		t.Fatal("warmup did not finish")
+	}
+}
+
 func TestCloudSubtitleDiscoveryCacheInvalidatesByMediaAndProvider(t *testing.T) {
 	var loads atomic.Int32
 	cache := newCloudSubtitleDiscoveryCache(time.Hour)

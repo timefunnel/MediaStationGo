@@ -36,6 +36,7 @@ const (
 	cloudResolveRetryAttempts        = 2
 	cloudResolveRetryDelay           = 300 * time.Millisecond
 	cloudResolveRetryMaxAttemptDur   = 2 * time.Second
+	cloudResolveCacheMaxEntries      = 2048
 )
 
 // CloudResolve resolves a cloud file reference to a direct link.
@@ -195,6 +196,7 @@ func (s *StorageConfigService) storeResolvedLink(key, typ string, link *cloud.Di
 		s.resolveCache = make(map[string]cloudResolveCacheEntry)
 	}
 	now := time.Now()
+	s.pruneResolveCacheLocked(now, key)
 	hits := 0
 	if existing, ok := s.resolveCache[key]; ok {
 		hits = existing.hits
@@ -205,6 +207,41 @@ func (s *StorageConfigService) storeResolvedLink(key, typ string, link *cloud.Di
 		staleUntil = expiresAt
 	}
 	s.resolveCache[key] = cloudResolveCacheEntry{link: cloneDirectLink(link), expiresAt: expiresAt, staleUntil: staleUntil, hits: hits, lastHit: now}
+}
+
+func (s *StorageConfigService) pruneResolveCacheLocked(now time.Time, incomingKey string) {
+	if _, exists := s.resolveCache[incomingKey]; exists {
+		return
+	}
+	if len(s.resolveCache) < cloudResolveCacheMaxEntries {
+		return
+	}
+	for key, entry := range s.resolveCache {
+		if key != incomingKey && !entry.staleUntil.IsZero() && now.After(entry.staleUntil) {
+			delete(s.resolveCache, key)
+		}
+	}
+	for len(s.resolveCache) >= cloudResolveCacheMaxEntries {
+		oldestKey := ""
+		var oldest time.Time
+		for key, entry := range s.resolveCache {
+			if key == incomingKey {
+				continue
+			}
+			seen := entry.lastHit
+			if seen.IsZero() {
+				seen = entry.expiresAt
+			}
+			if oldestKey == "" || seen.Before(oldest) {
+				oldestKey = key
+				oldest = seen
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(s.resolveCache, oldestKey)
+	}
 }
 
 func cloudResolveHotRefreshWindow(ttl time.Duration) time.Duration {

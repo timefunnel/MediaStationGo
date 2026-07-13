@@ -62,6 +62,8 @@ type EmbyService struct {
 
 	cloudProbeMu       sync.Mutex
 	cloudProbeInFlight map[string]struct{}
+	cloudWarmMu        sync.Mutex
+	cloudWarmInFlight  map[string]struct{}
 
 	readCacheMu       sync.Mutex
 	readCacheInFlight map[string]*embyReadCacheFlight

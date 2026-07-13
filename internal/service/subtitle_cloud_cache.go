@@ -140,6 +140,65 @@ func (s *SubtitleService) discoverCloudSubtitlesCached(ctx context.Context, medi
 	return tracks, err
 }
 
+func (s *SubtitleService) cachedCloudSubtitles(media model.Media) ([]SubtitleTrack, bool) {
+	if s == nil || s.cloudCache == nil {
+		return nil, false
+	}
+	provider, _, ok := cloudSubtitleMediaRef(media)
+	if !ok {
+		return []SubtitleTrack{}, true
+	}
+	key := strings.TrimSpace(media.ID)
+	fingerprint := cloudSubtitleDiscoveryFingerprint(media)
+	if key == "" {
+		key = fingerprint
+	}
+	c := s.cloudCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, exists := c.entries[key]
+	if !exists || entry.provider != provider || entry.fingerprint != fingerprint || !entry.expiresAt.After(time.Now()) {
+		return nil, false
+	}
+	return cloneSubtitleTracks(entry.tracks), true
+}
+
+func (s *SubtitleService) warmCloudSubtitles(media model.Media) <-chan struct{} {
+	if s == nil {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	key := cloudSubtitleDiscoveryFingerprint(media)
+	s.warmMu.Lock()
+	if s.warmInFlight == nil {
+		s.warmInFlight = make(map[string]chan struct{})
+	}
+	if done := s.warmInFlight[key]; done != nil {
+		s.warmMu.Unlock()
+		return done
+	}
+	done := make(chan struct{})
+	s.warmInFlight[key] = done
+	s.warmMu.Unlock()
+	go func() {
+		defer func() {
+			s.warmMu.Lock()
+			if s.warmInFlight[key] == done {
+				delete(s.warmInFlight, key)
+			}
+			close(done)
+			s.warmMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := s.discoverCloudSubtitlesCached(ctx, media); err != nil && s.log != nil {
+			s.log.Debug("warm cloud subtitles failed", zap.String("media_id", media.ID), zap.Error(err))
+		}
+	}()
+	return done
+}
+
 func (s *SubtitleService) InvalidateCloudDiscovery(mediaID, provider string) int {
 	if s == nil || s.cloudCache == nil {
 		return 0

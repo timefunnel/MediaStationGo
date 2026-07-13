@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -36,7 +38,11 @@ type SubtitleService struct {
 	storage       *StorageConfigService
 	localCacheDir string
 	cloudCache    *cloudSubtitleDiscoveryCache
+	warmMu        sync.Mutex
+	warmInFlight  map[string]chan struct{}
 }
+
+const cloudSubtitlePlaybackWait = 500 * time.Millisecond
 
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
@@ -179,6 +185,43 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 		}
 	}
 	return mergeSubtitleTracks(tracks, localTracks), nil
+}
+
+// DiscoverForPlayback keeps OpenList directory I/O off the latency-sensitive
+// PlaybackInfo path. Local downloaded subtitles and a warm cloud-directory
+// cache are returned immediately; a cold cloud cache is populated in the
+// background for the next PlaybackInfo request.
+func (s *SubtitleService) DiscoverForPlayback(ctx context.Context, mediaID string) ([]SubtitleTrack, error) {
+	m, err := s.repo.Media.FindByID(ctx, mediaID)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("media not found")
+	}
+	localTracks := discoverLocalCachedSubtitles(s, mediaID)
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
+		return s.Discover(ctx, mediaID)
+	}
+	if s.cloudCache == nil || s.cloudCache.ttl <= 0 {
+		return s.Discover(ctx, mediaID)
+	}
+	if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
+		return mergeSubtitleTracks(cloudTracks, localTracks), nil
+	}
+	done := s.warmCloudSubtitles(*m)
+	timer := time.NewTimer(cloudSubtitlePlaybackWait)
+	defer timer.Stop()
+	select {
+	case <-done:
+		if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
+			return mergeSubtitleTracks(cloudTracks, localTracks), nil
+		}
+	case <-timer.C:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return mergeSubtitleTracks(localTracks), nil
 }
 
 // langTag matches the .zh / .zh-cn / .chs language sub-extensions.

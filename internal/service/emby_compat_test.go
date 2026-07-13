@@ -75,6 +75,22 @@ type fakeCloudPlaybackResolver struct {
 	ua   string
 }
 
+type cloudResolveRequest struct {
+	typ string
+	ref string
+	ua  string
+}
+
+type recordingCloudPlaybackResolver struct {
+	link  *cloud.DirectLink
+	calls chan cloudResolveRequest
+}
+
+func (r *recordingCloudPlaybackResolver) CloudResolve(_ context.Context, typ, fileRef, clientUA string) (*cloud.DirectLink, error) {
+	r.calls <- cloudResolveRequest{typ: typ, ref: fileRef, ua: clientUA}
+	return r.link, nil
+}
+
 func (f *fakeCloudPlaybackResolver) CloudResolve(_ context.Context, typ, fileRef, clientUA string) (*cloud.DirectLink, error) {
 	f.typ = typ
 	f.ref = fileRef

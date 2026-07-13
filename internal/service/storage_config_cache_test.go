@@ -103,6 +103,52 @@ func TestCloudResolveCacheUses115DirectLinkExpiry(t *testing.T) {
 	}
 }
 
+func TestCloudResolveCachePrunesLeastRecentlyUsedEntries(t *testing.T) {
+	storage := &StorageConfigService{resolveCache: make(map[string]cloudResolveCacheEntry)}
+	now := time.Now()
+	for i := 0; i < cloudResolveCacheMaxEntries; i++ {
+		key := fmt.Sprintf("openlist\x00/file-%04d\x00Player", i)
+		storage.resolveCache[key] = cloudResolveCacheEntry{
+			link:       &cloud.DirectLink{URL: fmt.Sprintf("https://cdn.example/%d", i)},
+			expiresAt:  now.Add(time.Minute),
+			staleUntil: now.Add(time.Minute),
+			lastHit:    now.Add(time.Duration(i) * time.Millisecond),
+		}
+	}
+	oldest := "openlist\x00/file-0000\x00Player"
+	storage.storeResolvedLink("openlist\x00/new-file\x00Player", "openlist", &cloud.DirectLink{URL: "https://cdn.example/new"})
+	if len(storage.resolveCache) != cloudResolveCacheMaxEntries {
+		t.Fatalf("cache size=%d, want %d", len(storage.resolveCache), cloudResolveCacheMaxEntries)
+	}
+	if _, ok := storage.resolveCache[oldest]; ok {
+		t.Fatal("least recently used cache entry was not pruned")
+	}
+	if _, ok := storage.resolveCache["openlist\x00/new-file\x00Player"]; !ok {
+		t.Fatal("new cache entry missing after prune")
+	}
+}
+
+func TestCloudResolveCacheRefreshAtCapacityDoesNotEvictAnotherEntry(t *testing.T) {
+	storage := &StorageConfigService{resolveCache: make(map[string]cloudResolveCacheEntry)}
+	now := time.Now()
+	for i := 0; i < cloudResolveCacheMaxEntries; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		storage.resolveCache[key] = cloudResolveCacheEntry{
+			link:       &cloud.DirectLink{URL: fmt.Sprintf("https://cdn.example/%d", i)},
+			expiresAt:  now.Add(time.Minute),
+			staleUntil: now.Add(time.Minute),
+			lastHit:    now,
+		}
+	}
+	storage.storeResolvedLink("key-0000", "openlist", &cloud.DirectLink{URL: "https://cdn.example/refreshed"})
+	if len(storage.resolveCache) != cloudResolveCacheMaxEntries {
+		t.Fatalf("cache size=%d, want %d", len(storage.resolveCache), cloudResolveCacheMaxEntries)
+	}
+	if storage.resolveCache["key-0000"].link.URL != "https://cdn.example/refreshed" {
+		t.Fatal("existing cache entry was not refreshed")
+	}
+}
+
 func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
 	var resolves atomic.Int32
 	expiry := time.Now().Add(time.Hour).Unix()

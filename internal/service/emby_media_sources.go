@@ -118,7 +118,7 @@ func (e *EmbyService) attachExternalSubtitleStreams(ctx context.Context, m *mode
 	if e == nil || e.subtitle == nil || m == nil || src == nil || strings.TrimSpace(m.ID) == "" {
 		return
 	}
-	tracks, err := e.subtitle.Discover(ctx, m.ID)
+	tracks, err := e.subtitle.DiscoverForPlayback(ctx, m.ID)
 	if err != nil || len(tracks) == 0 {
 		return
 	}

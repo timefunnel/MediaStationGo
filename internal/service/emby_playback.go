@@ -15,15 +15,56 @@ import (
 
 // PlaybackInfo returns a PlaybackInfoResponse usable by Emby clients.
 func (e *EmbyService) PlaybackInfo(ctx context.Context, mediaID, userID string) (map[string]any, error) {
+	return e.PlaybackInfoForClient(ctx, mediaID, userID, "")
+}
+
+// PlaybackInfoForClient returns playback metadata and prewarms the exact
+// provider link variant that the requesting client's User-Agent will use.
+func (e *EmbyService) PlaybackInfoForClient(ctx context.Context, mediaID, userID, clientUA string) (map[string]any, error) {
 	m, err := e.playableMedia(ctx, mediaID, userID)
 	if err != nil || m == nil {
 		return nil, err
 	}
 	e.ensureCloudTrackMetadata(ctx, m)
+	e.warmCloudPlaybackLink(m, clientUA)
 	return map[string]any{
 		"MediaSources":  e.mediaSourcesForItem(ctx, m, false, e.directPlayOnly(ctx)),
 		"PlaySessionId": fmt.Sprintf("%s-%d", m.ID, time.Now().Unix()),
 	}, nil
+}
+
+func (e *EmbyService) warmCloudPlaybackLink(m *model.Media, clientUA string) {
+	if e == nil || m == nil || e.storage == nil {
+		return
+	}
+	typ, ref, ok := parseCloudMediaPlaybackURL(m.STRMURL)
+	if !ok {
+		return
+	}
+	key := strings.Join([]string{m.ID, typ, ref, strings.TrimSpace(clientUA)}, "\x00")
+	e.cloudWarmMu.Lock()
+	if e.cloudWarmInFlight == nil {
+		e.cloudWarmInFlight = make(map[string]struct{})
+	}
+	if _, busy := e.cloudWarmInFlight[key]; busy {
+		e.cloudWarmMu.Unlock()
+		return
+	}
+	e.cloudWarmInFlight[key] = struct{}{}
+	e.cloudWarmMu.Unlock()
+
+	go func() {
+		defer func() {
+			e.cloudWarmMu.Lock()
+			delete(e.cloudWarmInFlight, key)
+			e.cloudWarmMu.Unlock()
+		}()
+		warmCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := e.storage.CloudResolve(warmCtx, typ, ref, clientUA); err != nil && e.log != nil {
+			e.log.Debug("warm cloud playback link failed", zap.String("media_id", m.ID), zap.Error(err))
+		}
+	}()
 }
 
 // ensureCloudTrackMetadata 在后台补齐云盘媒体的轨道元数据。
