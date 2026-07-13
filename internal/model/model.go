@@ -61,5 +61,6 @@ func AllModels() []interface{} {
 		&RegistrationCode{},
 		&SignIn{},
 		&UserDevice{},
+		&PipelineIngestJobRecord{},
 	}
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestPipelineIngestFindsMediaByTargetPath(t *testing.T) {
-	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)
 	maintenance := NewPipelineMaintenanceService(zap.NewNop(), repos)
 	svc := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
@@ -70,7 +70,7 @@ func TestPipelineIngestScansOnlyTargetOpenListPath(t *testing.T) {
 	})
 	defer upstream.Close()
 
-	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.Setting{}, &model.StorageConfig{})
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.Setting{}, &model.StorageConfig{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)
 	log := zap.NewNop()
 	storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
@@ -120,7 +120,7 @@ func TestPipelineIngestScansOnlyTargetOpenListPath(t *testing.T) {
 }
 
 func TestPipelineIngestRejectsUnhandledTargetOpenListPaths(t *testing.T) {
-	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{})
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)
 	log := zap.NewNop()
 	lib := model.Library{Name: "Local", Path: "/media/local", Type: "movie", Enabled: true}
@@ -163,7 +163,7 @@ func TestPipelineIngestRejectsUnhandledTargetOpenListPaths(t *testing.T) {
 }
 
 func TestPipelineIngestRunsMovieExtrasRepair(t *testing.T) {
-	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)
 	maintenance := NewPipelineMaintenanceService(zap.NewNop(), repos)
 	svc := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
@@ -197,6 +197,106 @@ func TestPipelineIngestRunsMovieExtrasRepair(t *testing.T) {
 	}
 	if job.Result.MovieExtras == nil || job.Result.MovieExtras.Updated != 1 || job.Result.MovieExtras.OpenListHidePath != "/115/movie/Movie" {
 		t.Fatalf("unexpected extras result: %#v", job.Result.MovieExtras)
+	}
+}
+
+func TestPipelineIngestPersistsAndReusesIdempotentJob(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	maintenance := NewPipelineMaintenanceService(zap.NewNop(), repos)
+	svc := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
+	lib, root := createPipelineMaintenanceRoot(t, db, "adult", "/115/adult")
+	media := model.Media{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "ABF-363", Path: "cloud://openlist/115/adult/ABF-363/ABF-363.mp4"}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "adult", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/adult"},
+		IdempotencyKey:            "task:ABF-363",
+		Title:                     "ABF-363",
+		TargetOpenListPaths:       []string{"/115/adult/ABF-363"},
+		RequireTargetPath:         true,
+	}
+
+	job, err := svc.Start(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusCompleted {
+		t.Fatalf("job=%#v", job)
+	}
+
+	restarted := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
+	persisted, err := restarted.Get(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != PipelineIngestStatusCompleted || persisted.Result.Media == nil || persisted.Result.Media.ID != media.ID {
+		t.Fatalf("persisted=%#v", persisted)
+	}
+	reused, err := restarted.Start(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused.ID != job.ID || reused.Status != PipelineIngestStatusCompleted {
+		t.Fatalf("reused=%#v", reused)
+	}
+	conflicting := request
+	conflicting.Title = "Different"
+	if _, err := restarted.Start(t.Context(), conflicting); err == nil || !strings.Contains(err.Error(), "different request") {
+		t.Fatalf("conflict err=%v", err)
+	}
+	var count int64
+	if err := db.Model(&model.PipelineIngestJobRecord{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("job records=%d", count)
+	}
+}
+
+func TestPipelineIngestRecoversPersistedRunningJob(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	maintenance := NewPipelineMaintenanceService(zap.NewNop(), repos)
+	lib, root := createPipelineMaintenanceRoot(t, db, "adult", "/115/adult")
+	media := model.Media{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "ABF-363", Path: "cloud://openlist/115/adult/ABF-363/ABF-363.mp4"}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	seed := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
+	seedJob := PipelineIngestJob{
+		ID:      "recover-job",
+		Status:  PipelineIngestStatusRunning,
+		Stage:   "find_media",
+		Message: "finding ingested media",
+		Request: PipelineIngestRequest{
+			PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "adult", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/adult"},
+			IdempotencyKey:            "task:recover-ABF-363",
+			Title:                     "ABF-363",
+			TargetOpenListPaths:       []string{"/115/adult/ABF-363"},
+			RequireTargetPath:         true,
+		},
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := seed.storeJob(t.Context(), seedJob); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := NewPipelineIngestService(zap.NewNop(), repos, nil, maintenance, nil)
+	count, err := restarted.Recover(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("recovered=%d", count)
+	}
+	job := waitPipelineIngestJob(t, restarted, seedJob.ID)
+	if job.Status != PipelineIngestStatusCompleted || job.Result.Media == nil || job.Result.Media.ID != media.ID {
+		t.Fatalf("job=%#v", job)
 	}
 }
 

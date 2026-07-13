@@ -40,7 +40,24 @@ func newServiceContainer(cfg *config.Config, log *zap.Logger, repos *repository.
 	builder.initSiteDownloadServices()
 	builder.initImageProxy()
 	builder.attachRuntimeContext()
+	builder.recoverPipelineIngest()
 	return builder.c
+}
+
+func (b *serviceContainerBuilder) recoverPipelineIngest() {
+	if b.c.PipelineIngest == nil {
+		return
+	}
+	count, err := b.c.PipelineIngest.Recover(context.Background())
+	if err != nil {
+		if b.log != nil {
+			b.log.Error("pipeline ingest recovery failed", zap.Error(err))
+		}
+		return
+	}
+	if count > 0 && b.log != nil {
+		b.log.Info("pipeline ingest jobs recovered", zap.Int("count", count))
+	}
 }
 
 func (b *serviceContainerBuilder) startRealtimeServices() {

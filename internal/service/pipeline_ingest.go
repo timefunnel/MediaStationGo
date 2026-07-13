@@ -27,10 +27,11 @@ type PipelineIngestService struct {
 	maintenance *PipelineMaintenanceService
 	tasks       *TaskTrackerService
 
-	mu     sync.Mutex
-	jobs   map[string]*PipelineIngestJob
-	recent []string
-	now    func() time.Time
+	mu        sync.Mutex
+	jobs      map[string]*PipelineIngestJob
+	recent    []string
+	executing map[string]bool
+	now       func() time.Time
 }
 
 func NewPipelineIngestService(log *zap.Logger, repos *repository.Container, scanner *ScannerService, maintenance *PipelineMaintenanceService, tasks *TaskTrackerService) *PipelineIngestService {
@@ -41,12 +42,14 @@ func NewPipelineIngestService(log *zap.Logger, repos *repository.Container, scan
 		maintenance: maintenance,
 		tasks:       tasks,
 		jobs:        make(map[string]*PipelineIngestJob),
+		executing:   make(map[string]bool),
 		now:         time.Now,
 	}
 }
 
 type PipelineIngestRequest struct {
 	PipelineMaintenanceTarget
+	IdempotencyKey            string   `json:"idempotency_key,omitempty"`
 	Title                     string   `json:"title,omitempty"`
 	Queries                   []string `json:"queries,omitempty"`
 	TargetOpenListPaths       []string `json:"target_openlist_paths,omitempty"`
@@ -118,9 +121,20 @@ func (s *PipelineIngestService) Start(ctx context.Context, req PipelineIngestReq
 	req.TargetOpenListPaths = pipelineCompactOpenListPaths(req.TargetOpenListPaths)
 	req.PruneDeletedOpenListPaths = pipelineCompactOpenListPaths(req.PruneDeletedOpenListPaths)
 
+	jobID := uuid.NewString()
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = "job:" + jobID
+	}
+	if existing, found, err := s.findJobByIdempotencyKey(ctx, req.IdempotencyKey); err != nil {
+		return PipelineIngestJob{}, err
+	} else if found {
+		return s.reuseJob(existing, req)
+	}
+
 	now := s.currentTime()
-	job := &PipelineIngestJob{
-		ID:        uuid.NewString(),
+	job := PipelineIngestJob{
+		ID:        jobID,
 		Status:    PipelineIngestStatusRunning,
 		Stage:     "queued",
 		Message:   "queued",
@@ -128,9 +142,13 @@ func (s *PipelineIngestService) Start(ctx context.Context, req PipelineIngestReq
 		StartedAt: now,
 		UpdatedAt: now,
 	}
-	s.storeJob(job)
-
-	go s.run(context.Background(), job.ID)
+	if err := s.storeJob(ctx, job); err != nil {
+		if existing, found, lookupErr := s.findJobByIdempotencyKey(ctx, req.IdempotencyKey); lookupErr == nil && found {
+			return s.reuseJob(existing, req)
+		}
+		return PipelineIngestJob{}, err
+	}
+	s.scheduleJob(job.ID)
 	return s.Get(job.ID)
 }
 
@@ -139,18 +157,38 @@ func (s *PipelineIngestService) Get(id string) (PipelineIngestJob, error) {
 	if id == "" {
 		return PipelineIngestJob{}, errors.New("job id is required")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	job, ok := s.jobs[id]
-	if !ok || job == nil {
+	if job, ok := s.cachedJob(id); ok {
+		return job, nil
+	}
+	job, found, err := s.loadJobByID(context.Background(), id)
+	if err != nil {
+		return PipelineIngestJob{}, err
+	}
+	if !found {
 		return PipelineIngestJob{}, errors.New("pipeline ingest job not found")
 	}
-	return clonePipelineIngestJob(*job), nil
+	s.cacheJob(job)
+	return clonePipelineIngestJob(job), nil
+}
+
+func (s *PipelineIngestService) reuseJob(existing PipelineIngestJob, req PipelineIngestRequest) (PipelineIngestJob, error) {
+	if !pipelineIngestRequestsEqual(existing.Request, req) {
+		return PipelineIngestJob{}, errors.New("pipeline ingest idempotency key already belongs to a different request")
+	}
+	s.cacheJob(existing)
+	if existing.Status == PipelineIngestStatusRunning {
+		s.scheduleJob(existing.ID)
+	}
+	return clonePipelineIngestJob(existing), nil
 }
 
 func (s *PipelineIngestService) run(ctx context.Context, id string) {
+	defer s.clearExecuting(id)
 	job, err := s.Get(id)
 	if err != nil {
+		if s.log != nil {
+			s.log.Error("pipeline ingest job load failed", zap.String("job_id", id), zap.Error(err))
+		}
 		return
 	}
 	var task *TaskHandle
@@ -168,11 +206,19 @@ func (s *PipelineIngestService) run(ctx context.Context, id string) {
 	}
 
 	if err := s.runJob(ctx, id, task); err != nil {
-		s.failJob(id, err)
+		if persistErr := s.failJob(id, err); persistErr != nil && s.log != nil {
+			s.log.Error("pipeline ingest failure persistence failed", zap.String("job_id", id), zap.Error(persistErr))
+		}
 		finishTask(err, "failed", "pipeline ingest failed", nil)
 		return
 	}
-	s.completeJob(id)
+	if err := s.completeJob(id); err != nil {
+		if persistErr := s.failJob(id, err); persistErr != nil && s.log != nil {
+			s.log.Error("pipeline ingest completion persistence failed", zap.String("job_id", id), zap.Error(persistErr))
+		}
+		finishTask(err, "failed", "pipeline ingest persistence failed", nil)
+		return
+	}
 	finishTask(nil, "completed", "pipeline ingest completed", nil)
 }
 
@@ -187,7 +233,9 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		return err
 	}
 	if len(req.PruneDeletedOpenListPaths) > 0 {
-		s.updateJob(id, "prune_deleted", "pruning stale deleted media", nil)
+		if err := s.updateJob(id, "prune_deleted", "pruning stale deleted media", nil); err != nil {
+			return err
+		}
 		if task != nil {
 			task.Update(TaskUpdate{Stage: "prune_deleted", Message: "pruning stale deleted media"})
 		}
@@ -195,9 +243,11 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		if err != nil {
 			return err
 		}
-		s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+		if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
 			resultOut.DeletedMediaPrune = &result
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	if req.Scan {
 		if s.scanner == nil {
@@ -207,7 +257,9 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		if len(req.TargetOpenListPaths) > 0 {
 			scanMessage = "scanning target path"
 		}
-		s.updateJob(id, "scan", scanMessage, nil)
+		if err := s.updateJob(id, "scan", scanMessage, nil); err != nil {
+			return err
+		}
 		if task != nil {
 			task.Update(TaskUpdate{Stage: "scan", Message: scanMessage})
 		}
@@ -219,16 +271,20 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		finish()
 		if scanResult != nil {
 			summary := pipelineIngestScanSummary(scanResult)
-			s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+			if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
 				resultOut.Scan = &summary
-			})
+			}); err != nil {
+				return err
+			}
 		}
 		if scanErr != nil {
 			return scanErr
 		}
 	}
 
-	s.updateJob(id, "find_media", "finding ingested media", nil)
+	if err := s.updateJob(id, "find_media", "finding ingested media", nil); err != nil {
+		return err
+	}
 	media, matchMode, matchPath, err := s.findMedia(ctx, target, req)
 	if err != nil {
 		return err
@@ -240,29 +296,39 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		MatchMode: matchMode,
 		MatchPath: matchPath,
 	}
-	s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+	if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
 		resultOut.Media = &mediaResult
-	})
+	}); err != nil {
+		return err
+	}
 
 	if req.RepairMovieExtras {
-		s.updateJob(id, "repair_movie_extras", "repairing movie extras", nil)
+		if err := s.updateJob(id, "repair_movie_extras", "repairing movie extras", nil); err != nil {
+			return err
+		}
 		result, err := s.maintenance.RepairMovieExtras(ctx, media.ID, req.PipelineMaintenanceTarget)
 		if err != nil {
 			return err
 		}
-		s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+		if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
 			resultOut.MovieExtras = &result
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	if req.RepairEpisodeVisibility {
-		s.updateJob(id, "repair_episode_visibility", "repairing episode visibility", nil)
+		if err := s.updateJob(id, "repair_episode_visibility", "repairing episode visibility", nil); err != nil {
+			return err
+		}
 		result, err := s.maintenance.RepairEpisodeVisibility(ctx, media.ID, req.PipelineMaintenanceTarget)
 		if err != nil {
 			return err
 		}
-		s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+		if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
 			resultOut.EpisodeVisibility = &result
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -364,69 +430,6 @@ func choosePipelineIngestMedia(rows []model.Media, rootOpenListPath string) mode
 	return candidates[0]
 }
 
-func (s *PipelineIngestService) storeJob(job *PipelineIngestJob) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.jobs[job.ID] = clonePipelineIngestJob(*job).ptr()
-	s.recent = append([]string{job.ID}, s.recent...)
-	if len(s.recent) > 100 {
-		for _, oldID := range s.recent[100:] {
-			delete(s.jobs, oldID)
-		}
-		s.recent = s.recent[:100]
-	}
-}
-
-func (s *PipelineIngestService) updateJob(id, stage, message string, mutate func(*PipelineIngestJob)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if job := s.jobs[id]; job != nil {
-		if stage != "" {
-			job.Stage = stage
-		}
-		if message != "" {
-			job.Message = message
-		}
-		job.UpdatedAt = s.currentTime()
-		if mutate != nil {
-			mutate(job)
-		}
-	}
-}
-
-func (s *PipelineIngestService) updateJobResult(id string, mutate func(*PipelineIngestResult)) {
-	s.updateJob(id, "", "", func(job *PipelineIngestJob) {
-		mutate(&job.Result)
-	})
-}
-
-func (s *PipelineIngestService) completeJob(id string) {
-	now := s.currentTime()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if job := s.jobs[id]; job != nil {
-		job.Status = PipelineIngestStatusCompleted
-		job.Stage = "completed"
-		job.Message = "completed"
-		job.UpdatedAt = now
-		job.FinishedAt = &now
-	}
-}
-
-func (s *PipelineIngestService) failJob(id string, err error) {
-	now := s.currentTime()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if job := s.jobs[id]; job != nil {
-		job.Status = PipelineIngestStatusFailed
-		job.Stage = "failed"
-		job.Message = "failed"
-		job.Error = err.Error()
-		job.UpdatedAt = now
-		job.FinishedAt = &now
-	}
-}
-
 func (s *PipelineIngestService) currentTime() time.Time {
 	if s != nil && s.now != nil {
 		return s.now()
@@ -438,6 +441,33 @@ func clonePipelineIngestJob(job PipelineIngestJob) PipelineIngestJob {
 	job.Request.Queries = append([]string(nil), job.Request.Queries...)
 	job.Request.TargetOpenListPaths = append([]string(nil), job.Request.TargetOpenListPaths...)
 	job.Request.PruneDeletedOpenListPaths = append([]string(nil), job.Request.PruneDeletedOpenListPaths...)
+	if job.Result.DeletedMediaPrune != nil {
+		cloned := *job.Result.DeletedMediaPrune
+		cloned.MediaIDs = append([]string(nil), cloned.MediaIDs...)
+		job.Result.DeletedMediaPrune = &cloned
+	}
+	if job.Result.Scan != nil {
+		cloned := *job.Result.Scan
+		job.Result.Scan = &cloned
+	}
+	if job.Result.Media != nil {
+		cloned := *job.Result.Media
+		job.Result.Media = &cloned
+	}
+	if job.Result.MovieExtras != nil {
+		cloned := *job.Result.MovieExtras
+		cloned.OpenListHidePatterns = append([]string(nil), cloned.OpenListHidePatterns...)
+		job.Result.MovieExtras = &cloned
+	}
+	if job.Result.EpisodeVisibility != nil {
+		cloned := *job.Result.EpisodeVisibility
+		cloned.OpenListHidePatterns = append([]string(nil), cloned.OpenListHidePatterns...)
+		job.Result.EpisodeVisibility = &cloned
+	}
+	if job.FinishedAt != nil {
+		finishedAt := *job.FinishedAt
+		job.FinishedAt = &finishedAt
+	}
 	return job
 }
 
