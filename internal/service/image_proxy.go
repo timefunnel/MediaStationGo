@@ -25,11 +25,12 @@ import (
 
 // ImageProxy fetches and caches remote images on behalf of the browser.
 type ImageProxy struct {
-	cfg      *config.Config
-	log      *zap.Logger
-	client   *http.Client
-	cacheDir string
-	mu       sync.Mutex
+	cfg             *config.Config
+	log             *zap.Logger
+	client          *http.Client
+	cacheDir        string
+	mu              sync.Mutex
+	variantFallback imageVariantFallbackFunc
 
 	// libraryRootsFn returns the configured media library roots so that
 	// sidecar poster/artwork files stored alongside media (under arbitrary
@@ -53,12 +54,14 @@ func NewImageProxy(cfg *config.Config, log *zap.Logger) *ImageProxy {
 	// from image.tmdb.org via their HTTP proxy without extra config. On
 	// Windows we also honor the current user's system proxy settings.
 	transport := NewExternalTransport()
-	return &ImageProxy{
+	proxy := &ImageProxy{
 		cfg:      cfg,
 		log:      log,
 		cacheDir: filepath.Join(cfg.Cache.CacheDir, "images"),
 		client:   &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
+	proxy.variantFallback = proxy.transcodeImageVariantWithFFmpeg
+	return proxy
 }
 
 // SetLibraryRootsProvider injects a callback that returns the current set of

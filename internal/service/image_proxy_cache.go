@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // transparent1x1PNG is a baseline 67-byte PNG used as a fallback when the
@@ -94,11 +97,11 @@ func (p *ImageProxy) remoteImageCachePathsForValidated(raw string) (string, stri
 	return key, cachePath, cachePath + ".fail"
 }
 
-func serveCachedImageFile(w http.ResponseWriter, r *http.Request, key, cachePath string) bool {
-	return serveImageFile(w, r, key, cachePath, imageBrowserCacheControl)
+func (p *ImageProxy) serveCachedImageFile(w http.ResponseWriter, r *http.Request, key, cachePath string) bool {
+	return p.serveImageFile(w, r, key, cachePath, imageBrowserCacheControl)
 }
 
-func serveImageFile(w http.ResponseWriter, r *http.Request, key, path, cacheControl string) bool {
+func (p *ImageProxy) serveImageFile(w http.ResponseWriter, r *http.Request, key, path, cacheControl string) bool {
 	file, err := os.Open(path) // #nosec G304 -- caller only passes validated local paths or SHA-derived cache paths.
 	if err != nil {
 		return false
@@ -116,13 +119,22 @@ func serveImageFile(w http.ResponseWriter, r *http.Request, key, path, cacheCont
 		return false
 	}
 	if variant := imageVariantFromRequest(r); variant.enabled() {
-		data, err := io.ReadAll(io.LimitReader(file, maxImageVariantInputBytes))
-		if err == nil && len(data) > 0 {
-			if serveImageVariant(w, r, key, stat.ModTime(), data, ctype, cacheControl, variant) {
-				return true
-			}
+		if stat.Size() > maxImageVariantInputBytes {
+			p.serveImageVariantFailure(w, key, errors.New("image exceeds variant input limit"))
+			return true
 		}
-		_, _ = file.Seek(0, io.SeekStart)
+		data, err := io.ReadAll(io.LimitReader(file, maxImageVariantInputBytes))
+		if err != nil || len(data) == 0 {
+			if err == nil {
+				err = errors.New("image variant source is empty")
+			}
+			p.serveImageVariantFailure(w, key, err)
+			return true
+		}
+		if err := p.serveImageVariant(w, r, key, stat.ModTime(), data, ctype, cacheControl, variant); err != nil {
+			p.serveImageVariantFailure(w, key, err)
+		}
+		return true
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", cacheControl)
@@ -131,11 +143,16 @@ func serveImageFile(w http.ResponseWriter, r *http.Request, key, path, cacheCont
 	return true
 }
 
-func serveImageBytes(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, data []byte, contentType, contentLength, cacheControl string) {
+func (p *ImageProxy) serveImageBytes(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, data []byte, contentType, contentLength, cacheControl string) {
 	if variant := imageVariantFromRequest(r); variant.enabled() {
-		if serveImageVariant(w, r, key, modTime, data, contentType, cacheControl, variant) {
+		if len(data) > maxImageVariantInputBytes {
+			p.serveImageVariantFailure(w, key, errors.New("image exceeds variant input limit"))
 			return
 		}
+		if err := p.serveImageVariant(w, r, key, modTime, data, contentType, cacheControl, variant); err != nil {
+			p.serveImageVariantFailure(w, key, err)
+		}
+		return
 	}
 	w.Header().Set("Content-Type", contentType)
 	if contentLength != "" {
@@ -143,6 +160,18 @@ func serveImageBytes(w http.ResponseWriter, r *http.Request, key string, modTime
 	}
 	w.Header().Set("Cache-Control", cacheControl)
 	http.ServeContent(w, r, key, modTime, bytes.NewReader(data))
+}
+
+func (p *ImageProxy) serveImageVariantFailure(w http.ResponseWriter, key string, err error) {
+	if p != nil && p.log != nil {
+		p.log.Warn("imageproxy: image variant generation failed", zap.String("key", key), zap.Error(err))
+	}
+	w.Header().Del("Content-Type")
+	w.Header().Del("Content-Length")
+	w.Header().Del("ETag")
+	w.Header().Del("Last-Modified")
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "image variant generation failed", http.StatusUnprocessableEntity)
 }
 
 func imageFileETag(key string, stat os.FileInfo) string {

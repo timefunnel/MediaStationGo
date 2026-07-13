@@ -41,7 +41,7 @@ func (p *ImageProxy) ServeCloudCached(w http.ResponseWriter, r *http.Request, st
 	}
 	key, cachePath, failPath := p.cloudImageCachePaths(stableKey)
 	p.removeUnusableImageCache(cachePath, failPath)
-	if serveCachedImageFile(w, r, key, cachePath) {
+	if p.serveCachedImageFile(w, r, key, cachePath) {
 		return true
 	}
 	if freshNegativeImageCache(failPath) {
@@ -64,7 +64,7 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 	}
 	key, cachePath, failPath := p.cloudImageCachePaths(stableKey)
 	p.removeUnusableImageCache(cachePath, failPath)
-	if serveCachedImageFile(w, r, key, cachePath) {
+	if p.serveCachedImageFile(w, r, key, cachePath) {
 		return nil
 	}
 	if freshNegativeImageCache(failPath) {
@@ -84,7 +84,7 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 		modTime = stat.ModTime()
 		w.Header().Set("ETag", imageFileETag(key, stat))
 	}
-	serveImageBytes(w, r, key, modTime, data, ctype, "", imageBrowserCacheControl)
+	p.serveImageBytes(w, r, key, modTime, data, ctype, "", imageBrowserCacheControl)
 	return nil
 }
 
