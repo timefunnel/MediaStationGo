@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -110,8 +109,7 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 		modTime = stat.ModTime()
 		w.Header().Set("ETag", imageFileETag(key, stat))
 	}
-	w.Header().Set("Cache-Control", imageBrowserCacheControl)
-	http.ServeContent(w, r, key, modTime, bytes.NewReader(data))
+	serveImageBytes(w, r, key, modTime, data, ctype, contentLength, imageBrowserCacheControl)
 	return nil
 }
 

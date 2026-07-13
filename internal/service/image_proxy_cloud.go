@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -85,7 +84,7 @@ func (p *ImageProxy) ServeCloudResolved(ctx context.Context, w http.ResponseWrit
 		modTime = stat.ModTime()
 		w.Header().Set("ETag", imageFileETag(key, stat))
 	}
-	http.ServeContent(w, r, key, modTime, bytes.NewReader(data))
+	serveImageBytes(w, r, key, modTime, data, ctype, "", imageBrowserCacheControl)
 	return nil
 }
 

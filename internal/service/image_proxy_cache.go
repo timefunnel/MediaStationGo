@@ -115,11 +115,34 @@ func serveImageFile(w http.ResponseWriter, r *http.Request, key, path, cacheCont
 	if !isImageContentType(ctype) {
 		return false
 	}
+	if variant := imageVariantFromRequest(r); variant.enabled() {
+		data, err := io.ReadAll(io.LimitReader(file, maxImageVariantInputBytes))
+		if err == nil && len(data) > 0 {
+			if serveImageVariant(w, r, key, stat.ModTime(), data, ctype, cacheControl, variant) {
+				return true
+			}
+		}
+		_, _ = file.Seek(0, io.SeekStart)
+	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("ETag", imageFileETag(key, stat))
 	http.ServeContent(w, r, key, stat.ModTime(), file)
 	return true
+}
+
+func serveImageBytes(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, data []byte, contentType, contentLength, cacheControl string) {
+	if variant := imageVariantFromRequest(r); variant.enabled() {
+		if serveImageVariant(w, r, key, modTime, data, contentType, cacheControl, variant) {
+			return
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	if contentLength != "" {
+		w.Header().Set("Content-Length", contentLength)
+	}
+	w.Header().Set("Cache-Control", cacheControl)
+	http.ServeContent(w, r, key, modTime, bytes.NewReader(data))
 }
 
 func imageFileETag(key string, stat os.FileInfo) string {
