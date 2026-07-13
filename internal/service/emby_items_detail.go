@@ -85,13 +85,26 @@ func (e *EmbyService) LatestItems(ctx context.Context, userID, parentID string, 
 	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
 		return cached.Items, nil
 	}
+	if e.cache != nil {
+		call, owner := e.beginEmbyReadCacheFill(cacheKey)
+		if !owner {
+			if err := waitEmbyReadCacheFill(ctx, call); err != nil {
+				return nil, err
+			}
+			if e.cache.GetJSON(ctx, cacheKey, &cached) {
+				return cached.Items, nil
+			}
+		} else {
+			defer e.finishEmbyReadCacheFill(cacheKey, call)
+		}
+	}
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("deleted_at IS NULL")
 	q = e.applyUserMediaVisibility(ctx, q, userID)
 	if parentID != "" {
 		if episodic, err := e.libraryIsEpisodic(ctx, parentID); err == nil && episodic {
 			out, err := e.latestSeriesItemsForLibrary(ctx, userID, parentID, limit)
 			if err == nil && e.cache != nil {
-				e.cache.SetJSON(ctx, cacheKey, embyLatestCacheValue{Items: out}, time.Duration(e.mediaCacheTTLSeconds())*time.Second)
+				e.cache.SetJSON(ctx, cacheKey, embyLatestCacheValue{Items: out}, e.embyMediaCacheTTL())
 			}
 			return out, err
 		}
@@ -117,7 +130,7 @@ func (e *EmbyService) LatestItems(ctx context.Context, userID, parentID string, 
 		return nil, err
 	}
 	if e.cache != nil {
-		e.cache.SetJSON(ctx, cacheKey, embyLatestCacheValue{Items: out}, time.Duration(e.mediaCacheTTLSeconds())*time.Second)
+		e.cache.SetJSON(ctx, cacheKey, embyLatestCacheValue{Items: out}, e.embyMediaCacheTTL())
 	}
 	return out, nil
 }

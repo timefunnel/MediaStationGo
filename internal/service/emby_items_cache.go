@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type embyItemsCacheValue struct {
@@ -16,6 +18,10 @@ type embyItemsCacheValue struct {
 
 type embyLatestCacheValue struct {
 	Items []map[string]any `json:"items"`
+}
+
+type embyReadCacheFlight struct {
+	done chan struct{}
 }
 
 func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
@@ -48,9 +54,58 @@ func (e *EmbyService) embyLatestCacheKey(userID, parentID string, limit int) str
 	return "media:emby:" + hex.EncodeToString(sum[:])
 }
 
+func (e *EmbyService) beginEmbyReadCacheFill(key string) (*embyReadCacheFlight, bool) {
+	if e == nil || strings.TrimSpace(key) == "" {
+		return nil, true
+	}
+	e.readCacheMu.Lock()
+	defer e.readCacheMu.Unlock()
+	if e.readCacheInFlight == nil {
+		e.readCacheInFlight = map[string]*embyReadCacheFlight{}
+	}
+	if call, ok := e.readCacheInFlight[key]; ok {
+		return call, false
+	}
+	call := &embyReadCacheFlight{done: make(chan struct{})}
+	e.readCacheInFlight[key] = call
+	return call, true
+}
+
+func (e *EmbyService) finishEmbyReadCacheFill(key string, call *embyReadCacheFlight) {
+	if e == nil || call == nil {
+		return
+	}
+	shouldClose := false
+	e.readCacheMu.Lock()
+	if e.readCacheInFlight != nil && e.readCacheInFlight[key] == call {
+		delete(e.readCacheInFlight, key)
+		shouldClose = true
+	}
+	e.readCacheMu.Unlock()
+	if shouldClose {
+		close(call.done)
+	}
+}
+
+func waitEmbyReadCacheFill(ctx context.Context, call *embyReadCacheFlight) error {
+	if call == nil {
+		return nil
+	}
+	select {
+	case <-call.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (e *EmbyService) mediaCacheTTLSeconds() int {
 	if e == nil || e.cfg == nil || e.cfg.Cache.MediaTTLSeconds < 1 {
 		return 15
 	}
 	return e.cfg.Cache.MediaTTLSeconds
+}
+
+func (e *EmbyService) embyMediaCacheTTL() time.Duration {
+	return time.Duration(e.mediaCacheTTLSeconds()) * time.Second
 }

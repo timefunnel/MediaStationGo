@@ -1,0 +1,101 @@
+package service
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/ShukeBta/MediaStationGo/internal/config"
+	"github.com/ShukeBta/MediaStationGo/internal/model"
+)
+
+func TestEmbyReadCacheFlightWaiterReadsOwnerCache(t *testing.T) {
+	svc := NewEmbyService(&config.Config{}, zap.NewNop(), nil).SetRuntimeCache(NewRuntimeCacheService(&config.Config{}, zap.NewNop()))
+	key := "media:emby:test-flight"
+	ownerCall, owner := svc.beginEmbyReadCacheFill(key)
+	if !owner {
+		t.Fatal("first cache fill should own the flight")
+	}
+	waiterCall, owner := svc.beginEmbyReadCacheFill(key)
+	if owner {
+		t.Fatal("second cache fill should wait for the owner")
+	}
+	if waiterCall != ownerCall {
+		t.Fatal("waiter should observe the existing flight")
+	}
+
+	done := make(chan string, 1)
+	go func() {
+		if err := waitEmbyReadCacheFill(context.Background(), waiterCall); err != nil {
+			done <- err.Error()
+			return
+		}
+		var cached embyLatestCacheValue
+		if !svc.cache.GetJSON(context.Background(), key, &cached) {
+			done <- "cache miss after owner finished"
+			return
+		}
+		cached.Items[0]["Name"] = "mutated"
+		var again embyLatestCacheValue
+		if !svc.cache.GetJSON(context.Background(), key, &again) {
+			done <- "second cache miss"
+			return
+		}
+		if again.Items[0]["Name"] != "Original" {
+			done <- "cache returned shared mutable payload"
+			return
+		}
+		done <- ""
+	}()
+
+	select {
+	case msg := <-done:
+		t.Fatalf("waiter returned before owner finished: %s", msg)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	svc.cache.SetJSON(context.Background(), key, embyLatestCacheValue{Items: []map[string]any{{"Name": "Original"}}}, time.Minute)
+	svc.finishEmbyReadCacheFill(key, ownerCall)
+
+	select {
+	case msg := <-done:
+		if msg != "" {
+			t.Fatal(msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not resume after owner finished")
+	}
+}
+
+func TestEmbyLatestItemsCacheReturnsIndependentPayload(t *testing.T) {
+	svc := newTestEmbyService(t)
+	svc.SetRuntimeCache(NewRuntimeCacheService(&config.Config{}, zap.NewNop()))
+	lib := model.Library{Name: "Movies", Path: `/media/movies`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:      model.Base{ID: "movie-1", CreatedAt: time.Now()},
+		LibraryID: lib.ID,
+		Title:     "Original",
+		Path:      `/media/movies/original.mkv`,
+	}
+	if err := svc.repo.DB.Create(&media).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	first, err := svc.LatestItems(t.Context(), "user-1", lib.ID, 10)
+	if err != nil {
+		t.Fatalf("latest items: %v", err)
+	}
+	first[0]["Name"] = "mutated"
+	second, err := svc.LatestItems(t.Context(), "user-1", lib.ID, 10)
+	if err != nil {
+		t.Fatalf("latest items from cache: %v", err)
+	}
+	if second[0]["Name"] != "Original" {
+		t.Fatalf("cached latest payload was mutated: %#v", second[0])
+	}
+}

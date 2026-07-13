@@ -15,6 +15,19 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
 		return map[string]any{"Items": cached.Items, "TotalRecordCount": cached.TotalRecordCount, "StartIndex": cached.StartIndex}, nil
 	}
+	if e.cache != nil {
+		call, owner := e.beginEmbyReadCacheFill(cacheKey)
+		if !owner {
+			if err := waitEmbyReadCacheFill(ctx, call); err != nil {
+				return nil, err
+			}
+			if e.cache.GetJSON(ctx, cacheKey, &cached) {
+				return map[string]any{"Items": cached.Items, "TotalRecordCount": cached.TotalRecordCount, "StartIndex": cached.StartIndex}, nil
+			}
+		} else {
+			defer e.finishEmbyReadCacheFill(cacheKey, call)
+		}
+	}
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{})
 	q = e.applyUserMediaVisibility(ctx, q, p.UserID)
 	if p.ParentID != "" {
@@ -112,7 +125,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	}
 	out := map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}
 	if e.cache != nil {
-		e.cache.SetJSON(ctx, cacheKey, embyItemsCacheValue{Items: items, TotalRecordCount: total, StartIndex: p.StartIndex}, time.Duration(e.mediaCacheTTLSeconds())*time.Second)
+		e.cache.SetJSON(ctx, cacheKey, embyItemsCacheValue{Items: items, TotalRecordCount: total, StartIndex: p.StartIndex}, e.embyMediaCacheTTL())
 	}
 	return out, nil
 }
