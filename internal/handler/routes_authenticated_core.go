@@ -53,6 +53,7 @@ func registerAuthedMediaRoutes(authed *gin.RouterGroup, svc *service.Container) 
 	authed.DELETE("/media/:id/purge", middleware.AdminRequired(), purgeMediaHandler(svc))
 	authed.GET("/media/:id/subtitles", listSubtitlesHandler(svc))
 	authed.GET("/subtitles/:id", serveSubtitleHandler(svc))
+	authed.POST("/subtitles/cloud-cache/invalidate", middleware.AdminRequired(), invalidateCloudSubtitleCacheHandler(svc))
 	authed.POST("/media/:id/nfo", middleware.AdminRequired(), exportNFOHandler(svc))
 	authed.POST("/libraries/:id/nfo", middleware.AdminRequired(), exportLibraryNFOHandler(svc))
 }

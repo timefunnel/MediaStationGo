@@ -30,6 +30,29 @@ type StorageConfigService struct {
 	resolveMu     sync.Mutex
 	resolveCache  map[string]cloudResolveCacheEntry
 	resolveFlight map[string]*cloudResolveCall
+	changeMu      sync.RWMutex
+	onChange      func(string)
+}
+
+func (s *StorageConfigService) SetChangeHandler(handler func(string)) {
+	if s == nil {
+		return
+	}
+	s.changeMu.Lock()
+	s.onChange = handler
+	s.changeMu.Unlock()
+}
+
+func (s *StorageConfigService) notifyChanged(typ string) {
+	if s == nil {
+		return
+	}
+	s.changeMu.RLock()
+	handler := s.onChange
+	s.changeMu.RUnlock()
+	if handler != nil {
+		handler(strings.TrimSpace(typ))
+	}
 }
 
 // NewStorageConfigService is the constructor.
@@ -133,6 +156,7 @@ func (s *StorageConfigService) Save(ctx context.Context, in StorageInput) (*Stor
 		return nil, err
 	}
 	s.clearResolveCacheForType(in.Type)
+	s.notifyChanged(in.Type)
 	return s.Get(ctx, in.Type)
 }
 

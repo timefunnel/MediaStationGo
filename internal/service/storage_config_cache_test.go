@@ -203,3 +203,23 @@ func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
 		t.Fatal("empty resolved link")
 	}
 }
+
+func TestStorageConfigSaveNotifiesChangeHandler(t *testing.T) {
+	_, storage := newStorageUploadTestService(t)
+	var changed string
+	storage.SetChangeHandler(func(typ string) {
+		changed = typ
+	})
+	if _, err := storage.Save(t.Context(), StorageInput{
+		Type: "openlist",
+		Config: map[string]any{
+			"server": "http://openlist.test",
+			"token":  "token",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if changed != "openlist" {
+		t.Fatalf("changed=%q, want openlist", changed)
+	}
+}

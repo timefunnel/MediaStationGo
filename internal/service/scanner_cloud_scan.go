@@ -30,6 +30,7 @@ type cloudScanImportResult struct {
 
 type cloudLibraryScanCompletion struct {
 	libraryID         string
+	provider          string
 	touchedLibraryIDs []string
 	result            *ScanResult
 	progress          *cloudScanProgressState
@@ -113,7 +114,7 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 	}
 	scopeIDs = appendUniqueLibraryIDs(scopeIDs, imported.scopeLibraryIDs...)
 	writeBatch.Flush()
-	s.completeCloudLibraryScan(ctx, cloudLibraryScanCompletion{libraryID: lib.ID, touchedLibraryIDs: imported.touchedLibraryIDs, result: res, progress: progress, autoScrape: autoScrape})
+	s.completeCloudLibraryScan(ctx, cloudLibraryScanCompletion{libraryID: lib.ID, provider: mount.Provider, touchedLibraryIDs: imported.touchedLibraryIDs, result: res, progress: progress, autoScrape: autoScrape})
 	return res, nil
 }
 
@@ -184,6 +185,7 @@ func (s *ScannerService) scanCloudLibraryWithRoot(ctx context.Context, lib *mode
 	}
 	s.completeCloudLibraryScan(ctx, cloudLibraryScanCompletion{
 		libraryID:         lib.ID,
+		provider:          typ,
 		touchedLibraryIDs: imported.touchedLibraryIDs,
 		result:            res,
 		progress:          progress,
@@ -243,6 +245,9 @@ func (s *ScannerService) importCloudScanCandidates(ctx context.Context, rootLib 
 func (s *ScannerService) completeCloudLibraryScan(ctx context.Context, req cloudLibraryScanCompletion) {
 	publishCloudScanFinished(s, req.libraryID, req.result, req.progress)
 	s.invalidateMediaCache(ctx)
+	if scanHasImportChanges(req.result) && s.subtitle != nil {
+		s.subtitle.InvalidateCloudDiscovery("", req.provider)
+	}
 	targetIDs := appendUniqueLibraryIDs(req.touchedLibraryIDs, req.libraryID)
 	for _, targetID := range targetIDs {
 		s.maybeGenerateSTRMAfterScan(targetID)

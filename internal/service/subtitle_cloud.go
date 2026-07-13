@@ -9,31 +9,26 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 )
 
-func discoverCloudSubtitles(ctx context.Context, s *SubtitleService, m model.Media) []SubtitleTrack {
+func loadCloudSubtitles(ctx context.Context, s *SubtitleService, m model.Media) ([]SubtitleTrack, error) {
 	if s == nil || s.storage == nil {
-		return []SubtitleTrack{}
+		return nil, errors.New("cloud storage service unavailable")
 	}
 	typ, mediaRef, ok := cloudSubtitleMediaRef(m)
 	if !ok {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, nil
 	}
 	dirRef, mediaName := splitCloudRef(mediaRef)
 	if mediaName == "" {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, nil
 	}
 	base := strings.TrimSuffix(mediaName, filepath.Ext(mediaName))
 	entries, err := s.storage.CloudList(ctx, typ, dirRef)
 	if err != nil {
-		if s.log != nil {
-			s.log.Debug("list cloud subtitles failed", zap.String("provider", typ), zap.String("dir", dirRef), zap.Error(err))
-		}
-		return []SubtitleTrack{}
+		return nil, fmt.Errorf("list cloud subtitle directory %q: %w", dirRef, err)
 	}
 	tracks := cloudSubtitleTracks(typ, entries, base, false)
 	for _, entry := range entries {
@@ -42,11 +37,11 @@ func discoverCloudSubtitles(ctx context.Context, s *SubtitleService, m model.Med
 		}
 		subEntries, err := s.storage.CloudList(ctx, typ, entry.ID)
 		if err != nil {
-			continue
+			return tracks, fmt.Errorf("list cloud subtitle subdirectory %q: %w", entry.Name, err)
 		}
 		tracks = append(tracks, cloudSubtitleTracks(typ, subEntries, base, true)...)
 	}
-	return tracks
+	return tracks, nil
 }
 
 func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, subdir bool) []SubtitleTrack {
@@ -144,7 +139,11 @@ func serveCloudSubtitle(ctx context.Context, s *SubtitleService, m model.Media, 
 		return ErrCloudPlaybackUnavailable
 	}
 	allowed := false
-	for _, track := range discoverCloudSubtitles(ctx, s, m) {
+	tracks, err := s.discoverCloudSubtitlesCached(ctx, m)
+	if err != nil {
+		return err
+	}
+	for _, track := range tracks {
 		if track.Path == buildCloudSubtitlePath(typ, ref, name) {
 			allowed = true
 			break

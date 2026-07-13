@@ -35,11 +35,17 @@ type SubtitleService struct {
 	repo          *repository.Container
 	storage       *StorageConfigService
 	localCacheDir string
+	cloudCache    *cloudSubtitleDiscoveryCache
 }
 
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
-	s := &SubtitleService{log: log, repo: repo, localCacheDir: subtitleCacheDirFromEnv()}
+	s := &SubtitleService{
+		log:           log,
+		repo:          repo,
+		localCacheDir: subtitleCacheDirFromEnv(),
+		cloudCache:    newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
+	}
 	if len(storage) > 0 {
 		s.storage = storage[0]
 	}
@@ -49,6 +55,7 @@ func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...
 func (s *SubtitleService) SetStorageConfig(storage *StorageConfigService) {
 	if s != nil {
 		s.storage = storage
+		s.InvalidateCloudDiscovery("", "")
 	}
 }
 
@@ -119,7 +126,17 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	}
 	localTracks := discoverLocalCachedSubtitles(s, mediaID)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		return mergeSubtitleTracks(discoverCloudSubtitles(ctx, s, *m), localTracks), nil
+		cloudTracks, err := s.discoverCloudSubtitlesCached(ctx, *m)
+		if err != nil {
+			if s.log != nil {
+				s.log.Warn("discover cloud subtitles failed",
+					zap.String("media_id", m.ID),
+					zap.String("path", m.Path),
+					zap.Error(err))
+			}
+			return mergeSubtitleTracks(cloudTracks, localTracks), nil
+		}
+		return mergeSubtitleTracks(cloudTracks, localTracks), nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))

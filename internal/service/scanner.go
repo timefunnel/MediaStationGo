@@ -58,6 +58,7 @@ type ScannerService struct {
 	storage   *StorageConfigService
 	cache     *RuntimeCacheService
 	notify    *NotifyChannelService
+	subtitle  *SubtitleService
 
 	imageProxy *ImageProxy
 
@@ -139,6 +140,12 @@ func (s *ScannerService) SetRuntimeCache(cache *RuntimeCacheService) {
 func (s *ScannerService) SetNotifyChannels(notify *NotifyChannelService) {
 	if s != nil {
 		s.notify = notify
+	}
+}
+
+func (s *ScannerService) SetSubtitleService(subtitle *SubtitleService) {
+	if s != nil {
+		s.subtitle = subtitle
 	}
 }
 
