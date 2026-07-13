@@ -20,7 +20,11 @@ type pipelineMaintenanceRequest struct {
 func registerAuthedPipelineMaintenanceRoutes(authed *gin.RouterGroup, svc *service.Container) {
 	authed.POST("/pipeline/media/:id/repair-movie-extras", middleware.AdminRequired(), pipelineRepairMovieExtrasHandler(svc))
 	authed.POST("/pipeline/media/:id/repair-episode-visibility", middleware.AdminRequired(), pipelineRepairEpisodeVisibilityHandler(svc))
+	authed.POST("/pipeline/deleted-media/hide-candidates", middleware.AdminRequired(), pipelineDeletedMediaHideCandidatesHandler(svc))
 	authed.POST("/pipeline/deleted-media/prune", middleware.AdminRequired(), pipelinePruneDeletedMediaHandler(svc))
+	authed.POST("/pipeline/migrations/search", middleware.AdminRequired(), pipelineMigrationSearchHandler(svc))
+	authed.POST("/pipeline/migrations/validate", middleware.AdminRequired(), pipelineMigrationValidateHandler(svc))
+	authed.POST("/pipeline/migrations/apply", middleware.AdminRequired(), pipelineMigrationApplyHandler(svc))
 }
 
 func pipelineRepairMovieExtrasHandler(svc *service.Container) gin.HandlerFunc {
