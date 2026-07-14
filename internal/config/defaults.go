@@ -118,4 +118,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("license.server_url", defaultLicenseServerURL)
 	v.SetDefault("license.hmac_secret", "")
 	v.SetDefault("license.public_key", defaultLicensePublicKey)
+
+	v.SetDefault("resource_import.enabled", false)
+	v.SetDefault("resource_import.pipeline_url", "")
+	v.SetDefault("resource_import.pipeline_token", "")
+	v.SetDefault("resource_import.max_concurrent", 3)
+	v.SetDefault("resource_import.max_concurrent_per_user", 2)
+	v.SetDefault("resource_import.poll_seconds", 5)
+	v.SetDefault("resource_import.search_timeout_seconds", 30)
 }

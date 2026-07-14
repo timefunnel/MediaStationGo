@@ -2,19 +2,31 @@ package config
 
 // Config 是根配置聚合。
 type Config struct {
-	App          AppConfig          `mapstructure:"app"`
-	Database     DatabaseConfig     `mapstructure:"database"`
-	Secrets      SecretsConfig      `mapstructure:"secrets"`
-	Logging      LoggingConfig      `mapstructure:"logging"`
-	Cache        CacheConfig        `mapstructure:"cache"`
-	Search       SearchConfig       `mapstructure:"search"`
-	Media        MediaConfig        `mapstructure:"media"`
-	Transcoder   TranscoderConfig   `mapstructure:"transcoder"`
-	AI           AIConfig           `mapstructure:"ai"`
-	FlareSolverr FlareSolverrConfig `mapstructure:"flaresolverr"`
-	ApiConfig    ApiConfigConfig    `mapstructure:"api_config"`
-	Organizer    OrganizerConfig    `mapstructure:"organizer"`
-	License      LicenseConfig      `mapstructure:"license"`
+	App            AppConfig            `mapstructure:"app"`
+	Database       DatabaseConfig       `mapstructure:"database"`
+	Secrets        SecretsConfig        `mapstructure:"secrets"`
+	Logging        LoggingConfig        `mapstructure:"logging"`
+	Cache          CacheConfig          `mapstructure:"cache"`
+	Search         SearchConfig         `mapstructure:"search"`
+	Media          MediaConfig          `mapstructure:"media"`
+	Transcoder     TranscoderConfig     `mapstructure:"transcoder"`
+	AI             AIConfig             `mapstructure:"ai"`
+	FlareSolverr   FlareSolverrConfig   `mapstructure:"flaresolverr"`
+	ApiConfig      ApiConfigConfig      `mapstructure:"api_config"`
+	Organizer      OrganizerConfig      `mapstructure:"organizer"`
+	License        LicenseConfig        `mapstructure:"license"`
+	ResourceImport ResourceImportConfig `mapstructure:"resource_import"`
+}
+
+// ResourceImportConfig configures the trusted media-pipeline bridge.
+type ResourceImportConfig struct {
+	Enabled              bool   `mapstructure:"enabled"`
+	PipelineURL          string `mapstructure:"pipeline_url"`
+	PipelineToken        string `mapstructure:"pipeline_token"`
+	MaxConcurrent        int    `mapstructure:"max_concurrent"`
+	MaxConcurrentPerUser int    `mapstructure:"max_concurrent_per_user"`
+	PollSeconds          int    `mapstructure:"poll_seconds"`
+	SearchTimeoutSeconds int    `mapstructure:"search_timeout_seconds"`
 }
 
 // ApiConfigConfig API 配置相关设置。

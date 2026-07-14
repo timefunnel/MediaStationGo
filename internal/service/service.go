@@ -78,6 +78,7 @@ type Container struct {
 	PipelineMaintenance *PipelineMaintenanceService
 	PipelineIngest      *PipelineIngestService
 	PipelineScrape      *PipelineScrapeService
+	ResourceImport      *ResourceImportService
 
 	stopCtx    context.Context
 	stopCancel context.CancelFunc

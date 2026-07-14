@@ -1,3 +1,5 @@
+import { Search } from 'lucide-react'
+
 import type { Library } from '../types'
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
 import { libraryDisplayPath } from './libraryDisplayModel'
@@ -16,6 +18,7 @@ type LibraryPageHeaderProps = {
   onScan: () => void
   onScrape: () => void
   onRepairRescrape: () => void
+  onResourceSearch: () => void
 }
 
 export function LibraryPageHeader({
@@ -32,6 +35,7 @@ export function LibraryPageHeader({
   onScan,
   onScrape,
   onRepairRescrape,
+  onResourceSearch,
 }: LibraryPageHeaderProps) {
   const displayPath = library ? libraryDisplayPath(library.path) : ''
 
@@ -46,8 +50,18 @@ export function LibraryPageHeader({
         {loadingAllText && <p className="mt-1 text-xs text-sand-500">{loadingAllText}</p>}
         {scanProgress && <p className="mt-1 text-xs text-brand-500">{scanProgress}</p>}
       </div>
-      {isAdmin && (
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          className="btn-outline h-10 w-10 px-0"
+          title="搜索资源并入库"
+          aria-label="搜索资源并入库"
+          onClick={onResourceSearch}
+        >
+          <Search size={18} />
+        </button>
+        {isAdmin && (
+          <>
           <EpisodeArtworkToggle
             checked={scrapeEpisodeArtwork}
             onChange={onScrapeEpisodeArtworkChange}
@@ -68,8 +82,9 @@ export function LibraryPageHeader({
           >
             {repairing ? '修复中…' : '修复+重刮本库'}
           </button>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

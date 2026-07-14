@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   Cast,
   Clock,
   CloudDownload,
@@ -71,10 +72,11 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     id: 'downloads',
     label: '下载与订阅',
     icon: CloudDownload,
-    activePaths: ['/downloads', '/download-clients', '/subscriptions', '/site-search', '/sites'],
+    activePaths: ['/downloads', '/download-clients', '/subscriptions', '/site-search', '/sites', '/tasks'],
     items: [
       { to: '/downloads', label: '下载中心', icon: CloudDownload, permission: 'can_manage_downloads' },
       { to: '/subscriptions', label: '订阅管理', icon: Rss, permission: 'can_manage_subscriptions' },
+      { to: '/tasks', label: '入库任务', icon: Activity },
       { to: '/sites', label: '站点管理', icon: Globe, permission: 'can_manage_sites' },
     ],
   },
@@ -82,7 +84,7 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     id: 'tools',
     label: '文件与自动化',
     icon: HardDrive,
-    activePaths: ['/storage', '/storage-config', '/files', '/strm', '/duplicates', '/tasks', '/scheduler', '/recycle', '/stats'],
+    activePaths: ['/storage', '/storage-config', '/files', '/strm', '/duplicates', '/scheduler', '/recycle', '/stats'],
     adminOnly: true,
     items: [
       { to: '/storage', label: '存储与文件', icon: HardDrive },

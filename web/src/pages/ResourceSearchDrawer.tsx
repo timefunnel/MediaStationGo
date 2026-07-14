@@ -1,0 +1,662 @@
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  LoaderCircle,
+  Search,
+  X,
+} from 'lucide-react'
+
+import { confirmAction } from '../components/confirmAction'
+import {
+  resourceImportsAPI,
+  type ResourceImportDuplicateConflict,
+  type ResourceImportTask,
+  type ResourceSearchCandidate,
+  type ResourceSearchResponse,
+  type ResourceSearchRoot,
+} from '../api/resourceImports'
+import type { LibraryRoot } from '../types'
+import { formatSize } from './libraryPageModel'
+import { ResourceImportTaskView } from './ResourceImportTaskView'
+import {
+  RESOURCE_SEARCH_PAGE_SIZE,
+  cappedResourceTotal,
+  cappedResourceTotalPages,
+  clampResourcePage,
+  isResourceImportActive,
+  resolveResourceRootID,
+  resourceImportError,
+  resourceImportDuplicateConflict,
+  supportsResourceSource,
+} from './resourceImportModel'
+
+type ResourceSearchDrawerProps = {
+  open: boolean
+  libraryID: string
+  libraryName: string
+  libraryRoots: LibraryRoot[]
+  tasks: ResourceImportTask[]
+  taskID: string
+  onTaskIDChange: (taskID: string) => void
+  onTaskChanged: (task: ResourceImportTask) => void
+  onClose: () => void
+}
+
+type SearchSource = '' | 'pansou'
+
+export function ResourceSearchDrawer({
+  open,
+  libraryID,
+  libraryName,
+  libraryRoots,
+  tasks,
+  taskID,
+  onTaskIDChange,
+  onTaskChanged,
+  onClose,
+}: ResourceSearchDrawerProps) {
+  const [query, setQuery] = useState('')
+  const [response, setResponse] = useState<ResourceSearchResponse | null>(null)
+  const [source, setSource] = useState<SearchSource>('')
+  const [selectedRootID, setSelectedRootID] = useState('')
+  const [jumpPage, setJumpPage] = useState('1')
+  const [searching, setSearching] = useState(false)
+  const [importingIndex, setImportingIndex] = useState<number | null>(null)
+  const [searchError, setSearchError] = useState('')
+  const [taskError, setTaskError] = useState('')
+  const [localTask, setLocalTask] = useState<ResourceImportTask | null>(null)
+  const [busyAction, setBusyAction] = useState<'cancel' | 'retry' | null>(null)
+  const [duplicateConflict, setDuplicateConflict] = useState<{
+    candidate: ResourceSearchCandidate
+    conflict: ResourceImportDuplicateConflict
+  } | null>(null)
+
+  const roots = useMemo(
+    () => searchRoots(response, libraryRoots),
+    [libraryRoots, response],
+  )
+  const selectedTask = taskID
+    ? (localTask?.id === taskID ? localTask : tasks.find((task) => task.id === taskID) ?? null)
+    : null
+  const selectedTaskStatus = selectedTask?.status ?? ''
+  const total = cappedResourceTotal(response?.total ?? 0)
+  const totalPages = cappedResourceTotalPages(
+    response?.total ?? 0,
+    response?.page_size ?? RESOURCE_SEARCH_PAGE_SIZE,
+    response?.total_pages,
+  )
+  const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
+
+  useEffect(() => {
+    setSelectedRootID((current) => resolveResourceRootID(roots, current))
+  }, [roots])
+
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [onClose, open])
+
+  useEffect(() => {
+    if (!taskID) {
+      setLocalTask(null)
+      setTaskError('')
+      return
+    }
+    const next = tasks.find((task) => task.id === taskID)
+    if (next) setLocalTask(next)
+  }, [taskID, tasks])
+
+  useEffect(() => {
+    if (!open || !taskID || (selectedTaskStatus && !isResourceImportActive(selectedTaskStatus))) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const task = await resourceImportsAPI.get(taskID)
+        if (cancelled) return
+        setLocalTask(task)
+        onTaskChanged(task)
+        setTaskError('')
+      } catch (requestError) {
+        if (!cancelled) setTaskError(resourceImportError(requestError, '任务进度加载失败'))
+      }
+    }
+    void tick()
+    const timer = window.setInterval(tick, 2_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [onTaskChanged, open, selectedTaskStatus, taskID])
+
+  if (!open) return null
+
+  const runSearch = async (page: number, nextSource: SearchSource = source) => {
+    const normalizedQuery = query.trim()
+    if (!normalizedQuery) {
+      setSearchError('请输入要查找的影片或剧集名称')
+      return
+    }
+    const effectiveRootID = resolveResourceRootID(roots, selectedRootID)
+    if (roots.length > 1 && !effectiveRootID) {
+      setSearchError('该媒体库有多个目录，请先明确选择入库目录')
+      return
+    }
+    setSearching(true)
+    setSearchError('')
+    setDuplicateConflict(null)
+    try {
+      const next = await resourceImportsAPI.search(libraryID, {
+        query: normalizedQuery,
+        source: nextSource || undefined,
+        page,
+        page_size: RESOURCE_SEARCH_PAGE_SIZE,
+        root_id: effectiveRootID || undefined,
+      })
+      if (!next.session_id || !Array.isArray(next.results)) {
+        throw new Error('资源搜索响应缺少会话或结果列表')
+      }
+      setResponse(next)
+      setSource(nextSource)
+      setJumpPage(String(clampResourcePage(next.page, cappedResourceTotalPages(next.total, next.page_size, next.total_pages))))
+    } catch (requestError) {
+      setSearchError(resourceImportError(requestError, '资源搜索失败'))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const submitSearch = (event: FormEvent) => {
+    event.preventDefault()
+    void runSearch(1)
+  }
+
+  const importCandidate = async (candidate: ResourceSearchCandidate, forceDuplicate = false) => {
+    if (!response) return
+    if (!selectedRootID) {
+      setSearchError('该媒体库有多个目录，请先明确选择入库目录')
+      return
+    }
+    setImportingIndex(candidate.index)
+    setSearchError('')
+    setDuplicateConflict(null)
+    try {
+      const task = await resourceImportsAPI.create(libraryID, {
+        search_session_id: response.session_id,
+        candidate_index: candidate.index,
+        root_id: selectedRootID,
+        force_duplicate: forceDuplicate || undefined,
+      })
+      setLocalTask(task)
+      onTaskChanged(task)
+      onTaskIDChange(task.id)
+    } catch (requestError) {
+      const conflict = resourceImportDuplicateConflict(requestError)
+      if (conflict) {
+        setDuplicateConflict({ candidate, conflict })
+      } else {
+        setSearchError(resourceImportError(requestError, '提交入库任务失败'))
+      }
+    } finally {
+      setImportingIndex(null)
+    }
+  }
+
+  const cancelTask = async (task: ResourceImportTask) => {
+    const confirmed = await confirmAction({
+      title: '取消资源入库任务',
+      message: '确定取消当前任务吗？取消后，已经转存到 115 的文件可能仍会保留。',
+      confirmText: '取消任务',
+      cancelText: '继续执行',
+    })
+    if (!confirmed) return
+    setBusyAction('cancel')
+    setTaskError('')
+    try {
+      const next = await resourceImportsAPI.cancel(task.id)
+      setLocalTask(next)
+      onTaskChanged(next)
+    } catch (requestError) {
+      setTaskError(resourceImportError(requestError, '取消任务失败'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const retryTask = async (task: ResourceImportTask) => {
+    setBusyAction('retry')
+    setTaskError('')
+    try {
+      const next = await resourceImportsAPI.retry(task.id)
+      setLocalTask(next)
+      onTaskChanged(next)
+      onTaskIDChange(next.id)
+    } catch (requestError) {
+      setTaskError(resourceImportError(requestError, '重试任务失败'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`${libraryName} 资源搜索入库`}>
+      <button
+        type="button"
+        className="absolute inset-0 hidden bg-black/35 backdrop-blur-sm sm:block"
+        aria-label="关闭资源搜索面板"
+        onClick={onClose}
+      />
+      <aside className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-[var(--app-panel)] px-4 sm:px-6">
+          {taskID && (
+            <button
+              type="button"
+              className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
+              title="返回搜索结果"
+              aria-label="返回搜索结果"
+              onClick={() => onTaskIDChange('')}
+            >
+              <ArrowLeft size={19} />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-display text-lg font-bold text-ink-600">
+              {taskID ? '资源入库进度' : '搜索资源并入库'}
+            </h2>
+            <p className="truncate text-xs text-sand-500">{libraryName}</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
+            title="关闭"
+            aria-label="关闭资源搜索面板"
+            onClick={onClose}
+          >
+            <X size={20} />
+          </button>
+        </header>
+
+        {taskID ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            {taskError && <InlineError message={taskError} />}
+            {selectedTask ? (
+              <div>
+                <ResourceImportTaskView
+                  task={selectedTask}
+                  busyAction={busyAction}
+                  onCancel={(task) => void cancelTask(task)}
+                  onRetry={(task) => void retryTask(task)}
+                />
+                {isResourceImportActive(selectedTask.status) && (
+                  <p className="mt-3 text-xs leading-5 text-sand-500">
+                    任务进度通过当前账号鉴权后的接口轮询更新。取消后，已经转存到 115 的文件可能仍会保留。
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 py-8 text-sm text-sand-500">
+                <LoaderCircle size={17} className="animate-spin" />
+                正在加载任务详情…
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <form className="shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 py-4 sm:px-6" onSubmit={submitSearch}>
+              <div className="flex gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">搜索关键词</span>
+                  <input
+                    autoFocus
+                    className="input-field h-11 py-2.5"
+                    value={query}
+                    placeholder="输入影片、剧集或资源名称"
+                    maxLength={200}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+                <button type="submit" className="btn-primary h-11 shrink-0 px-4" disabled={searching}>
+                  {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Search size={18} />}
+                  <span className="hidden sm:inline">搜索</span>
+                </button>
+              </div>
+
+              {roots.length > 0 && (
+                <div className="mt-3">
+                  {roots.length === 1 ? (
+                    <p className="truncate text-xs text-sand-500" title={roots[0].path}>
+                      入库目录：{rootLabel(roots[0])}
+                    </p>
+                  ) : (
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-semibold text-ink-100">入库目录</span>
+                      <select
+                        className="input-field h-10 py-2"
+                        value={selectedRootID}
+                        onChange={(event) => setSelectedRootID(event.target.value)}
+                      >
+                        <option value="">请选择本次入库目录</option>
+                        {roots.map((root) => (
+                          <option key={root.id} value={root.id}>{rootLabel(root)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {response?.capabilities && (
+                <SearchSourceControl
+                  source={source}
+                  searching={searching}
+                  pansou={supportsResourceSource(response.capabilities, 'pansou')}
+                  onSelect={(nextSource) => void runSearch(1, nextSource)}
+                />
+              )}
+
+              {searchError && <InlineError message={searchError} className="mt-3" />}
+            </form>
+
+            {duplicateConflict && (
+              <DuplicateConfirmation
+                candidate={duplicateConflict.candidate}
+                conflict={duplicateConflict.conflict}
+                importing={importingIndex !== null}
+                onForce={() => void importCandidate(duplicateConflict.candidate, true)}
+                onCancel={() => setDuplicateConflict(null)}
+              />
+            )}
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
+              {!response && !searching && (
+                <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
+                  <Search className="mb-3 h-9 w-9" />
+                  <p className="text-sm">在当前媒体库中搜索可入库资源</p>
+                </div>
+              )}
+
+              {response && (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 py-3 text-xs text-sand-500">
+                    <span>共 {total} 条{response.total > total ? '，仅展示前 100 条' : ''}</span>
+                    <span>第 {currentPage} / {totalPages} 页</span>
+                  </div>
+
+                  {response.results.length === 0 ? (
+                    <p className="py-12 text-center text-sm text-sand-500">当前搜索没有返回资源</p>
+                  ) : (
+                    <div>
+                      {response.results.slice(0, RESOURCE_SEARCH_PAGE_SIZE).map((candidate) => (
+                        <ResourceCandidateRow
+                          key={`${response.session_id}-${candidate.index}`}
+                          candidate={candidate}
+                          importing={importingIndex === candidate.index}
+                          importDisabled={!selectedRootID || importingIndex !== null}
+                          onImport={() => void importCandidate(candidate)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {response && totalPages > 1 && (
+              <ResourceSearchPagination
+                page={currentPage}
+                totalPages={totalPages}
+                jumpPage={jumpPage}
+                disabled={searching}
+                onJumpPageChange={setJumpPage}
+                onPageChange={(page) => void runSearch(clampResourcePage(page, totalPages))}
+              />
+            )}
+          </>
+        )}
+      </aside>
+    </div>
+  )
+}
+
+function SearchSourceControl({
+  source,
+  searching,
+  pansou,
+  onSelect,
+}: {
+  source: SearchSource
+  searching: boolean
+  pansou: boolean
+  onSelect: (source: SearchSource) => void
+}) {
+  if (!pansou) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold text-ink-100">搜索方式</span>
+      <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <SourceButton active={source === ''} disabled={searching} onClick={() => onSelect('')}>普通</SourceButton>
+        {pansou && (
+          <SourceButton active={source === 'pansou'} disabled={searching} onClick={() => onSelect('pansou')}>
+            Pansou 补查
+          </SourceButton>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SourceButton({
+  active,
+  disabled,
+  children,
+  onClick,
+}: {
+  active: boolean
+  disabled: boolean
+  children: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex h-9 items-center gap-1.5 border-r border-gray-200 px-3 text-xs font-semibold last:border-r-0 ${active ? 'bg-brand-500 text-white' : 'text-ink-100 hover:bg-gray-50'}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ResourceCandidateRow({
+  candidate,
+  importing,
+  importDisabled,
+  onImport,
+}: {
+  candidate: ResourceSearchCandidate
+  importing: boolean
+  importDisabled: boolean
+  onImport: () => void
+}) {
+  const metadata = [
+    candidate.size_text || (candidate.size_bytes ? formatSize(candidate.size_bytes) : ''),
+    candidate.source ? `来源 ${candidate.source}` : '',
+    candidate.seeders !== undefined ? `做种 ${candidate.seeders}` : '',
+    candidate.resolution,
+    candidate.subtitle,
+    candidate.resource_type,
+  ].filter(Boolean)
+
+  return (
+    <article className="border-b border-gray-200 py-4 last:border-b-0">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="break-words text-sm font-semibold leading-6 text-ink-600">{candidate.title}</h3>
+          {metadata.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-sand-500">
+              {metadata.map((item) => <span key={String(item)}>{item}</span>)}
+            </div>
+          )}
+          {candidate.summary && <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-ink-50">{candidate.summary}</p>}
+        </div>
+        <button
+          type="button"
+          className="btn-outline h-10 shrink-0 px-3"
+          title={importDisabled && !importing ? '请先选择入库目录' : '提交入库任务'}
+          disabled={importDisabled}
+          onClick={onImport}
+        >
+          {importing ? <LoaderCircle size={17} className="animate-spin" /> : <Download size={17} />}
+          <span className="hidden sm:inline">入库</span>
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function ResourceSearchPagination({
+  page,
+  totalPages,
+  jumpPage,
+  disabled,
+  onJumpPageChange,
+  onPageChange,
+}: {
+  page: number
+  totalPages: number
+  jumpPage: string
+  disabled: boolean
+  onJumpPageChange: (page: string) => void
+  onPageChange: (page: number) => void
+}) {
+  const submitJump = (event: FormEvent) => {
+    event.preventDefault()
+    const parsed = Number.parseInt(jumpPage, 10)
+    if (!Number.isFinite(parsed)) {
+      onJumpPageChange(String(page))
+      return
+    }
+    onPageChange(clampResourcePage(parsed, totalPages))
+  }
+  return (
+    <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-[var(--app-panel)] px-4 py-3 sm:px-6">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="btn-outline h-9 px-3"
+          title="上一页"
+          disabled={disabled || page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          <ChevronLeft size={17} />
+          <span className="hidden sm:inline">上一页</span>
+        </button>
+        <button
+          type="button"
+          className="btn-outline h-9 px-3"
+          title="下一页"
+          disabled={disabled || page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          <span className="hidden sm:inline">下一页</span>
+          <ChevronRight size={17} />
+        </button>
+      </div>
+      <form className="flex items-center gap-2" onSubmit={submitJump}>
+        <label className="text-xs text-sand-500" htmlFor="resource-search-jump">跳至</label>
+        <input
+          id="resource-search-jump"
+          type="number"
+          min={1}
+          max={totalPages}
+          className="input-field h-9 w-20 px-2 py-1 text-center"
+          value={jumpPage}
+          disabled={disabled}
+          onChange={(event) => onJumpPageChange(event.target.value)}
+        />
+        <button type="submit" className="btn-outline h-9 px-3" disabled={disabled}>跳页</button>
+      </form>
+    </footer>
+  )
+}
+
+function InlineError({ message, className = '' }: { message: string; className?: string }) {
+  return <p className={`break-words text-sm text-red-500 ${className}`}>{message}</p>
+}
+
+function DuplicateConfirmation({
+  candidate,
+  conflict,
+  importing,
+  onForce,
+  onCancel,
+}: {
+  candidate: ResourceSearchCandidate
+  conflict: ResourceImportDuplicateConflict
+  importing: boolean
+  onForce: () => void
+  onCancel: () => void
+}) {
+  return (
+    <section className="shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-4 sm:px-6">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-amber-900">检测到重复资源</h3>
+          <p className="mt-1 break-words text-sm text-amber-800">{conflict.message}</p>
+          <p className="mt-1 truncate text-xs text-amber-700" title={candidate.title}>{candidate.title}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {conflict.can_force ? (
+              <>
+                <button type="button" className="btn-primary px-4 py-2" disabled={importing} onClick={onForce}>
+                  {importing && <LoaderCircle size={16} className="animate-spin" />}
+                  仍然入库
+                </button>
+                <button type="button" className="btn-outline px-4 py-2" disabled={importing} onClick={onCancel}>
+                  取消
+                </button>
+              </>
+            ) : (
+              <>
+                {conflict.media_id && (
+                  <Link className="btn-primary px-4 py-2" to={`/media/${conflict.media_id}`}>
+                    查看已入库影片
+                  </Link>
+                )}
+                {!conflict.media_id && (
+                  <button type="button" className="btn-outline px-4 py-2" onClick={onCancel}>关闭</button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function searchRoots(response: ResourceSearchResponse | null, libraryRoots: LibraryRoot[]): ResourceSearchRoot[] {
+  if (response?.roots) return response.roots.filter((root) => root.enabled !== false)
+  return libraryRoots
+    .filter((root) => root.enabled)
+    .map((root) => ({ id: root.id, name: root.name, path: root.path, enabled: root.enabled }))
+}
+
+function rootLabel(root: ResourceSearchRoot): string {
+  if (root.name && root.path) return `${root.name} · ${root.path}`
+  return root.name || root.path || root.id
+}

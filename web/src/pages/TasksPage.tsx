@@ -3,7 +3,9 @@ import toast from 'react-hot-toast'
 import { Activity, Copy } from 'lucide-react'
 
 import { tasksAPI, type BackgroundTask, type TasksSnapshot } from '../api/tasks'
+import { useAuthStore } from '../stores/auth'
 import { TorrentTaskTable, TranscodeTaskTable } from './TaskRuntimeTables'
+import { ResourceImportTasksSection } from './ResourceImportTasksSection'
 
 const metricLabels: Record<string, string> = {
   organized: '新增',
@@ -94,7 +96,8 @@ async function copyTask(task: BackgroundTask) {
 function BackgroundTaskTable({ tasks, empty }: { tasks: BackgroundTask[]; empty: string }) {
   if (tasks.length === 0) return <p className="text-sand-500">{empty}</p>
   return (
-    <table className="w-full text-left text-sm">
+    <div className="overflow-x-auto">
+    <table className="min-w-[760px] w-full text-left text-sm">
       <thead className="text-xs uppercase tracking-wider text-sand-500">
         <tr>
           <th className="py-2">任务</th>
@@ -147,6 +150,7 @@ function BackgroundTaskTable({ tasks, empty }: { tasks: BackgroundTask[]; empty:
         ))}
       </tbody>
     </table>
+    </div>
   )
 }
 
@@ -154,8 +158,10 @@ function BackgroundTaskTable({ tasks, empty }: { tasks: BackgroundTask[]; empty:
 // transcodes + qBittorrent downloads. Refreshes every 3 s.
 export function TasksPage() {
   const [snap, setSnap] = useState<TasksSnapshot | null>(null)
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
 
   useEffect(() => {
+    if (!isAdmin) return
     let cancelled = false
     const tick = () =>
       tasksAPI.snapshot().then((s) => {
@@ -167,12 +173,10 @@ export function TasksPage() {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [])
+  }, [isAdmin])
 
-  if (!snap) return <p className="text-sand-500">加载中…</p>
-
-  const torrents = snap.torrents ?? []
-  const background = snap.background_tasks ?? { active: [], recent: [] }
+  const torrents = snap?.torrents ?? []
+  const background = snap?.background_tasks ?? { active: [], recent: [] }
 
   return (
     <div className="space-y-8">
@@ -181,7 +185,11 @@ export function TasksPage() {
         <h1 className="font-display text-3xl font-bold text-ink-600">实时任务</h1>
       </header>
 
-      <section className="glass-panel">
+      <ResourceImportTasksSection isAdmin={isAdmin} />
+
+      {isAdmin && !snap && <p className="text-sand-500">正在加载系统任务…</p>}
+
+      {isAdmin && snap && <section className="glass-panel">
         <h2 className="mb-3 font-display text-lg font-semibold text-ink-600">整理 / 重命名 / 入库 / 刮削任务</h2>
         <div className="space-y-5">
           <div>
@@ -193,17 +201,17 @@ export function TasksPage() {
             <BackgroundTaskTable tasks={background.recent.slice(0, 10)} empty="暂无最近完成的后台任务。" />
           </div>
         </div>
-      </section>
+      </section>}
 
-      <section className="glass-panel">
+      {isAdmin && snap && <section className="glass-panel">
         <h2 className="mb-3 font-display text-lg font-semibold text-ink-600">转码任务</h2>
         <TranscodeTaskTable transcodes={snap.transcodes} />
-      </section>
+      </section>}
 
-      <section className="glass-panel">
+      {isAdmin && snap && <section className="glass-panel">
         <h2 className="mb-3 font-display text-lg font-semibold text-ink-600">下载任务</h2>
         <TorrentTaskTable torrents={torrents} />
-      </section>
+      </section>}
     </div>
   )
 }

@@ -13,16 +13,22 @@ import { useLibraryData } from './useLibraryData'
 import { useLibraryScanStatus } from './useLibraryScanStatus'
 import { useLibrarySeriesSelection } from './useLibrarySeriesSelection'
 import { useLibraryAdminActions } from './useLibraryAdminActions'
+import { useLibraryResourceImports } from './useLibraryResourceImports'
+import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
+import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 
 export function LibraryPage() {
   const { id = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const role = useAuthStore((s) => s.user?.role)
+  const userID = useAuthStore((s) => s.user?.id ?? '')
 
   const [manualSeriesScrapeOpen, setManualSeriesScrapeOpen] = useState(false)
   const [seriesMetadataEditOpen, setSeriesMetadataEditOpen] = useState(false)
   const [manualMovie, setManualMovie] = useState<Media | null>(null)
+  const [resourceDrawerOpen, setResourceDrawerOpen] = useState(false)
+  const [resourceTaskID, setResourceTaskID] = useState('')
 
   // 剧集模式：选中某个剧集后展开详情
   const [selectedSeries, setSelectedSeries] = useState<SeriesCard | null>(null)
@@ -100,6 +106,8 @@ export function LibraryPage() {
     setManualMovie,
   })
 
+  const resourceImports = useLibraryResourceImports(id, userID, reloadCurrentLibrary)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -127,6 +135,23 @@ export function LibraryPage() {
         onScan={handleScan}
         onScrape={handleScrape}
         onRepairRescrape={handleRepairRescrape}
+        onResourceSearch={() => {
+          setResourceTaskID('')
+          setResourceDrawerOpen(true)
+        }}
+      />
+
+      <LibraryResourceImportStatus
+        activeTasks={resourceImports.activeTasks}
+        latestCompletedTask={resourceImports.latestCompletedTask}
+        loading={resourceImports.loading}
+        error={resourceImports.error}
+        onOpenTask={(task) => {
+          setResourceTaskID(task.id)
+          setResourceDrawerOpen(true)
+        }}
+        onDismissCompleted={resourceImports.dismissCompletedTask}
+        onRetryLoad={() => void resourceImports.refresh()}
       />
 
       <LibraryMediaSections
@@ -137,6 +162,7 @@ export function LibraryPage() {
         loading={loading}
         movieActions={movieActions}
         onSeriesClick={handleSeriesClick}
+        highlightedMediaID={resourceImports.highlightedMediaID}
       />
 
       <LibrarySeriesDetailSection
@@ -172,6 +198,18 @@ export function LibraryPage() {
         onCloseSeriesMetadataEdit={() => setSeriesMetadataEditOpen(false)}
         onCloseManualMovie={() => setManualMovie(null)}
         onApplied={reloadCurrentLibrary}
+      />
+
+      <ResourceSearchDrawer
+        open={resourceDrawerOpen}
+        libraryID={id}
+        libraryName={library?.name ?? '媒体库'}
+        libraryRoots={library?.roots ?? []}
+        tasks={resourceImports.tasks}
+        taskID={resourceTaskID}
+        onTaskIDChange={setResourceTaskID}
+        onTaskChanged={resourceImports.acceptTask}
+        onClose={() => setResourceDrawerOpen(false)}
       />
     </div>
   )

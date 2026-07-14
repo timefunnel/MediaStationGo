@@ -13,6 +13,7 @@ type LibraryMediaSectionsProps = {
   loading: boolean
   movieActions: (media: Media) => ReactNode
   onSeriesClick: (series: SeriesCard) => void
+  highlightedMediaID?: string
 }
 
 export function LibraryMediaSections({
@@ -23,13 +24,19 @@ export function LibraryMediaSections({
   loading,
   movieActions,
   onSeriesClick,
+  highlightedMediaID,
 }: LibraryMediaSectionsProps) {
   return (
     <>
       {!isSeries && items.length > 0 && (
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8">
           {items.map((media) => (
-            <MediaCard key={media.id} media={media} actions={movieActions(media)} />
+            <div
+              key={media.id}
+              className={highlightedMediaID === media.id ? 'rounded-lg ring-4 ring-emerald-400/70 ring-offset-2' : ''}
+            >
+              <MediaCard media={media} actions={movieActions(media)} />
+            </div>
           ))}
         </div>
       )}
@@ -41,12 +48,20 @@ export function LibraryMediaSections({
       {isSeries && seriesCards.length > 0 && !selectedSeries && (
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8">
           {seriesCards.map((series) => (
-            <MediaCard
+            <div
               key={series.key}
-              media={series.rep}
-              count={series.count}
-              onClick={() => onSeriesClick(series)}
-            />
+              className={
+                highlightedMediaID === series.rep.id || highlightedMediaID === series.linkMedia.id
+                  ? 'rounded-lg ring-4 ring-emerald-400/70 ring-offset-2'
+                  : ''
+              }
+            >
+              <MediaCard
+                media={series.rep}
+                count={series.count}
+                onClick={() => onSeriesClick(series)}
+              />
+            </div>
           ))}
         </div>
       )}

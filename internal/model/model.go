@@ -62,5 +62,7 @@ func AllModels() []interface{} {
 		&SignIn{},
 		&UserDevice{},
 		&PipelineIngestJobRecord{},
+		&ResourceSearchSession{},
+		&ResourceImportJob{},
 	}
 }

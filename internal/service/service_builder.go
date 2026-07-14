@@ -40,8 +40,37 @@ func newServiceContainer(cfg *config.Config, log *zap.Logger, repos *repository.
 	builder.initSiteDownloadServices()
 	builder.initImageProxy()
 	builder.attachRuntimeContext()
+	builder.initResourceImport()
 	builder.recoverPipelineIngest()
+	builder.recoverResourceImports()
 	return builder.c
+}
+
+func (b *serviceContainerBuilder) initResourceImport() {
+	service, err := NewResourceImportService(b.cfg.ResourceImport, b.log, b.repos, b.c.stopCtx)
+	if err != nil {
+		if b.log != nil {
+			b.log.Error("resource import service initialization failed", zap.Error(err))
+		}
+		return
+	}
+	b.c.ResourceImport = service
+}
+
+func (b *serviceContainerBuilder) recoverResourceImports() {
+	if b.c.ResourceImport == nil {
+		return
+	}
+	count, err := b.c.ResourceImport.Recover(context.Background())
+	if err != nil {
+		if b.log != nil {
+			b.log.Error("resource import recovery failed", zap.Error(err))
+		}
+		return
+	}
+	if count > 0 && b.log != nil {
+		b.log.Info("resource import jobs recovered", zap.Int("count", count))
+	}
 }
 
 func (b *serviceContainerBuilder) recoverPipelineIngest() {

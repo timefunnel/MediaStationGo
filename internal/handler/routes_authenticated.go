@@ -44,4 +44,5 @@ func registerAuthenticatedRoutes(api *gin.RouterGroup, cfg *config.Config, svc *
 	registerAuthedPipelineMaintenanceRoutes(authed, svc)
 	registerAuthedPipelineIngestRoutes(authed, svc)
 	registerAuthedPipelineScrapeRoutes(authed, svc)
+	registerAuthedResourceImportRoutes(authed, svc)
 }

@@ -93,6 +93,11 @@ func TestEnvOverride(t *testing.T) {
 	t.Setenv("MEDIASTATION_LICENSE_SERVER_URL", "https://license.example.com")
 	t.Setenv("MEDIASTATION_LICENSE_HMAC_SECRET", "override-secret")
 	t.Setenv("MEDIASTATION_LICENSE_PUBLIC_KEY", "override-public-key")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_ENABLED", "true")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_PIPELINE_URL", "http://host.docker.internal:8765")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_PIPELINE_TOKEN", "test-pipeline-token")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_MAX_CONCURRENT", "4")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_MAX_CONCURRENT_PER_USER", "2")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
@@ -111,6 +116,12 @@ func TestEnvOverride(t *testing.T) {
 	}
 	if cfg.License.ServerURL != "https://license.example.com" || cfg.License.HMACSecret != "override-secret" || cfg.License.PublicKey != "override-public-key" {
 		t.Fatalf("expected license config from env, got url=%q secret=%q public_key=%q", cfg.License.ServerURL, cfg.License.HMACSecret, cfg.License.PublicKey)
+	}
+	if !cfg.ResourceImport.Enabled || cfg.ResourceImport.PipelineURL != "http://host.docker.internal:8765" || cfg.ResourceImport.PipelineToken != "test-pipeline-token" {
+		t.Fatalf("expected resource import config from env, got %+v", cfg.ResourceImport)
+	}
+	if cfg.ResourceImport.MaxConcurrent != 4 || cfg.ResourceImport.MaxConcurrentPerUser != 2 {
+		t.Fatalf("unexpected resource import concurrency config: %+v", cfg.ResourceImport)
 	}
 }
 
