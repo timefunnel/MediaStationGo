@@ -15,21 +15,26 @@ import (
 func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library, rootID, typ, ref, path, name string, size int64, localMeta *LocalMetadata, existingMedia map[string]existingCloudMedia, writeBatch *localMediaWriteBatch, probeBudget *int, res *ScanResult) {
 	res.Visited++
 	ext := strings.ToLower(filepath.Ext(name))
-	title, year := CleanQueryWithRecognition(ctx, s.repo, name)
-	if title == "" {
-		title = strings.TrimSuffix(filepath.Base(name), ext)
+	preserveSourceTitle := libraryPreservesSourceTitle(lib)
+	title := sourceFilenameTitle(name)
+	year, parsedSeason, parsedEpisode := 0, 0, 0
+	if !preserveSourceTitle {
+		title, year = CleanQueryWithRecognition(ctx, s.repo, name)
+		if title == "" {
+			title = strings.TrimSuffix(filepath.Base(name), ext)
+		}
+		parsedSeason, parsedEpisode = ParseEpisode(path)
+		if librarySupportsSeasons(lib) || parsedSeason > 0 || parsedEpisode > 0 {
+			if seriesTitle, seriesYear := cloudSeriesTitleFromMediaPath(path); seriesTitle != "" {
+				title = seriesTitle
+				if seriesYear > 0 {
+					year = seriesYear
+				}
+			}
+		}
 	}
 	if title == "" {
 		title = ref
-	}
-	parsedSeason, parsedEpisode := ParseEpisode(path)
-	if librarySupportsSeasons(lib) || parsedSeason > 0 || parsedEpisode > 0 {
-		if seriesTitle, seriesYear := cloudSeriesTitleFromMediaPath(path); seriesTitle != "" {
-			title = seriesTitle
-			if seriesYear > 0 {
-				year = seriesYear
-			}
-		}
 	}
 	expectedSTRMURL := BuildRelativeCloudPlayURL(typ, ref)
 	m := &model.Media{
@@ -56,6 +61,9 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		applyLocalMetadata(m, localMeta)
 		s.queueCloudArtworkPrefetch(localMeta.PosterURL)
 		s.queueCloudArtworkPrefetch(localMeta.BackdropURL)
+	}
+	if preserveSourceTitle {
+		preserveSourceTitleIdentity(m, name)
 	}
 	if _, hints := pathHintMetadata(path, librarySupportsSeasons(lib) || parsedSeason > 0 || parsedEpisode > 0); hints.useful() {
 		if hints.TMDbID > 0 && m.TMDbID <= 0 {

@@ -14,6 +14,7 @@ export interface Library {
   name: string
   path: string
   type: string
+  title_mode: 'smart' | 'filename'
   enabled: boolean
   roots?: LibraryRoot[]
   created_at: string

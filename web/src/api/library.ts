@@ -96,13 +96,13 @@ export const libraryAPI = {
       })
       .then((r) => r.data),
 
-  create: (name: string, path: string, type: string) =>
-    api.post<Library>('/libraries', { name, path, type }).then((r) => r.data),
+  create: (name: string, path: string, type: string, titleMode = 'smart') =>
+    api.post<Library>('/libraries', { name, path, type, title_mode: titleMode }).then((r) => r.data),
 
-  createWithRoots: (name: string, type: string, roots: LibraryRootInput[]) =>
-    api.post<Library>('/libraries', { name, type, roots }).then((r) => r.data),
+  createWithRoots: (name: string, type: string, titleMode: string, roots: LibraryRootInput[]) =>
+    api.post<Library>('/libraries', { name, type, title_mode: titleMode, roots }).then((r) => r.data),
 
-  update: (id: string, patch: { enabled: boolean }) =>
+  update: (id: string, patch: { enabled?: boolean; title_mode?: 'smart' | 'filename' }) =>
     api.patch<Library>(`/libraries/${id}`, patch).then((r) => r.data),
 
   remove: (id: string) => api.delete(`/libraries/${id}`).then((r) => r.data),

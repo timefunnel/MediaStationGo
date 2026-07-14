@@ -117,6 +117,42 @@ func TestUpdateLibraryEnabledDoesNotChangeRootStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateLibraryTitleMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Library{}); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: "cloud://openlist/115/其他", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.Container{Repo: repos, Media: service.NewMediaService(&config.Config{}, zap.NewNop(), repos)}
+
+	body := bytes.NewBufferString(`{"title_mode":"filename"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/libraries/"+lib.ID, body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "id", Value: lib.ID}}
+	updateLibraryHandler(svc)(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	updated, err := repos.Library.FindByID(t.Context(), lib.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated == nil || updated.TitleMode != service.LibraryTitleModeFilename || !updated.Enabled {
+		t.Fatalf("updated library = %#v", updated)
+	}
+}
+
 func TestListLibrariesIncludeHiddenNormalizesCloudDisplayNames(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

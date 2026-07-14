@@ -6,9 +6,11 @@ import type { RootDraft } from './adminLibraryPanelModel'
 type CreateFormProps = {
   name: string
   type: string
+  titleMode: 'smart' | 'filename'
   roots: RootDraft[]
   onNameChange: (value: string) => void
   onTypeChange: (value: string) => void
+  onTitleModeChange: (value: 'smart' | 'filename') => void
   onRootChange: (index: number, patch: Partial<RootDraft>) => void
   onAddRoot: () => void
   onRemoveRoot: (index: number) => void
@@ -18,9 +20,11 @@ type CreateFormProps = {
 export function AdminLibraryCreateForm({
   name,
   type,
+  titleMode,
   roots,
   onNameChange,
   onTypeChange,
+  onTitleModeChange,
   onRootChange,
   onAddRoot,
   onRemoveRoot,
@@ -41,6 +45,14 @@ export function AdminLibraryCreateForm({
         <option value="variety">综艺</option>
         <option value="anime">动漫</option>
         <option value="music">音乐</option>
+      </select>
+      <select
+        className="input-base"
+        value={titleMode}
+        onChange={(e) => onTitleModeChange(e.target.value as 'smart' | 'filename')}
+      >
+        <option value="smart">智能识别标题</option>
+        <option value="filename">原始文件名（不自动刮削）</option>
       </select>
       <div className="md:col-span-4 space-y-2">
         {roots.map((root, index) => (

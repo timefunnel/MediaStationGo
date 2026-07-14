@@ -223,6 +223,10 @@ func localDerivedMetadataNeedsRefresh(existing existingLocalMedia, incoming *mod
 }
 
 func scanDerivedMetadataNeedsRefresh(existing scanDerivedMetadata, incoming *model.Media) bool {
+	if incoming.PreserveSourceTitle {
+		return strings.TrimSpace(existing.Title) != strings.TrimSpace(incoming.Title) ||
+			existing.SeasonNum != 0 || existing.EpisodeNum != 0
+	}
 	status := strings.TrimSpace(existing.ScrapeStatus)
 	enrichable := status == "" || status == "pending" || status == "no_match"
 	if enrichable && strings.TrimSpace(incoming.Title) != "" && !strings.EqualFold(strings.TrimSpace(existing.Title), strings.TrimSpace(incoming.Title)) {

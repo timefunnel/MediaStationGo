@@ -31,6 +31,7 @@ function useCreateLibraryForm(refresh: () => Promise<void>) {
   const [name, setName] = useState('')
   const [roots, setRoots] = useState<RootDraft[]>([emptyRootDraft()])
   const [type, setType] = useState('movie')
+  const [titleMode, setTitleMode] = useState<'smart' | 'filename'>('smart')
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
@@ -40,7 +41,7 @@ function useCreateLibraryForm(refresh: () => Promise<void>) {
         toast.error('请至少填写一个路径')
         return
       }
-      await libraryAPI.createWithRoots(name, type, payload)
+      await libraryAPI.createWithRoots(name, type, titleMode, payload)
       toast.success('媒体库已保存')
       setName('')
       setRoots([emptyRootDraft()])
@@ -57,9 +58,11 @@ function useCreateLibraryForm(refresh: () => Promise<void>) {
   return {
     name,
     type,
+    titleMode,
     roots,
     setName,
     setType,
+    setTitleMode,
     updateRoot,
     addRoot: () => setRoots((prev) => [...prev, emptyRootDraft()]),
     removeRoot: (index: number) => setRoots((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index))),
@@ -163,6 +166,12 @@ function useLibraryActions(refresh: () => Promise<void>) {
     else toast.success(`扫描完成，新增 ${result.added}，更新 ${result.updated ?? 0}`)
   }
 
+  const updateLibraryTitleMode = async (library: Library, titleMode: 'smart' | 'filename') => {
+    await libraryAPI.update(library.id, { title_mode: titleMode })
+    toast.success(titleMode === 'filename' ? '已改为保留原始文件名' : '已改为智能识别标题')
+    await refresh()
+  }
+
   const removeLibrary = async (library: Library) => {
     if (!(await confirmAction({ title: '删除媒体库', message: `确定删除「${library.name}」?`, confirmText: '删除' }))) return
     await libraryAPI.remove(library.id)
@@ -170,5 +179,5 @@ function useLibraryActions(refresh: () => Promise<void>) {
     await refresh()
   }
 
-  return { toggleLibrary, scanLibrary, removeLibrary }
+  return { toggleLibrary, scanLibrary, updateLibraryTitleMode, removeLibrary }
 }

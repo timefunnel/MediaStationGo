@@ -24,8 +24,17 @@ func (s *MediaService) CreateLibrary(ctx context.Context, name, path, kind strin
 }
 
 func (s *MediaService) CreateLibraryWithRoots(ctx context.Context, name, kind string, inputs []LibraryRootInput) (*model.Library, error) {
+	return s.CreateLibraryWithRootsAndTitleMode(ctx, name, kind, "", inputs)
+}
+
+func (s *MediaService) CreateLibraryWithRootsAndTitleMode(ctx context.Context, name, kind, titleMode string, inputs []LibraryRootInput) (*model.Library, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, errors.New("name required")
+	}
+	requestedTitleMode := strings.TrimSpace(titleMode)
+	titleMode, err := NormalizeLibraryTitleMode(requestedTitleMode)
+	if err != nil {
+		return nil, err
 	}
 	roots, err := normalizeLibraryRootInputs(inputs, true)
 	if err != nil {
@@ -39,10 +48,16 @@ func (s *MediaService) CreateLibraryWithRoots(ctx context.Context, name, kind st
 		if err != nil {
 			return nil, err
 		}
+		if requestedTitleMode != "" {
+			lib, err = s.UpdateLibrary(ctx, lib.ID, LibraryUpdateInput{TitleMode: &titleMode})
+			if err != nil {
+				return nil, err
+			}
+		}
 		s.invalidateMediaCache(ctx)
 		return lib, nil
 	}
-	lib := &model.Library{Name: strings.TrimSpace(name), Path: roots[0].Path, Type: kind, Enabled: true}
+	lib := &model.Library{Name: strings.TrimSpace(name), Path: roots[0].Path, Type: kind, TitleMode: titleMode, Enabled: true}
 	if err := s.repo.Library.CreateWithRoots(ctx, lib, roots); err != nil {
 		return nil, err
 	}

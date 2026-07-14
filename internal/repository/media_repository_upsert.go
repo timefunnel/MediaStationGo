@@ -107,6 +107,10 @@ func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Me
 
 func addMediaTitleUpdates(updates map[string]any, existing, incoming model.Media) {
 	if incoming.Title != "" {
+		if incoming.PreserveSourceTitle {
+			setIfChanged(updates, "title", existing.Title, incoming.Title)
+			return
+		}
 		// scanner 给出的标题只是从路径推导，刮削后 title 已被替换为
 		// 真实剧名。仅在 existing 还停留在 'pending'/'' 时回填扫描标题，
 		// 避免覆盖刮削结果。
@@ -204,6 +208,13 @@ func addMediaPlacementUpdates(updates map[string]any, existing, incoming model.M
 	}
 	if incoming.RelativePath != "" && incoming.RelativePath != existing.RelativePath {
 		updates["relative_path"] = incoming.RelativePath
+	}
+	if incoming.PreserveSourceTitle {
+		setIfChanged(updates, "season_num", existing.SeasonNum, 0)
+		setIfChanged(updates, "episode_num", existing.EpisodeNum, 0)
+		setIfChanged(updates, "series_id", existing.SeriesID, "")
+		setIfChanged(updates, "episode_title", existing.EpisodeTitle, "")
+		return
 	}
 	seasonChanged := (incoming.SeasonNum > 0 || incoming.EpisodeNum > 0) && existing.SeasonNum != incoming.SeasonNum
 	episodeChanged := incoming.EpisodeNum > 0 && existing.EpisodeNum != incoming.EpisodeNum

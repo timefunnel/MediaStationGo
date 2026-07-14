@@ -16,15 +16,17 @@ import (
 )
 
 type createLibraryReq struct {
-	Name  string                     `json:"name" binding:"required"`
-	Path  string                     `json:"path"`
-	Paths []string                   `json:"paths"`
-	Roots []service.LibraryRootInput `json:"roots"`
-	Type  string                     `json:"type"`
+	Name      string                     `json:"name" binding:"required"`
+	Path      string                     `json:"path"`
+	Paths     []string                   `json:"paths"`
+	Roots     []service.LibraryRootInput `json:"roots"`
+	Type      string                     `json:"type"`
+	TitleMode string                     `json:"title_mode"`
 }
 
 type updateLibraryReq struct {
-	Enabled *bool `json:"enabled" binding:"required"`
+	Enabled   *bool   `json:"enabled"`
+	TitleMode *string `json:"title_mode"`
 }
 
 func listLibrariesHandler(svc *service.Container) gin.HandlerFunc {
@@ -102,9 +104,13 @@ func createLibraryHandler(svc *service.Container) gin.HandlerFunc {
 		if len(roots) == 0 && strings.TrimSpace(req.Path) != "" {
 			roots = append(roots, service.LibraryRootInput{Path: req.Path})
 		}
-		l, err := svc.Media.CreateLibraryWithRoots(c.Request.Context(), req.Name, req.Type, roots)
+		l, err := svc.Media.CreateLibraryWithRootsAndTitleMode(c.Request.Context(), req.Name, req.Type, req.TitleMode, roots)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "title_mode") {
+				status = http.StatusBadRequest
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		uid, _ := c.Get("ctx_user_id")
@@ -118,13 +124,20 @@ func createLibraryHandler(svc *service.Container) gin.HandlerFunc {
 func updateLibraryHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req updateLibraryReq
-		if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+		if err := c.ShouldBindJSON(&req); err != nil || (req.Enabled == nil && req.TitleMode == nil) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enabled or title_mode is required"})
 			return
 		}
-		lib, err := svc.Media.UpdateLibraryEnabled(c.Request.Context(), c.Param("id"), *req.Enabled)
+		lib, err := svc.Media.UpdateLibrary(c.Request.Context(), c.Param("id"), service.LibraryUpdateInput{
+			Enabled:   req.Enabled,
+			TitleMode: req.TitleMode,
+		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "title_mode") {
+				status = http.StatusBadRequest
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		if lib == nil {
@@ -133,7 +146,8 @@ func updateLibraryHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		uid, _ := c.Get("ctx_user_id")
 		if svc.Audit != nil {
-			svc.Audit.Record(c.Request.Context(), toString(uid), "library.update_status", lib.ID, c.ClientIP(), strconv.FormatBool(lib.Enabled))
+			detail := "enabled=" + strconv.FormatBool(lib.Enabled) + ",title_mode=" + lib.TitleMode
+			svc.Audit.Record(c.Request.Context(), toString(uid), "library.update", lib.ID, c.ClientIP(), detail)
 		}
 		if svc.Watcher != nil {
 			go func() { _ = svc.Watcher.Refresh(context.Background()) }()

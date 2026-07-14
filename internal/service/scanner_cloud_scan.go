@@ -254,7 +254,9 @@ func (s *ScannerService) completeCloudLibraryScan(ctx context.Context, req cloud
 	}
 	if scanHasImportChanges(req.result) && req.autoScrape && s.scraper != nil && s.scraper.AnyEnabled() && s.autoScrapeEnabled(ctx) {
 		for _, targetID := range targetIDs {
-			s.startAutoScrape(ctx, targetID)
+			if s.libraryAllowsAutoScrape(ctx, targetID) {
+				s.startAutoScrape(ctx, targetID)
+			}
 		}
 	}
 }

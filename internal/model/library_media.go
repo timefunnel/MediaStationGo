@@ -3,11 +3,12 @@ package model
 // Library 表示一个逻辑媒体库。Path 保留为兼容字段，指向第一条 LibraryRoot。
 type Library struct {
 	Base
-	Name    string        `gorm:"size:128;not null" json:"name"`
-	Path    string        `gorm:"size:1024;not null" json:"path"`
-	Type    string        `gorm:"size:16;not null;default:movie" json:"type"` // movie / tv / anime / music
-	Enabled bool          `gorm:"default:true" json:"enabled"`
-	Roots   []LibraryRoot `gorm:"foreignKey:LibraryID" json:"roots,omitempty"`
+	Name      string        `gorm:"size:128;not null" json:"name"`
+	Path      string        `gorm:"size:1024;not null" json:"path"`
+	Type      string        `gorm:"size:16;not null;default:movie" json:"type"` // movie / tv / anime / music
+	TitleMode string        `gorm:"size:16;not null;default:smart" json:"title_mode"`
+	Enabled   bool          `gorm:"default:true" json:"enabled"`
+	Roots     []LibraryRoot `gorm:"foreignKey:LibraryID" json:"roots,omitempty"`
 }
 
 // LibraryRoot 是逻辑媒体库下的一条真实物理/挂载路径。
@@ -81,6 +82,8 @@ type Media struct {
 	// IsDuplicate flags this media as a duplicate of another media row.
 	IsDuplicate bool   `gorm:"default:false" json:"is_duplicate"`
 	DuplicateOf string `gorm:"size:128" json:"duplicate_of,omitempty"`
+
+	PreserveSourceTitle bool `gorm:"-" json:"-"`
 }
 
 // Series 将属于同一节目的剧集分组。

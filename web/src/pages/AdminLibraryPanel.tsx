@@ -10,9 +10,11 @@ export function AdminLibraryPanel() {
       <AdminLibraryCreateForm
         name={createForm.name}
         type={createForm.type}
+        titleMode={createForm.titleMode}
         roots={createForm.roots}
         onNameChange={createForm.setName}
         onTypeChange={createForm.setType}
+        onTitleModeChange={createForm.setTitleMode}
         onRootChange={createForm.updateRoot}
         onAddRoot={createForm.addRoot}
         onRemoveRoot={createForm.removeRoot}
@@ -28,6 +30,7 @@ export function AdminLibraryPanel() {
         onRemoveRoot={rootActions.removeLibraryRoot}
         onToggleLibrary={libraryActions.toggleLibrary}
         onScanLibrary={libraryActions.scanLibrary}
+        onTitleModeChange={libraryActions.updateLibraryTitleMode}
         onRemoveLibrary={libraryActions.removeLibrary}
       />
     </div>

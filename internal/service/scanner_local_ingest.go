@@ -138,9 +138,17 @@ type localScanMediaInput struct {
 }
 
 func (s *ScannerService) buildLocalScanMedia(in localScanMediaInput) *model.Media {
-	title, year := CleanQueryWithRecognition(context.Background(), s.repo, in.path)
-	if title == "" {
-		title = strings.TrimSuffix(filepath.Base(in.path), in.ext)
+	preserveSourceTitle := libraryPreservesSourceTitle(in.lib)
+	title := sourceFilenameTitle(in.path)
+	year := 0
+	parsedSeason, parsedEpisode := 0, 0
+	if !preserveSourceTitle {
+		title, year = CleanQueryWithRecognition(context.Background(), s.repo, in.path)
+		if title == "" {
+			title = strings.TrimSuffix(filepath.Base(in.path), in.ext)
+		}
+		parsedSeason = in.parsedSeason
+		parsedEpisode = in.parsedEpisode
 	}
 
 	media := &model.Media{
@@ -153,8 +161,8 @@ func (s *ScannerService) buildLocalScanMedia(in localScanMediaInput) *model.Medi
 		SizeBytes:     in.size,
 		Container:     strings.TrimPrefix(in.ext, "."),
 		FileID:        in.fileID,
-		SeasonNum:     in.parsedSeason,
-		EpisodeNum:    in.parsedEpisode,
+		SeasonNum:     parsedSeason,
+		EpisodeNum:    parsedEpisode,
 	}
 	if in.ext == ".strm" {
 		media.Container = "strm"
@@ -166,6 +174,9 @@ func (s *ScannerService) buildLocalScanMedia(in localScanMediaInput) *model.Medi
 	}
 	if in.localMeta != nil {
 		applyLocalMetadata(media, in.localMeta)
+	}
+	if preserveSourceTitle {
+		preserveSourceTitleIdentity(media, in.path)
 	}
 	return media
 }

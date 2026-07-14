@@ -15,6 +15,7 @@ type LibraryTableProps = {
   onRemoveRoot: (library: Library, root: LibraryRoot) => void
   onToggleLibrary: (library: Library) => void
   onScanLibrary: (library: Library) => void
+  onTitleModeChange: (library: Library, titleMode: 'smart' | 'filename') => void
   onRemoveLibrary: (library: Library) => void
 }
 
@@ -28,6 +29,7 @@ export function AdminLibraryTable({ libs, ...actions }: LibraryTableProps) {
             <th className="w-28">媒体库状态</th>
             <th>路径</th>
             <th className="w-20">类型</th>
+            <th className="w-36">标题模式</th>
             <th className="w-12 text-right">操作</th>
           </tr>
         </thead>
@@ -56,6 +58,16 @@ function LibraryTableRow({ library, ...actions }: LibraryTableRowProps) {
         <LibraryRootsCell library={library} {...actions} />
       </td>
       <td className="px-3 text-ink-100">{library.type}</td>
+      <td className="px-3">
+        <select
+          className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs text-ink-100"
+          value={library.title_mode || 'smart'}
+          onChange={(event) => actions.onTitleModeChange(library, event.target.value as 'smart' | 'filename')}
+        >
+          <option value="smart">智能识别</option>
+          <option value="filename">原始文件名</option>
+        </select>
+      </td>
       <td className="py-2 text-right">
         <LibraryActionsCell library={library} {...actions} />
       </td>
