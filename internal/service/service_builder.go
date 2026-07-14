@@ -147,6 +147,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.STRM = NewSTRMService(b.log, b.repos, b.cfg)
 	b.c.Scan.SetStorageConfig(b.c.StorageCfg)
 	b.c.Subtitle.SetStorageConfig(b.c.StorageCfg)
+	b.c.PipelineIngest.SetSubtitleService(b.c.Subtitle)
 	b.c.Scan.SetSubtitleService(b.c.Subtitle)
 	b.c.StorageCfg.SetChangeHandler(func(provider string) {
 		b.c.Subtitle.InvalidateCloudDiscovery("", provider)

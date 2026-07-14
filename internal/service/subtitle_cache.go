@@ -22,14 +22,20 @@ var (
 )
 
 type localSubtitleIndex struct {
-	Tracks []localSubtitleIndexTrack `json:"tracks"`
+	MediaID   string                    `json:"media_id,omitempty"`
+	Source    string                    `json:"source,omitempty"`
+	Provider  string                    `json:"provider,omitempty"`
+	MediaPath string                    `json:"media_path,omitempty"`
+	CachedAt  string                    `json:"cached_at,omitempty"`
+	Tracks    []localSubtitleIndexTrack `json:"tracks"`
 }
 
 type localSubtitleIndexTrack struct {
-	MediaID  string `json:"media_id"`
-	Filename string `json:"filename"`
-	Lang     string `json:"lang"`
-	Label    string `json:"label"`
+	MediaID    string `json:"media_id"`
+	Filename   string `json:"filename"`
+	Lang       string `json:"lang"`
+	Label      string `json:"label"`
+	SourcePath string `json:"source_path,omitempty"`
 }
 
 func subtitleCacheDirFromEnv() string {
@@ -51,17 +57,22 @@ func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string) []Subtitle
 	if s == nil {
 		return []SubtitleTrack{}
 	}
-	mediaDir, ok := localSubtitleMediaDir(s.localCacheDir, mediaID)
+	tracks, _, _ := discoverCachedSubtitles(s.localCacheDir, mediaID, localSubtitleScheme)
+	return tracks
+}
+
+func discoverCachedSubtitles(root, mediaID, scheme string) ([]SubtitleTrack, bool, *localSubtitleIndex) {
+	mediaDir, ok := localSubtitleMediaDir(root, mediaID)
 	if !ok {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, false, nil
 	}
 	raw, err := os.ReadFile(filepath.Join(mediaDir, "tracks.json")) // #nosec G304 -- mediaDir is constrained by localSubtitleMediaDir.
 	if err != nil {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, false, nil
 	}
 	var index localSubtitleIndex
 	if err := json.Unmarshal(raw, &index); err != nil {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, false, nil
 	}
 	tracks := make([]SubtitleTrack, 0, len(index.Tracks))
 	for _, item := range index.Tracks {
@@ -91,16 +102,20 @@ func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string) []Subtitle
 		tracks = append(tracks, SubtitleTrack{
 			Lang:  lang,
 			Label: label,
-			Path:  localSubtitleURI(mediaID, filename),
+			Path:  cachedSubtitleURI(scheme, mediaID, filename),
 			Codec: codec,
 		})
 	}
-	return tracks
+	return tracks, true, &index
 }
 
 func localSubtitleURI(mediaID, filename string) string {
+	return cachedSubtitleURI(localSubtitleScheme, mediaID, filename)
+}
+
+func cachedSubtitleURI(scheme, mediaID, filename string) string {
 	u := url.URL{
-		Scheme: localSubtitleScheme,
+		Scheme: scheme,
 		Host:   strings.TrimSpace(mediaID),
 		Path:   "/" + strings.TrimSpace(filename),
 	}
@@ -108,8 +123,12 @@ func localSubtitleURI(mediaID, filename string) string {
 }
 
 func parseLocalSubtitlePath(raw string) (mediaID, filename string, ok bool) {
+	return parseSubtitleURI(raw, localSubtitleScheme)
+}
+
+func parseSubtitleURI(raw, scheme string) (mediaID, filename string, ok bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || strings.ToLower(u.Scheme) != localSubtitleScheme {
+	if err != nil || strings.ToLower(u.Scheme) != strings.ToLower(strings.TrimSpace(scheme)) {
 		return "", "", false
 	}
 	mediaID = strings.TrimSpace(u.Host)
@@ -127,10 +146,14 @@ func serveLocalCachedSubtitle(s *SubtitleService, mediaID, localMediaID, filenam
 	if s == nil {
 		return errors.New("subtitle service unavailable")
 	}
+	return serveCachedSubtitleFromRoot(s.localCacheDir, mediaID, localMediaID, filename, format, w)
+}
+
+func serveCachedSubtitleFromRoot(root, mediaID, localMediaID, filename, format string, w io.Writer) error {
 	if strings.TrimSpace(mediaID) != strings.TrimSpace(localMediaID) {
 		return errors.New("subtitle media mismatch")
 	}
-	mediaDir, ok := localSubtitleMediaDir(s.localCacheDir, mediaID)
+	mediaDir, ok := localSubtitleMediaDir(root, mediaID)
 	if !ok {
 		return errors.New("subtitle cache unavailable")
 	}

@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -268,6 +271,64 @@ func TestPipelineIngestRunsMovieExtrasRepair(t *testing.T) {
 	}
 	if job.Result.MovieExtras == nil || job.Result.MovieExtras.Updated != 1 || job.Result.MovieExtras.OpenListHidePath != "/115/movie/Movie" {
 		t.Fatalf("unexpected extras result: %#v", job.Result.MovieExtras)
+	}
+}
+
+func TestPipelineIngestEnsuresPersistentCloudSubtitleCache(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	lib, root := createPipelineMaintenanceRoot(t, db, "movie", "/115/movie")
+	media := model.Media{
+		LibraryID:     lib.ID,
+		LibraryRootID: root.ID,
+		Title:         "Movie",
+		Path:          "cloud://openlist/115/movie/Movie/Movie.mkv",
+		SizeBytes:     5000,
+	}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	mediaDir := filepath.Join(cacheDir, media.ID)
+	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	indexBody, err := json.Marshal(localSubtitleIndex{
+		MediaID:   media.ID,
+		Source:    "cloud",
+		Provider:  "openlist",
+		MediaPath: media.Path,
+		Tracks:    []localSubtitleIndexTrack{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mediaDir, "tracks.json"), indexBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	subtitle := NewSubtitleService(log, repos)
+	subtitle.SetMaterializedCacheDir(cacheDir)
+	maintenance := NewPipelineMaintenanceService(log, repos)
+	svc := NewPipelineIngestService(log, repos, nil, maintenance, nil)
+	svc.SetSubtitleService(subtitle)
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "movie", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/movie"},
+		Title:                     "Movie",
+		TargetOpenListPaths:       []string{"/115/movie/Movie"},
+		RequireTargetPath:         true,
+		Scan:                      false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusCompleted {
+		t.Fatalf("job status=%s error=%s", job.Status, job.Error)
+	}
+	if job.Result.CloudSubtitles == nil || job.Result.CloudSubtitles.Status != "skipped" || job.Result.CloudSubtitles.Reason != "cache_current" {
+		t.Fatalf("cloud subtitle result=%#v", job.Result.CloudSubtitles)
 	}
 }
 

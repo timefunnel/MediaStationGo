@@ -110,6 +110,7 @@ services:
       # - 确认迁移完成后，建议改成 /data/no-sqlite-migration.db 这类不存在的路径。
       MEDIASTATION_DATABASE_DB_PATH: /data/mediastation.db
       MEDIASTATION_CACHE_CACHE_DIR: /cache
+      MEDIASTATION_CLOUD_SUBTITLE_CACHE_DIR: /cache/cloud-subtitles
 
       # 云端同目录外挂字幕发现缓存。设为 0 可关闭；扫描检测到媒体变化或存储配置变化时会主动失效。
       MEDIASTATION_SUBTITLE_CLOUD_CACHE_TTL_HOURS: "30"

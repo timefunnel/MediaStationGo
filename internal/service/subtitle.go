@@ -33,13 +33,15 @@ import (
 
 // SubtitleService is the discovery + conversion entry point.
 type SubtitleService struct {
-	log           *zap.Logger
-	repo          *repository.Container
-	storage       *StorageConfigService
-	localCacheDir string
-	cloudCache    *cloudSubtitleDiscoveryCache
-	warmMu        sync.Mutex
-	warmInFlight  map[string]chan struct{}
+	log                  *zap.Logger
+	repo                 *repository.Container
+	storage              *StorageConfigService
+	localCacheDir        string
+	materializedCacheDir string
+	cloudCache           *cloudSubtitleDiscoveryCache
+	warmMu               sync.Mutex
+	warmInFlight         map[string]chan struct{}
+	materializeMu        sync.Mutex
 }
 
 const cloudSubtitlePlaybackWait = 500 * time.Millisecond
@@ -47,10 +49,11 @@ const cloudSubtitlePlaybackWait = 500 * time.Millisecond
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
 	s := &SubtitleService{
-		log:           log,
-		repo:          repo,
-		localCacheDir: subtitleCacheDirFromEnv(),
-		cloudCache:    newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
+		log:                  log,
+		repo:                 repo,
+		localCacheDir:        subtitleCacheDirFromEnv(),
+		materializedCacheDir: cloudSubtitleMaterializedDirFromEnv(),
+		cloudCache:           newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
 	}
 	if len(storage) > 0 {
 		s.storage = storage[0]
@@ -132,6 +135,10 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	}
 	localTracks := discoverLocalCachedSubtitles(s, mediaID)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
+		materializedTracks, materialized := discoverMaterializedCloudSubtitles(s, mediaID)
+		if materialized {
+			return mergeSubtitleTracks(localTracks, materializedTracks), nil
+		}
 		cloudTracks, err := s.discoverCloudSubtitlesCached(ctx, *m)
 		if err != nil {
 			if s.log != nil {
@@ -140,9 +147,9 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 					zap.String("path", m.Path),
 					zap.Error(err))
 			}
-			return mergeSubtitleTracks(cloudTracks, localTracks), nil
+			return mergeSubtitleTracks(localTracks, cloudTracks), nil
 		}
-		return mergeSubtitleTracks(cloudTracks, localTracks), nil
+		return mergeSubtitleTracks(localTracks, cloudTracks), nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))
@@ -203,11 +210,15 @@ func (s *SubtitleService) DiscoverForPlayback(ctx context.Context, mediaID strin
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
 		return s.Discover(ctx, mediaID)
 	}
+	materializedTracks, materialized := discoverMaterializedCloudSubtitles(s, mediaID)
+	if materialized {
+		return mergeSubtitleTracks(localTracks, materializedTracks), nil
+	}
 	if s.cloudCache == nil || s.cloudCache.ttl <= 0 {
 		return s.Discover(ctx, mediaID)
 	}
 	if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
-		return mergeSubtitleTracks(cloudTracks, localTracks), nil
+		return mergeSubtitleTracks(localTracks, cloudTracks), nil
 	}
 	done := s.warmCloudSubtitles(*m)
 	timer := time.NewTimer(cloudSubtitlePlaybackWait)
@@ -215,7 +226,7 @@ func (s *SubtitleService) DiscoverForPlayback(ctx context.Context, mediaID strin
 	select {
 	case <-done:
 		if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
-			return mergeSubtitleTracks(cloudTracks, localTracks), nil
+			return mergeSubtitleTracks(localTracks, cloudTracks), nil
 		}
 	case <-timer.C:
 	case <-ctx.Done():
@@ -273,6 +284,9 @@ func (s *SubtitleService) ServeAs(ctx context.Context, mediaID, sub, format stri
 	}
 	if localMediaID, filename, ok := parseLocalSubtitlePath(sub); ok {
 		return serveLocalCachedSubtitle(s, mediaID, localMediaID, filename, format, w)
+	}
+	if localMediaID, filename, ok := parseMaterializedSubtitlePath(sub); ok {
+		return serveMaterializedCloudSubtitle(s, mediaID, localMediaID, filename, format, w)
 	}
 	if typ, ref, name, ok := parseCloudSubtitlePath(sub); ok {
 		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, format, w)

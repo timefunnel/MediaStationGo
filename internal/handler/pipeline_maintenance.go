@@ -20,11 +20,27 @@ type pipelineMaintenanceRequest struct {
 func registerAuthedPipelineMaintenanceRoutes(authed *gin.RouterGroup, svc *service.Container) {
 	authed.POST("/pipeline/media/:id/repair-movie-extras", middleware.AdminRequired(), pipelineRepairMovieExtrasHandler(svc))
 	authed.POST("/pipeline/media/:id/repair-episode-visibility", middleware.AdminRequired(), pipelineRepairEpisodeVisibilityHandler(svc))
+	authed.POST("/pipeline/media/:id/cache-cloud-subtitles", middleware.AdminRequired(), pipelineCacheCloudSubtitlesHandler(svc))
 	authed.POST("/pipeline/deleted-media/hide-candidates", middleware.AdminRequired(), pipelineDeletedMediaHideCandidatesHandler(svc))
 	authed.POST("/pipeline/deleted-media/prune", middleware.AdminRequired(), pipelinePruneDeletedMediaHandler(svc))
 	authed.POST("/pipeline/migrations/search", middleware.AdminRequired(), pipelineMigrationSearchHandler(svc))
 	authed.POST("/pipeline/migrations/validate", middleware.AdminRequired(), pipelineMigrationValidateHandler(svc))
 	authed.POST("/pipeline/migrations/apply", middleware.AdminRequired(), pipelineMigrationApplyHandler(svc))
+}
+
+func pipelineCacheCloudSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.Subtitle == nil {
+			Error(c, http.StatusInternalServerError, ErrInternal, "subtitle service unavailable")
+			return
+		}
+		result, err := svc.Subtitle.RefreshCloudSubtitles(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			Error(c, http.StatusBadGateway, ErrExternal, err.Error())
+			return
+		}
+		Success(c, result)
+	}
 }
 
 func pipelineRepairMovieExtrasHandler(svc *service.Container) gin.HandlerFunc {
