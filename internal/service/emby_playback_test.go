@@ -521,6 +521,50 @@ func TestEmbyHidesAdultLibrariesForUserLock(t *testing.T) {
 	}
 }
 
+func TestEmbyHonorsAdministratorLibraryAccess(t *testing.T) {
+	svc := newTestEmbyService(t)
+	allowed := model.Library{Name: "电影", Path: `/media/movies`, Type: "movie", Enabled: true}
+	blocked := model.Library{Name: "私有库", Path: `/media/private`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &allowed); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.Library.Create(t.Context(), &blocked); err != nil {
+		t.Fatal(err)
+	}
+	viewer := &model.User{
+		Username:          "limited-viewer",
+		Role:              "user",
+		Tier:              "free",
+		IsActive:          true,
+		AllowedLibraryIDs: []string{allowed.ID},
+	}
+	if err := svc.repo.User.Create(t.Context(), viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.DB.Create(&[]model.Media{
+		{LibraryID: allowed.ID, Title: "可见电影", Path: `/media/movies/a.mkv`},
+		{LibraryID: blocked.ID, Title: "不可见电影", Path: `/media/private/b.mkv`},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := svc.Items(t.Context(), ItemsParams{UserID: viewer.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Id"] != allowed.ID {
+		t.Fatalf("root libraries = %#v, want only %s", items, allowed.ID)
+	}
+	blockedItems, err := svc.Items(t.Context(), ItemsParams{UserID: viewer.ID, ParentID: blocked.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := blockedItems["TotalRecordCount"]; got != int64(0) {
+		t.Fatalf("blocked library media should be hidden, total=%#v", got)
+	}
+}
+
 func TestEmbyPlaybackInfoRespectsDirectPlayOnly(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "电影", Path: `/media/movies`, Type: "movie", Enabled: true}

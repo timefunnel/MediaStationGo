@@ -89,6 +89,17 @@ func (e *EmbyService) mediaVisibility(ctx context.Context, userID string) MediaV
 	return visibility
 }
 
+// InvalidateUserVisibility makes administrator access changes effective on
+// the next Emby-compatible request instead of waiting for the short cache TTL.
+func (e *EmbyService) InvalidateUserVisibility(userID string) {
+	if e == nil {
+		return
+	}
+	e.visibilityMu.Lock()
+	delete(e.visibilityCache, strings.TrimSpace(userID))
+	e.visibilityMu.Unlock()
+}
+
 func (e *EmbyService) mergedLibraryIDs(ctx context.Context, libraryID string) []string {
 	ids, err := MergedLibraryIDsForLibrary(ctx, e.repo, libraryID)
 	if err != nil || len(ids) == 0 {

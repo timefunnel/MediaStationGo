@@ -40,6 +40,11 @@ export const adminAPI = {
   setUserStatus: (id: string, isActive: boolean) =>
     api.patch<User>(`/admin/users/${id}/status`, { is_active: isActive }).then((r) => r.data),
 
+  setUserLibraries: (id: string, allowedLibraryIDs: string[]) =>
+    api
+      .put<User>(`/admin/users/${id}/libraries`, { allowed_library_ids: allowedLibraryIDs })
+      .then((r) => r.data),
+
   deleteUser: (id: string) => api.delete(`/admin/users/${id}`).then((r) => r.data),
 
   listSettings: () => api.get<Setting[]>('/admin/settings').then((r) => r.data),

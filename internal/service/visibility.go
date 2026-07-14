@@ -11,6 +11,8 @@ import (
 
 const AdultLibraryIDsSettingKey = "adult.library_ids"
 
+const noLibraryAccessID = "__no_library_access__"
+
 // AdultContentEnabled reads the global Adult / NSFW switch.
 func AdultContentEnabled(ctx context.Context, repo *repository.Container) bool {
 	if repo == nil || repo.Setting == nil {
@@ -42,7 +44,11 @@ func UserHidesAdult(ctx context.Context, repo *repository.Container, userID stri
 // UserDefaultMediaVisibility is the visibility policy used by clients that
 // cannot pass a web play-profile token, notably Emby/Jellyfin-compatible apps.
 func UserDefaultMediaVisibility(ctx context.Context, repo *repository.Container, userID string) MediaVisibility {
-	visibility := MediaVisibility{IncludeNSFW: AdultContentEnabled(ctx, repo)}
+	adminAllowedLibraryIDs := UserAllowedLibraryIDs(ctx, repo, userID)
+	visibility := MediaVisibility{
+		IncludeNSFW:       AdultContentEnabled(ctx, repo),
+		AllowedLibraryIDs: adminAllowedLibraryIDs,
+	}
 	if repo == nil {
 		return visibility
 	}
@@ -62,11 +68,83 @@ func UserDefaultMediaVisibility(ctx context.Context, repo *repository.Container,
 			continue
 		}
 		visibility.IncludeNSFW = visibility.IncludeNSFW && row.AllowAdult
-		visibility.AllowedLibraryIDs = DecodeAllowedLibraryIDs(row.AllowedLibraryIDs)
+		visibility.AllowedLibraryIDs = CombineAllowedLibraryIDs(
+			ctx,
+			repo,
+			adminAllowedLibraryIDs,
+			DecodeAllowedLibraryIDs(row.AllowedLibraryIDs),
+		)
 		visibility.HiddenLibraryIDs = hiddenAdultLibraryIDs(ctx, repo, visibility.IncludeNSFW)
 		break
 	}
 	return visibility
+}
+
+// UserAllowedLibraryIDs returns the administrator-enforced library scope.
+// An empty slice means unrestricted; administrators are always unrestricted.
+func UserAllowedLibraryIDs(ctx context.Context, repo *repository.Container, userID string) []string {
+	if strings.TrimSpace(userID) == "" || repo == nil || repo.User == nil {
+		return nil
+	}
+	// Some isolated service tests intentionally construct repositories without
+	// the users table. They have no authenticated user policy to enforce.
+	if repo.DB != nil && !repo.DB.Migrator().HasTable(&model.User{}) {
+		return nil
+	}
+	user, err := repo.User.FindByID(ctx, userID)
+	if err != nil {
+		return []string{noLibraryAccessID}
+	}
+	if user == nil || user.Role == "admin" {
+		return nil
+	}
+	return NormalizeAllowedLibraryIDs(user.AllowedLibraryIDs)
+}
+
+// NormalizeAllowedLibraryIDs trims and de-duplicates persisted/request IDs.
+func NormalizeAllowedLibraryIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// CombineAllowedLibraryIDs applies a profile as a further restriction within
+// the administrator-enforced scope. Empty means unrestricted on either side.
+func CombineAllowedLibraryIDs(ctx context.Context, repo *repository.Container, adminIDs, profileIDs []string) []string {
+	adminIDs = NormalizeAllowedLibraryIDs(expandMergedLibraryIDs(ctx, repo, adminIDs))
+	profileIDs = NormalizeAllowedLibraryIDs(expandMergedLibraryIDs(ctx, repo, profileIDs))
+	if len(adminIDs) == 0 {
+		return profileIDs
+	}
+	if len(profileIDs) == 0 {
+		return adminIDs
+	}
+
+	allowed := make(map[string]struct{}, len(adminIDs))
+	for _, id := range adminIDs {
+		allowed[id] = struct{}{}
+	}
+	intersection := make([]string, 0, len(profileIDs))
+	for _, id := range profileIDs {
+		if _, ok := allowed[id]; ok {
+			intersection = append(intersection, id)
+		}
+	}
+	if len(intersection) == 0 {
+		return []string{noLibraryAccessID}
+	}
+	return intersection
 }
 
 // DecodeAllowedLibraryIDs normalises a PlayProfile allowed-library JSON string.

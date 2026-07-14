@@ -2,21 +2,27 @@ import { FormEvent, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { adminAPI } from '../api/admin'
+import { libraryAPI } from '../api/library'
 import { licenseAPI, type LicenseStatus } from '../api/license'
-import type { User } from '../types'
+import type { Library, User } from '../types'
 import { confirmAction } from '../components/confirmAction'
 import { requestPassword } from '../components/requestPassword'
 import { AdminUsersForm } from './AdminUsersForm'
+import { AdminUserLibraryAccessModal } from './AdminUserLibraryAccessModal'
 import { AdminUsersTable } from './AdminUsersTable'
 
 export function AdminUsersPanel() {
   const [users, setUsers] = useState<User[]>([])
+  const [libraries, setLibraries] = useState<Library[]>([])
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [editingID, setEditingID] = useState<string | null>(null)
   const [editingUsername, setEditingUsername] = useState('')
   const [resettingPasswordID, setResettingPasswordID] = useState<string | null>(null)
+  const [libraryAccessUser, setLibraryAccessUser] = useState<User | null>(null)
+  const [loadingLibraryAccessID, setLoadingLibraryAccessID] = useState<string | null>(null)
+  const [savingLibraryAccess, setSavingLibraryAccess] = useState(false)
   const refresh = async () => {
     const [nextUsers, nextLicense] = await Promise.all([
       adminAPI.listUsers(),
@@ -135,6 +141,41 @@ export function AdminUsersPanel() {
     await refresh()
   }
 
+  const saveLibraryAccess = async (allowedLibraryIDs: string[]) => {
+    if (!libraryAccessUser || savingLibraryAccess) return
+    setSavingLibraryAccess(true)
+    try {
+      await adminAPI.setUserLibraries(libraryAccessUser.id, allowedLibraryIDs)
+      toast.success(allowedLibraryIDs.length === 0 ? '已允许访问全部媒体库' : '媒体库访问范围已更新')
+      setLibraryAccessUser(null)
+      await refresh()
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '更新媒体库访问范围失败'
+      toast.error(msg)
+    } finally {
+      setSavingLibraryAccess(false)
+    }
+  }
+
+  const openLibraryAccess = async (user: User) => {
+    if (user.role === 'admin' || loadingLibraryAccessID) return
+    setLoadingLibraryAccessID(user.id)
+    try {
+      const nextLibraries = await libraryAPI.list({ includeHidden: true })
+      setLibraries(nextLibraries)
+      setLibraryAccessUser(user)
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '加载媒体库失败'
+      toast.error(msg)
+    } finally {
+      setLoadingLibraryAccessID(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <AdminUsersForm
@@ -160,7 +201,20 @@ export function AdminUsersPanel() {
         onResetPassword={resetPassword}
         onToggleStatus={toggleStatus}
         onDeleteUser={deleteUser}
+        loadingLibraryAccessID={loadingLibraryAccessID}
+        onManageLibraries={openLibraryAccess}
       />
+
+      {libraryAccessUser && (
+        <AdminUserLibraryAccessModal
+          key={libraryAccessUser.id}
+          user={libraryAccessUser}
+          libraries={libraries}
+          saving={savingLibraryAccess}
+          onClose={() => setLibraryAccessUser(null)}
+          onSave={saveLibraryAccess}
+        />
+      )}
     </div>
   )
 }

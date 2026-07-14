@@ -174,6 +174,56 @@ func TestConfiguredAdultLibrariesDoNotHideSafeLibraryWithNSFWItems(t *testing.T)
 	}
 }
 
+func TestUserLibraryAccessIsHardLimitForDefaultProfile(t *testing.T) {
+	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Media{}, &model.Setting{}, &model.PlayProfile{})
+	repos := repository.New(db)
+
+	libraries := []model.Library{
+		{Base: model.Base{ID: "library-a"}, Name: "A", Path: "/media/a", Type: "movie", Enabled: true},
+		{Base: model.Base{ID: "library-b"}, Name: "B", Path: "/media/b", Type: "movie", Enabled: true},
+		{Base: model.Base{ID: "library-c"}, Name: "C", Path: "/media/c", Type: "movie", Enabled: true},
+	}
+	if err := db.Create(&libraries).Error; err != nil {
+		t.Fatal(err)
+	}
+	viewer := &model.User{
+		Base:              model.Base{ID: "viewer-limited"},
+		Username:          "viewer-limited",
+		PasswordHash:      "hash",
+		Role:              "user",
+		AllowedLibraryIDs: []string{"library-a", "library-b"},
+	}
+	if err := repos.User.Create(t.Context(), viewer); err != nil {
+		t.Fatal(err)
+	}
+	profile := &model.PlayProfile{
+		UserID:            viewer.ID,
+		Name:              "默认",
+		IsDefault:         true,
+		AllowAdult:        true,
+		AllowedLibraryIDs: `["library-b","library-c"]`,
+	}
+	if err := db.Create(profile).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	visibility := UserDefaultMediaVisibility(t.Context(), repos, viewer.ID)
+	if !visibility.Allows(&model.Media{LibraryID: "library-b"}) {
+		t.Fatal("profile should retain the library also granted by the administrator")
+	}
+	for _, id := range []string{"library-a", "library-c"} {
+		if visibility.Allows(&model.Media{LibraryID: id}) {
+			t.Fatalf("library %s should be outside the effective intersection", id)
+		}
+	}
+
+	denied := CombineAllowedLibraryIDs(t.Context(), repos, []string{"library-a"}, []string{"library-c"})
+	deniedVisibility := MediaVisibility{IncludeNSFW: true, AllowedLibraryIDs: denied}
+	if deniedVisibility.Allows(&model.Media{LibraryID: "library-b"}) {
+		t.Fatal("disjoint administrator/profile scopes must deny all libraries")
+	}
+}
+
 func TestSearchMediaVisibleHonorsLargePosterWallLimit(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
 	repos := repository.New(db)

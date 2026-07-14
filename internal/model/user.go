@@ -13,6 +13,7 @@ type User struct {
 	Nickname           string     `gorm:"size:128" json:"nickname,omitempty"`
 	Email              string     `gorm:"size:128" json:"email,omitempty"`
 	AvatarURL          string     `gorm:"size:255" json:"avatar_url,omitempty"`
+	AllowedLibraryIDs  []string   `gorm:"serializer:json;type:text;not null;default:'[]'" json:"allowed_library_ids"`
 	HideAdult          bool       `gorm:"default:true" json:"hide_adult"`
 	ForcePasswordReset bool       `gorm:"default:false" json:"force_password_reset"`
 	IsActive           bool       `gorm:"default:true" json:"is_active"`

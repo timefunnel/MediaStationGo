@@ -6,6 +6,7 @@ export interface User {
   nickname?: string
   email?: string
   avatar_url?: string
+  allowed_library_ids?: string[]
   hide_adult?: boolean
   force_password_reset: boolean
   is_active: boolean
