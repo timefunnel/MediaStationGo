@@ -38,8 +38,9 @@ type cloudLibraryScanCompletion struct {
 }
 
 type cloudScanRootTarget struct {
-	scanDir    string
-	displayDir string
+	scanDir         string
+	displayDir      string
+	targetFileNames map[string]struct{}
 }
 
 func (s *ScannerService) scanCloudLibrary(ctx context.Context, lib *model.Library, mount CloudMountInfo, autoScrape bool) (*ScanResult, error) {
@@ -82,6 +83,7 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 			rootDir:          target.scanDir,
 			rootDisplayDir:   target.displayDir,
 			refreshRoot:      true,
+			targetFileNames:  target.targetFileNames,
 			autoCategoryRoot: autoCategoryRoot,
 			progress:         progress,
 			result:           res,
@@ -267,16 +269,18 @@ func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []c
 	rootDisplay := normalizeCloudMountDir(mount.Provider, mount.DisplayDir)
 	rootScan := normalizeCloudMountDir(mount.Provider, mount.ScanDir)
 	out := make([]cloudScanRootTarget, 0, len(values))
-	seen := map[string]struct{}{}
+	indexByDir := map[string]int{}
 	for _, value := range values {
 		displayDir := normalizeCloudMountDir(mount.Provider, value)
 		if displayDir == "" {
 			continue
 		}
+		targetFileName := ""
 		if _, ok := videoExtensions[strings.ToLower(path.Ext(displayDir))]; ok {
+			targetFileName = path.Base(displayDir)
 			displayDir = normalizeCloudMountDir(mount.Provider, path.Dir(displayDir))
 		}
-		if displayDir == "" || displayDir == rootDisplay || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+		if displayDir == "" || (displayDir == rootDisplay && targetFileName == "") || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
 			continue
 		}
 		suffix := strings.Trim(strings.TrimPrefix(displayDir, rootDisplay), "/")
@@ -285,11 +289,20 @@ func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []c
 			scanDir = strings.Trim(strings.TrimRight(rootScan, "/")+"/"+suffix, "/")
 		}
 		key := scanDir + "\x00" + displayDir
-		if _, ok := seen[key]; ok {
+		if index, ok := indexByDir[key]; ok {
+			if targetFileName == "" {
+				out[index].targetFileNames = nil
+			} else if out[index].targetFileNames != nil {
+				out[index].targetFileNames[targetFileName] = struct{}{}
+			}
 			continue
 		}
-		seen[key] = struct{}{}
-		out = append(out, cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir})
+		target := cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir}
+		if targetFileName != "" {
+			target.targetFileNames = map[string]struct{}{targetFileName: {}}
+		}
+		indexByDir[key] = len(out)
+		out = append(out, target)
 	}
 	return out
 }

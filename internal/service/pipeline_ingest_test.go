@@ -119,6 +119,77 @@ func TestPipelineIngestScansOnlyTargetOpenListPath(t *testing.T) {
 	}
 }
 
+func TestPipelineIngestScansOnlyTargetOpenListFile(t *testing.T) {
+	const targetName = "黑衣人3.Men.in.Black.III.2012.UHD.Bluray.REMUX.2160p.mkv"
+	requested := []openListListTestRequest{}
+	upstream := newOpenListAPIServerWithRequests(t, func(req openListListTestRequest) ([]openListTestEntry, int) {
+		requested = append(requested, req)
+		if req.Path != "/115/movie" {
+			t.Fatalf("targeted file ingest should only list its parent, got %q", req.Path)
+		}
+		return []openListTestEntry{
+			{Name: targetName, Size: 5000},
+			{Name: "Sibling.Movie.2024.mkv", Size: 6000},
+			{Name: "Sibling.Directory", IsDir: true},
+		}, 3
+	})
+	defer upstream.Close()
+
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.Setting{}, &model.StorageConfig{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "openlist-token"}}); err != nil {
+		t.Fatal(err)
+	}
+	libPath := BuildCloudLibraryPath("openlist", "/115/movie", "/115/movie")
+	lib := model.Library{Name: "Movies", Path: libPath, Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	root := model.LibraryRoot{LibraryID: lib.ID, Name: "Movies", Path: libPath, Enabled: true}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	scanner := NewScannerService(&config.Config{}, log, repos, NewHub(log), nil, nil)
+	scanner.SetStorageConfig(storage)
+	maintenance := NewPipelineMaintenanceService(log, repos)
+	svc := NewPipelineIngestService(log, repos, scanner, maintenance, nil)
+	targetPath := "/115/movie/" + targetName
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "movie", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/movie"},
+		Title:                     "黑衣人3",
+		TargetOpenListPaths:       []string{targetPath},
+		RequireTargetPath:         true,
+		Scan:                      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusCompleted {
+		t.Fatalf("job status=%s error=%s", job.Status, job.Error)
+	}
+	if job.Result.Scan == nil || job.Result.Scan.Visited != 1 || job.Result.Scan.Added != 1 {
+		t.Fatalf("scan result = %#v, want visited=1 added=1", job.Result.Scan)
+	}
+	wantMediaPath := "cloud://openlist/115/movie/" + targetName
+	if job.Result.Media == nil || job.Result.Media.MatchMode != "path" || job.Result.Media.MatchPath != targetPath || job.Result.Media.Path != wantMediaPath {
+		t.Fatalf("unexpected media result: %#v", job.Result.Media)
+	}
+	if len(requested) != 1 || requested[0].Path != "/115/movie" || !requested[0].Refresh {
+		t.Fatalf("openlist requests = %#v, want one refreshed parent listing", requested)
+	}
+	var mediaRows []model.Media
+	if err := db.Find(&mediaRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(mediaRows) != 1 || mediaRows[0].Path != wantMediaPath {
+		t.Fatalf("media rows = %#v, want only target file", mediaRows)
+	}
+}
+
 func TestPipelineIngestRejectsUnhandledTargetOpenListPaths(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)

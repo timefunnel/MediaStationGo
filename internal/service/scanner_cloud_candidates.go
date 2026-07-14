@@ -17,6 +17,7 @@ type cloudScanCandidateRequest struct {
 	rootDir          string
 	rootDisplayDir   string
 	refreshRoot      bool
+	targetFileNames  map[string]struct{}
 	autoCategoryRoot bool
 	progress         *cloudScanProgressState
 	result           *ScanResult
@@ -109,8 +110,15 @@ func (c *cloudScanCandidateCollector) walk(dirID, displayDir string, inheritedMe
 			return err
 		}
 		if entry.IsDir {
-			c.queueChildDirectory(displayDir, entry.Name, entry.ID, dirMeta)
+			if len(c.req.targetFileNames) == 0 {
+				c.queueChildDirectory(displayDir, entry.Name, entry.ID, dirMeta)
+			}
 			continue
+		}
+		if len(c.req.targetFileNames) > 0 {
+			if _, ok := c.req.targetFileNames[entry.Name]; !ok {
+				continue
+			}
 		}
 		c.addFileCandidate(displayDir, entry, sidecars, dirMeta)
 	}
