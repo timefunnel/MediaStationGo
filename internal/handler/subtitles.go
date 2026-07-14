@@ -3,17 +3,11 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
-
-type invalidateCloudSubtitleCacheRequest struct {
-	MediaID  string `json:"media_id"`
-	Provider string `json:"provider"`
-}
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -42,29 +36,5 @@ func serveSubtitleHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-	}
-}
-
-func invalidateCloudSubtitleCacheHandler(svc *service.Container) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if svc == nil || svc.Subtitle == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "subtitle service unavailable"})
-			return
-		}
-		var in invalidateCloudSubtitleCacheRequest
-		if c.Request.ContentLength != 0 {
-			if err := c.ShouldBindJSON(&in); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		}
-		mediaID := strings.TrimSpace(in.MediaID)
-		provider := strings.TrimSpace(in.Provider)
-		invalidated := svc.Subtitle.InvalidateCloudDiscovery(mediaID, provider)
-		c.JSON(http.StatusOK, gin.H{
-			"invalidated": invalidated,
-			"media_id":    mediaID,
-			"provider":    provider,
-		})
 	}
 }

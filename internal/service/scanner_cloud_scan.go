@@ -247,9 +247,6 @@ func (s *ScannerService) importCloudScanCandidates(ctx context.Context, rootLib 
 func (s *ScannerService) completeCloudLibraryScan(ctx context.Context, req cloudLibraryScanCompletion) {
 	publishCloudScanFinished(s, req.libraryID, req.result, req.progress)
 	s.invalidateMediaCache(ctx)
-	if scanHasImportChanges(req.result) && s.subtitle != nil {
-		s.subtitle.InvalidateCloudDiscovery("", req.provider)
-	}
 	targetIDs := appendUniqueLibraryIDs(req.touchedLibraryIDs, req.libraryID)
 	for _, targetID := range targetIDs {
 		s.maybeGenerateSTRMAfterScan(targetID)

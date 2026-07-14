@@ -1,7 +1,7 @@
 package service
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,23 +128,18 @@ func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
 	}
 }
 
-func TestEmbyPlaybackInfoDoesNotBlockOnColdCloudSubtitleDiscovery(t *testing.T) {
+func TestEmbyPlaybackInfoUsesOnlyMaterializedCloudSubtitles(t *testing.T) {
 	svc := newTestEmbyService(t)
 	subtitle := NewSubtitleService(zap.NewNop(), svc.repo)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	subtitle.cloudCache.load = func(_ context.Context, _ *SubtitleService, _ model.Media) ([]SubtitleTrack, error) {
-		close(started)
-		<-release
-		return []SubtitleTrack{{Path: "cloud://openlist/Movies/Movie.zh.srt", Lang: "zh-Hans", Codec: "srt"}}, nil
-	}
+	cacheDir := t.TempDir()
+	subtitle.SetMaterializedCacheDir(cacheDir)
 	svc.SetSubtitleService(subtitle)
 	lib := model.Library{Name: "OpenList", Path: `cloud://openlist/Movies`, Type: "movie", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
 	media := model.Media{
-		Base:        model.Base{ID: "cloud-subtitle-cold"},
+		Base:        model.Base{ID: "cloud-subtitle-materialized"},
 		LibraryID:   lib.ID,
 		Title:       "Cloud Movie",
 		Path:        `cloud://openlist/Movies/Movie.mkv`,
@@ -159,38 +154,30 @@ func TestEmbyPlaybackInfoDoesNotBlockOnColdCloudSubtitleDiscovery(t *testing.T) 
 	if err := svc.repo.DB.Create(&media).Error; err != nil {
 		t.Fatalf("create media: %v", err)
 	}
-
-	result := make(chan error, 1)
-	go func() {
-		_, err := svc.PlaybackInfo(t.Context(), media.ID, "user-1")
-		result <- err
-	}()
-	select {
-	case err := <-result:
-		if err != nil {
-			t.Fatalf("playback info: %v", err)
-		}
-	case <-time.After(cloudSubtitlePlaybackWait + 250*time.Millisecond):
-		close(release)
-		t.Fatal("PlaybackInfo blocked on cloud subtitle discovery")
+	mediaDir := filepath.Join(cacheDir, media.ID)
+	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		close(release)
-		t.Fatal("background cloud subtitle discovery did not start")
+	if err := os.WriteFile(filepath.Join(mediaDir, "movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	close(release)
-
-	deadline := time.Now().Add(time.Second)
-	for {
-		if tracks, ok := subtitle.cachedCloudSubtitles(media); ok && len(tracks) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("background cloud subtitle discovery did not populate cache")
-		}
-		time.Sleep(10 * time.Millisecond)
+	indexBody, err := json.Marshal(localSubtitleIndex{
+		MediaID:   media.ID,
+		Source:    "cloud",
+		Provider:  "openlist",
+		MediaPath: media.Path,
+		Tracks: []localSubtitleIndexTrack{{
+			MediaID:  media.ID,
+			Filename: "movie.zh.srt",
+			Lang:     "zh-Hans",
+			Label:    "简体中文",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mediaDir, "tracks.json"), indexBody, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	playback, err := svc.PlaybackInfo(t.Context(), media.ID, "user-1")
 	if err != nil {
@@ -198,28 +185,15 @@ func TestEmbyPlaybackInfoDoesNotBlockOnColdCloudSubtitleDiscovery(t *testing.T) 
 	}
 	streams := playback["MediaSources"].([]map[string]any)[0]["MediaStreams"].([]map[string]any)
 	if len(streams) != 3 || streams[2]["Type"] != "Subtitle" {
-		t.Fatalf("warm cloud subtitle cache not exposed: %#v", streams)
+		t.Fatalf("materialized cloud subtitle not exposed: %#v", streams)
 	}
-}
 
-func TestEmbyPlaybackInfoWithDisabledCloudSubtitleCacheDiscoversSynchronously(t *testing.T) {
-	svc := newTestEmbyService(t)
-	subtitle := NewSubtitleService(zap.NewNop(), svc.repo)
-	subtitle.cloudCache.ttl = 0
-	subtitle.cloudCache.load = func(_ context.Context, _ *SubtitleService, _ model.Media) ([]SubtitleTrack, error) {
-		return []SubtitleTrack{{Path: "cloud://openlist/Movies/Movie.zh.srt", Lang: "zh-Hans", Codec: "srt"}}, nil
-	}
-	svc.SetSubtitleService(subtitle)
-	lib := model.Library{Name: "OpenList", Path: `cloud://openlist/Movies`, Type: "movie", Enabled: true}
-	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
-		t.Fatalf("create library: %v", err)
-	}
-	media := model.Media{
-		Base:        model.Base{ID: "cloud-subtitle-disabled-cache"},
+	uncached := model.Media{
+		Base:        model.Base{ID: "cloud-subtitle-not-materialized"},
 		LibraryID:   lib.ID,
-		Title:       "Cloud Movie",
-		Path:        `cloud://openlist/Movies/Movie.mkv`,
-		STRMURL:     `/api/cloud/play/openlist?ref=%2FMovies%2FMovie.mkv`,
+		Title:       "Uncached Cloud Movie",
+		Path:        `cloud://openlist/Movies/Uncached.mkv`,
+		STRMURL:     `/api/cloud/play/openlist?ref=%2FMovies%2FUncached.mkv`,
 		Container:   "mkv",
 		DurationSec: 3600,
 		Width:       1920,
@@ -227,16 +201,18 @@ func TestEmbyPlaybackInfoWithDisabledCloudSubtitleCacheDiscoversSynchronously(t 
 		VideoCodec:  "h264",
 		AudioCodec:  "aac",
 	}
-	if err := svc.repo.DB.Create(&media).Error; err != nil {
+	if err := svc.repo.DB.Create(&uncached).Error; err != nil {
 		t.Fatalf("create media: %v", err)
 	}
-	playback, err := svc.PlaybackInfo(t.Context(), media.ID, "user-1")
+	playback, err = svc.PlaybackInfo(t.Context(), uncached.ID, "user-1")
 	if err != nil {
 		t.Fatalf("playback info: %v", err)
 	}
-	streams := playback["MediaSources"].([]map[string]any)[0]["MediaStreams"].([]map[string]any)
-	if len(streams) != 3 || streams[2]["Type"] != "Subtitle" {
-		t.Fatalf("disabled cache should preserve synchronous subtitle discovery: %#v", streams)
+	streams = playback["MediaSources"].([]map[string]any)[0]["MediaStreams"].([]map[string]any)
+	for _, stream := range streams {
+		if stream["Type"] == "Subtitle" {
+			t.Fatalf("unmaterialized cloud subtitle should not be discovered at playback: %#v", streams)
+		}
 	}
 }
 

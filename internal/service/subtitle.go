@@ -24,7 +24,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -38,13 +37,8 @@ type SubtitleService struct {
 	storage              *StorageConfigService
 	localCacheDir        string
 	materializedCacheDir string
-	cloudCache           *cloudSubtitleDiscoveryCache
-	warmMu               sync.Mutex
-	warmInFlight         map[string]chan struct{}
 	materializeMu        sync.Mutex
 }
-
-const cloudSubtitlePlaybackWait = 500 * time.Millisecond
 
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
@@ -53,7 +47,6 @@ func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...
 		repo:                 repo,
 		localCacheDir:        subtitleCacheDirFromEnv(),
 		materializedCacheDir: cloudSubtitleMaterializedDirFromEnv(),
-		cloudCache:           newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
 	}
 	if len(storage) > 0 {
 		s.storage = storage[0]
@@ -64,7 +57,6 @@ func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...
 func (s *SubtitleService) SetStorageConfig(storage *StorageConfigService) {
 	if s != nil {
 		s.storage = storage
-		s.InvalidateCloudDiscovery("", "")
 	}
 }
 
@@ -135,21 +127,8 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	}
 	localTracks := discoverLocalCachedSubtitles(s, mediaID)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		materializedTracks, materialized := discoverMaterializedCloudSubtitles(s, mediaID)
-		if materialized {
-			return mergeSubtitleTracks(localTracks, materializedTracks), nil
-		}
-		cloudTracks, err := s.discoverCloudSubtitlesCached(ctx, *m)
-		if err != nil {
-			if s.log != nil {
-				s.log.Warn("discover cloud subtitles failed",
-					zap.String("media_id", m.ID),
-					zap.String("path", m.Path),
-					zap.Error(err))
-			}
-			return mergeSubtitleTracks(localTracks, cloudTracks), nil
-		}
-		return mergeSubtitleTracks(localTracks, cloudTracks), nil
+		materializedTracks, _ := discoverMaterializedCloudSubtitles(s, mediaID)
+		return mergeSubtitleTracks(localTracks, materializedTracks), nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))
@@ -194,45 +173,10 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	return mergeSubtitleTracks(tracks, localTracks), nil
 }
 
-// DiscoverForPlayback keeps OpenList directory I/O off the latency-sensitive
-// PlaybackInfo path. Local downloaded subtitles and a warm cloud-directory
-// cache are returned immediately; a cold cloud cache is populated in the
-// background for the next PlaybackInfo request.
+// DiscoverForPlayback only reads local subtitle caches. Cloud subtitle listing
+// and download happen during ingest or an explicit maintenance refresh.
 func (s *SubtitleService) DiscoverForPlayback(ctx context.Context, mediaID string) ([]SubtitleTrack, error) {
-	m, err := s.repo.Media.FindByID(ctx, mediaID)
-	if err != nil {
-		return nil, err
-	}
-	if m == nil {
-		return nil, errors.New("media not found")
-	}
-	localTracks := discoverLocalCachedSubtitles(s, mediaID)
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		return s.Discover(ctx, mediaID)
-	}
-	materializedTracks, materialized := discoverMaterializedCloudSubtitles(s, mediaID)
-	if materialized {
-		return mergeSubtitleTracks(localTracks, materializedTracks), nil
-	}
-	if s.cloudCache == nil || s.cloudCache.ttl <= 0 {
-		return s.Discover(ctx, mediaID)
-	}
-	if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
-		return mergeSubtitleTracks(localTracks, cloudTracks), nil
-	}
-	done := s.warmCloudSubtitles(*m)
-	timer := time.NewTimer(cloudSubtitlePlaybackWait)
-	defer timer.Stop()
-	select {
-	case <-done:
-		if cloudTracks, ok := s.cachedCloudSubtitles(*m); ok {
-			return mergeSubtitleTracks(localTracks, cloudTracks), nil
-		}
-	case <-timer.C:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	return mergeSubtitleTracks(localTracks), nil
+	return s.Discover(ctx, mediaID)
 }
 
 // langTag matches the .zh / .zh-cn / .chs language sub-extensions.
@@ -287,9 +231,6 @@ func (s *SubtitleService) ServeAs(ctx context.Context, mediaID, sub, format stri
 	}
 	if localMediaID, filename, ok := parseMaterializedSubtitlePath(sub); ok {
 		return serveMaterializedCloudSubtitle(s, mediaID, localMediaID, filename, format, w)
-	}
-	if typ, ref, name, ok := parseCloudSubtitlePath(sub); ok {
-		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, format, w)
 	}
 	abs, err := filepath.Abs(sub)
 	if err != nil {

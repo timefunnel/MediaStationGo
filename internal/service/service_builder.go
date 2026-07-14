@@ -149,9 +149,6 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.Subtitle.SetStorageConfig(b.c.StorageCfg)
 	b.c.PipelineIngest.SetSubtitleService(b.c.Subtitle)
 	b.c.Scan.SetSubtitleService(b.c.Subtitle)
-	b.c.StorageCfg.SetChangeHandler(func(provider string) {
-		b.c.Subtitle.InvalidateCloudDiscovery("", provider)
-	})
 	b.c.Emby.SetSubtitleService(b.c.Subtitle)
 	b.c.Emby.SetRuntimeCache(b.c.Cache)
 	b.c.Emby.SetCloudProbe(b.c.StorageCfg, b.c.FFprobe)

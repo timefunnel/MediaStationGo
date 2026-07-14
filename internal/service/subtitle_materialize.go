@@ -169,7 +169,6 @@ func (s *SubtitleService) materializeCloudSubtitles(ctx context.Context, mediaID
 	result.Status = "success"
 	result.Cached = len(index.Tracks)
 	result.Removed = removed
-	s.InvalidateCloudDiscovery(media.ID, provider)
 	return result, nil
 }
 
