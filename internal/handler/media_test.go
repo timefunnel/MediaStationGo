@@ -67,6 +67,56 @@ func TestListLibrariesHidesAdultDirectoriesUnlessAdminRequestsAll(t *testing.T) 
 	}
 }
 
+func TestUpdateLibraryEnabledDoesNotChangeRootStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Library{}, &model.LibraryRoot{}); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.New(db)
+	lib := model.Library{Name: "电影", Path: "/media/movies", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	root := model.LibraryRoot{LibraryID: lib.ID, Name: "电影路径", Path: "/media/movies", Enabled: true}
+	if err := repos.Library.CreateRoot(t.Context(), &root); err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.Container{
+		Repo:  repos,
+		Media: service.NewMediaService(&config.Config{}, zap.NewNop(), repos),
+	}
+
+	body := bytes.NewBufferString(`{"enabled":false}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/libraries/"+lib.ID, body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "id", Value: lib.ID}}
+	updateLibraryHandler(svc)(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	updated, err := repos.Library.FindByID(t.Context(), lib.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated == nil || updated.Enabled {
+		t.Fatalf("library enabled = %#v, want false", updated)
+	}
+	updatedRoot, err := repos.Library.FindRootByID(t.Context(), lib.ID, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedRoot == nil || !updatedRoot.Enabled {
+		t.Fatalf("root enabled = %#v, want true", updatedRoot)
+	}
+}
+
 func TestListLibrariesIncludeHiddenNormalizesCloudDisplayNames(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

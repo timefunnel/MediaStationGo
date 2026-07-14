@@ -82,6 +82,22 @@ func TestMediaVisibilityFiltersNSFWAndLibraries(t *testing.T) {
 	}
 }
 
+func TestDisabledLibraryIsNotVisibleToUsers(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "停用库", Path: "/media/disabled", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Library.UpdateEnabled(t.Context(), lib.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	lib.Enabled = false
+	if LibraryVisibleForUser(t.Context(), repos, lib, MediaVisibility{IncludeNSFW: true}) {
+		t.Fatal("disabled library must not be visible to normal users")
+	}
+}
+
 func TestMediaVisibilityHidesDeprecatedNativeCloudLibraries(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
 	repos := repository.New(db)

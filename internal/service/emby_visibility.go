@@ -119,6 +119,9 @@ func cloneMediaVisibility(visibility MediaVisibility) MediaVisibility {
 }
 
 func (e *EmbyService) libraryVisibleFromCachedVisibility(lib model.Library, visibility MediaVisibility) bool {
+	if !lib.Enabled {
+		return false
+	}
 	if len(visibility.AllowedLibraryIDs) > 0 {
 		allowed := false
 		for _, id := range visibility.AllowedLibraryIDs {

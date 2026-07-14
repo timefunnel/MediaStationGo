@@ -13,6 +13,7 @@ type LibraryTableProps = {
   onScanRoot: (libraryID: string, root: LibraryRoot) => void
   onToggleRoot: (libraryID: string, root: LibraryRoot) => void
   onRemoveRoot: (library: Library, root: LibraryRoot) => void
+  onToggleLibrary: (library: Library) => void
   onScanLibrary: (library: Library) => void
   onRemoveLibrary: (library: Library) => void
 }
@@ -24,6 +25,7 @@ export function AdminLibraryTable({ libs, ...actions }: LibraryTableProps) {
         <thead className="text-xs uppercase tracking-wider text-sand-500">
           <tr>
             <th className="w-28 py-2">名称</th>
+            <th className="w-28">媒体库状态</th>
             <th>路径</th>
             <th className="w-20">类型</th>
             <th className="w-12 text-right">操作</th>
@@ -47,6 +49,9 @@ function LibraryTableRow({ library, ...actions }: LibraryTableRowProps) {
   return (
     <tr className="border-t border-gray-200">
       <td className="py-2 pr-3 font-medium text-ink-600">{library.name}</td>
+      <td className="pr-3">
+        <StatusBadge enabled={library.enabled} enabledLabel="媒体库启用" disabledLabel="媒体库停用" />
+      </td>
       <td className="py-1.5 text-ink-100">
         <LibraryRootsCell library={library} {...actions} />
       </td>
@@ -79,7 +84,7 @@ function ExistingRootEditor({ library, root, ...actions }: RootEditorProps) {
   return (
     <div className="grid items-center gap-1.5 rounded-lg border border-gray-200/80 bg-gray-50/60 p-1.5 xl:grid-cols-[minmax(92px,0.65fr)_minmax(240px,2fr)_auto_auto]">
       {root.id ? <EditableRootFields library={library} root={root} draft={draft} {...actions} /> : <ReadonlyRootFields root={root} />}
-      <RootStatus enabled={draft.enabled ?? root.enabled} />
+      <StatusBadge enabled={draft.enabled ?? root.enabled} enabledLabel="路径启用" disabledLabel="路径禁用" />
       <RootActionButtons library={library} root={root} draft={draft} {...actions} />
     </div>
   )
@@ -115,14 +120,14 @@ function EditableRootFields({ library, root, draft, onEditableRootChange }: Root
   )
 }
 
-function RootStatus({ enabled }: { enabled: boolean }) {
+function StatusBadge({ enabled, enabledLabel, disabledLabel }: { enabled: boolean; enabledLabel: string; disabledLabel: string }) {
   return (
     <span
       className={`whitespace-nowrap rounded-md border px-2 py-1 text-xs ${
         enabled ? 'border-emerald-300/60 text-emerald-600' : 'border-gray-300 text-ink-50'
       }`}
     >
-      {enabled ? '启用' : '禁用'}
+      {enabled ? enabledLabel : disabledLabel}
     </span>
   )
 }
@@ -170,9 +175,16 @@ function RootActionButtons({ library, root, draft, ...actions }: RootEditorProps
   )
 }
 
-function LibraryActionsCell({ library, onScanLibrary, onRemoveLibrary }: LibraryTableRowProps) {
+function LibraryActionsCell({ library, onToggleLibrary, onScanLibrary, onRemoveLibrary }: LibraryTableRowProps) {
   return (
     <ActionMenu label="媒体库操作">
+      <MenuButton
+        icon={library.enabled ? <PowerOff size={14} /> : <Power size={14} />}
+        label={library.enabled ? '停用媒体库' : '启用媒体库'}
+        onClick={() => onToggleLibrary(library)}
+      >
+        {library.enabled ? '停用媒体库' : '启用媒体库'}
+      </MenuButton>
       <MenuButton icon={<RefreshCw size={14} />} label="扫描" onClick={() => onScanLibrary(library)}>
         扫描
       </MenuButton>

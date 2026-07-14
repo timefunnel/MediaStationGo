@@ -168,6 +168,9 @@ func DecodeAllowedLibraryIDs(raw string) []string {
 // LibraryVisibleForUser applies profile library limits and adult-directory
 // hiding to a library card/folder.
 func LibraryVisibleForUser(ctx context.Context, repo *repository.Container, lib model.Library, visibility MediaVisibility) bool {
+	if !lib.Enabled {
+		return false
+	}
 	if len(visibility.AllowedLibraryIDs) > 0 {
 		found := false
 		for _, id := range visibility.AllowedLibraryIDs {

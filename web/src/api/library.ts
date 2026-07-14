@@ -102,6 +102,9 @@ export const libraryAPI = {
   createWithRoots: (name: string, type: string, roots: LibraryRootInput[]) =>
     api.post<Library>('/libraries', { name, type, roots }).then((r) => r.data),
 
+  update: (id: string, patch: { enabled: boolean }) =>
+    api.patch<Library>(`/libraries/${id}`, patch).then((r) => r.data),
+
   remove: (id: string) => api.delete(`/libraries/${id}`).then((r) => r.data),
 
   listRoots: (id: string) => api.get<LibraryRoot[]>(`/libraries/${id}/roots`).then((r) => r.data),

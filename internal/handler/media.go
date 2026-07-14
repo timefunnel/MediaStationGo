@@ -23,6 +23,10 @@ type createLibraryReq struct {
 	Type  string                     `json:"type"`
 }
 
+type updateLibraryReq struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
 func listLibrariesHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		libs, err := svc.Media.ListLibraries(c.Request.Context())
@@ -108,6 +112,33 @@ func createLibraryHandler(svc *service.Container) gin.HandlerFunc {
 		// Refresh fsnotify watcher to pick up the new library root.
 		go func() { _ = svc.Watcher.Refresh(context.Background()) }()
 		c.JSON(http.StatusCreated, l)
+	}
+}
+
+func updateLibraryHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req updateLibraryReq
+		if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+			return
+		}
+		lib, err := svc.Media.UpdateLibraryEnabled(c.Request.Context(), c.Param("id"), *req.Enabled)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if lib == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		uid, _ := c.Get("ctx_user_id")
+		if svc.Audit != nil {
+			svc.Audit.Record(c.Request.Context(), toString(uid), "library.update_status", lib.ID, c.ClientIP(), strconv.FormatBool(lib.Enabled))
+		}
+		if svc.Watcher != nil {
+			go func() { _ = svc.Watcher.Refresh(context.Background()) }()
+		}
+		c.JSON(http.StatusOK, lib)
 	}
 }
 

@@ -22,6 +22,13 @@ func TestEmbyRootItemsExposeLibraries(t *testing.T) {
 			t.Fatalf("create library: %v", err)
 		}
 	}
+	disabled := model.Library{Name: "停用库", Path: `F:\downloads\停用`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &disabled); err != nil {
+		t.Fatalf("create disabled library: %v", err)
+	}
+	if err := svc.repo.Library.UpdateEnabled(t.Context(), disabled.ID, false); err != nil {
+		t.Fatalf("disable library: %v", err)
+	}
 
 	root, err := svc.Items(t.Context(), ItemsParams{Limit: 50})
 	if err != nil {
@@ -29,7 +36,7 @@ func TestEmbyRootItemsExposeLibraries(t *testing.T) {
 	}
 	items := root["Items"].([]map[string]any)
 	if len(items) != 2 {
-		t.Fatalf("expected root items to expose libraries, got %#v", items)
+		t.Fatalf("expected root items to expose only enabled libraries, got %#v", items)
 	}
 	if items[0]["Type"] != "CollectionFolder" || items[1]["Type"] != "CollectionFolder" {
 		t.Fatalf("root should return collection folders: %#v", items)

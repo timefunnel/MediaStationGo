@@ -26,6 +26,7 @@ export function AdminLibraryPanel() {
         onScanRoot={rootActions.scanLibraryRoot}
         onToggleRoot={rootActions.toggleLibraryRoot}
         onRemoveRoot={rootActions.removeLibraryRoot}
+        onToggleLibrary={libraryActions.toggleLibrary}
         onScanLibrary={libraryActions.scanLibrary}
         onRemoveLibrary={libraryActions.removeLibrary}
       />

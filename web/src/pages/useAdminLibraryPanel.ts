@@ -140,6 +140,23 @@ function useEditableLibraryRootActions(refresh: () => Promise<void>, drafts: Edi
 }
 
 function useLibraryActions(refresh: () => Promise<void>) {
+  const toggleLibrary = async (library: Library) => {
+    const enabled = !library.enabled
+    if (
+      !enabled &&
+      !(await confirmAction({
+        title: '停用媒体库',
+        message: `停用「${library.name}」后，普通用户和兼容客户端将不再显示该媒体库。路径和媒体记录不会删除。`,
+        confirmText: '停用',
+      }))
+    ) {
+      return
+    }
+    await libraryAPI.update(library.id, { enabled })
+    toast.success(enabled ? '媒体库已启用' : '媒体库已停用')
+    await refresh()
+  }
+
   const scanLibrary = async (library: Library) => {
     const result = await libraryAPI.scan(library.id)
     if (result.queued) toast.success('云盘扫描已加入后台队列，会自动入库')
@@ -153,5 +170,5 @@ function useLibraryActions(refresh: () => Promise<void>) {
     await refresh()
   }
 
-  return { scanLibrary, removeLibrary }
+  return { toggleLibrary, scanLibrary, removeLibrary }
 }

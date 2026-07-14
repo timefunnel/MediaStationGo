@@ -12,6 +12,21 @@ func (s *MediaService) ListLibraries(ctx context.Context) ([]model.Library, erro
 	return s.repo.Library.List(ctx)
 }
 
+func (s *MediaService) UpdateLibraryEnabled(ctx context.Context, id string, enabled bool) (*model.Library, error) {
+	lib, err := s.repo.Library.FindByID(ctx, id)
+	if err != nil || lib == nil {
+		return lib, err
+	}
+	if lib.Enabled == enabled {
+		return lib, nil
+	}
+	if err := s.repo.Library.UpdateEnabled(ctx, id, enabled); err != nil {
+		return nil, err
+	}
+	s.invalidateMediaCache(ctx)
+	return s.repo.Library.FindByID(ctx, id)
+}
+
 // DeleteLibrary removes a library and its media rows. The on-disk files are
 // left untouched.
 func (s *MediaService) DeleteLibrary(ctx context.Context, id string) error {
