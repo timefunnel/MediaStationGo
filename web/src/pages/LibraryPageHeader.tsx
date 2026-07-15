@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { Download } from 'lucide-react'
 
 import type { Library } from '../types'
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
@@ -53,12 +53,13 @@ export function LibraryPageHeader({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
-          className="btn-outline h-10 w-10 px-0"
-          title="搜索资源并入库"
-          aria-label="搜索资源并入库"
+          className="btn-outline h-10 px-3"
+          title="查找资源"
+          aria-label="查找资源"
           onClick={onResourceSearch}
         >
-          <Search size={18} />
+          <Download size={18} />
+          <span>查找资源</span>
         </button>
         {isAdmin && (
           <>
