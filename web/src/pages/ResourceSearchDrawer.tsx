@@ -6,8 +6,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Globe,
   LoaderCircle,
-  Search,
   X,
 } from 'lucide-react'
 
@@ -199,6 +199,16 @@ export function ResourceSearchDrawer({
     void runSearch(1)
   }
 
+  const selectSource = (nextSource: SearchSource) => {
+    if (nextSource === source || searching) return
+    setSource(nextSource)
+    setResponse(null)
+    setSearchFailure(null)
+    setSearchError('')
+    setDuplicateConflict(null)
+    setJumpPage('1')
+  }
+
   const importCandidate = async (candidate: ResourceSearchCandidate, forceDuplicate = false) => {
     if (!response) return
     if (!selectedRootID) {
@@ -267,11 +277,11 @@ export function ResourceSearchDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`${libraryName} 资源搜索入库`}>
+    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`${libraryName} 查找资源`}>
       <button
         type="button"
         className="absolute inset-0 hidden bg-black/35 backdrop-blur-sm sm:block"
-        aria-label="关闭资源搜索面板"
+        aria-label="关闭查找资源面板"
         onClick={onClose}
       />
       <aside className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl">
@@ -288,8 +298,9 @@ export function ResourceSearchDrawer({
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <h2 className="truncate font-display text-lg font-bold text-ink-600">
-              {taskID ? '资源入库进度' : '搜索资源并入库'}
+            <h2 className="flex min-w-0 items-center gap-2 font-display text-lg font-bold text-ink-600">
+              {!taskID && <Globe size={19} className="shrink-0 text-brand-600" />}
+              <span className="truncate">{taskID ? '资源入库进度' : '查找资源'}</span>
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>
@@ -297,7 +308,7 @@ export function ResourceSearchDrawer({
             type="button"
             className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
             title="关闭"
-            aria-label="关闭资源搜索面板"
+            aria-label="关闭查找资源面板"
             onClick={onClose}
           >
             <X size={20} />
@@ -333,13 +344,21 @@ export function ResourceSearchDrawer({
             <form className="shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 py-4 sm:px-6" onSubmit={submitSearch}>
               <div className="mb-2.5 flex items-center gap-2">
                 <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">
-                  <Download size={17} />
+                  <Globe size={17} />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-ink-600">查找可入库资源</h3>
-                  <p className="text-xs text-sand-500">{source === 'pansou' ? '网盘资源搜索' : '普通资源搜索'}</p>
+                  <h3 className="text-sm font-semibold text-ink-600">查找资源</h3>
+                  <p className="text-xs text-sand-500">{source === 'pansou' ? '网盘资源' : '普通资源'}</p>
                 </div>
               </div>
+
+              <SearchSourceControl
+                source={source}
+                searching={searching}
+                pansou={pansouAvailable}
+                onSelect={selectSource}
+              />
+
               <div className="flex min-w-0 gap-2">
                 <label className="min-w-0 flex-1">
                   <span className="sr-only">资源关键词</span>
@@ -353,7 +372,7 @@ export function ResourceSearchDrawer({
                   />
                 </label>
                 <button type="submit" className="btn-primary h-11 min-w-[6.5rem] shrink-0 px-3" disabled={searching}>
-                  {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Search size={18} />}
+                  {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Globe size={18} />}
                   <span>{searching ? '查找中' : '查找资源'}</span>
                 </button>
               </div>
@@ -382,13 +401,6 @@ export function ResourceSearchDrawer({
                 </div>
               )}
 
-              <SearchSourceControl
-                source={source}
-                searching={searching}
-                pansou={pansouAvailable}
-                onSelect={(nextSource) => void runSearch(1, nextSource)}
-              />
-
               {searchError && <InlineError message={searchError} className="mt-3" />}
             </form>
 
@@ -405,8 +417,8 @@ export function ResourceSearchDrawer({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
               {!response && !searching && !searchFailure && (
                 <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
-                  <Download className="mb-3 h-9 w-9" />
-                  <p className="text-sm">输入关键词查找可入库资源</p>
+                  <Globe className="mb-3 h-9 w-9" />
+                  <p className="text-sm">选择搜索模式并输入关键词查找资源</p>
                 </div>
               )}
 
@@ -414,7 +426,7 @@ export function ResourceSearchDrawer({
                 <div className="flex min-h-56 flex-col items-center justify-center text-center" aria-live="polite">
                   <LoaderCircle className="mb-3 h-8 w-8 animate-spin text-brand-500" />
                   <p className="text-sm font-medium text-ink-100">
-                    {source === 'pansou' ? '正在搜索网盘资源…' : '正在查找可入库资源…'}
+                    {source === 'pansou' ? '正在查找网盘资源…' : '正在查找资源…'}
                   </p>
                 </div>
               )}
@@ -488,7 +500,7 @@ function SearchSourceControl({
   onSelect: (source: SearchSource) => void
 }) {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
+    <div className="mb-3 flex flex-wrap items-center gap-2">
       <span className="text-xs font-semibold text-ink-100">搜索模式</span>
       <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
         <SourceButton
@@ -555,7 +567,7 @@ function ResourceSearchEmptyState({
   return (
     <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center" aria-live="polite">
       <span className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-sand-500">
-        <Search size={21} />
+        <Globe size={21} />
       </span>
       <h3 className="text-sm font-semibold text-ink-600">
         {failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
@@ -565,8 +577,8 @@ function ResourceSearchEmptyState({
       </p>
       {canSearchPansou && (
         <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onSearchPansou}>
-          <Search size={16} />
-          网盘搜索
+          <Globe size={16} />
+          网盘查找
         </button>
       )}
     </div>
