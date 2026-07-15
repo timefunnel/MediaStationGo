@@ -9,6 +9,8 @@ import {
 } from './LibrariesPageSections'
 import { isSeriesLibraryType, latestLibraryCards, type LibraryPreview } from './librariesPageModel'
 
+const LIBRARY_PREVIEW_MEDIA_LIMIT = 40
+
 export function LibrariesPage() {
   const [previews, setPreviews] = useState<LibraryPreview[]>([])
   const [loading, setLoading] = useState(true)
@@ -45,7 +47,7 @@ export function LibrariesPage() {
               ])
               return { library, items: [], total: mediaPage.total, cards: seriesPage.items ?? [] } satisfies LibraryPreview
             }
-            const page = await libraryAPI.listMedia(library.id, 1, 160, { groupVersions: false })
+            const page = await libraryAPI.listMedia(library.id, 1, LIBRARY_PREVIEW_MEDIA_LIMIT, { groupVersions: false })
             const cards = latestLibraryCards(page.items)
             return { library, items: page.items, total: page.total, cards } satisfies LibraryPreview
           } catch {

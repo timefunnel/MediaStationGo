@@ -142,7 +142,7 @@ function LibraryEntryCard({ preview }: { preview: LibraryPreview }) {
           artwork.map(({ src, version }, index) => (
             <img
               key={`${src}-${index}`}
-              src={imageURL(src, version)}
+              src={imageURL(src, version, { maxWidth: 180, quality: 76 })}
               alt=""
               loading="lazy"
               referrerPolicy="no-referrer"

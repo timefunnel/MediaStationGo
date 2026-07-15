@@ -19,7 +19,7 @@ export const MediaCard = ({
   const ref = useRef<HTMLDivElement>(null)
   const href = linkTo ?? `/media/${media.id}`
   const [posterFit, setPosterFit] = useState<'cover' | 'contain'>('cover')
-  const posterSrc = imageURL(media.poster_url, media.updated_at)
+  const posterSrc = imageURL(media.poster_url, media.updated_at, { maxWidth: 360, quality: 80 })
   const displayRating = rating ?? media.rating
   const versionCount = media.versions?.length ?? 0
 

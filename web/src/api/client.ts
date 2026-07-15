@@ -156,6 +156,9 @@ export type ImageURLOptions =
   | {
       refreshCache?: boolean
       retryFailed?: boolean
+      maxWidth?: number
+      maxHeight?: number
+      quality?: number
     }
 
 export function imageURL(remote?: string, version?: string, options: ImageURLOptions = false): string {
@@ -163,13 +166,26 @@ export function imageURL(remote?: string, version?: string, options: ImageURLOpt
   const versionQuery = version ? `v=${encodeURIComponent(version)}` : ''
   const retryFailed = typeof options === 'boolean' ? options : Boolean(options.retryFailed)
   const refreshCache = typeof options === 'boolean' ? false : Boolean(options.refreshCache)
+  const maxWidth = typeof options === 'boolean' ? 0 : positiveImageOption(options.maxWidth)
+  const maxHeight = typeof options === 'boolean' ? 0 : positiveImageOption(options.maxHeight)
+  const quality = typeof options === 'boolean' ? 0 : positiveImageOption(options.quality)
   const retryQuery = retryFailed ? 'retry=1' : ''
   const refreshQuery = refreshCache ? 'refresh=1' : ''
-  const imageQuery = [versionQuery, retryQuery, refreshQuery].filter(Boolean).join('&')
+  const widthQuery = maxWidth ? `maxWidth=${maxWidth}` : ''
+  const heightQuery = maxHeight ? `maxHeight=${maxHeight}` : ''
+  const qualityQuery = quality ? `quality=${quality}` : ''
+  const imageQuery = [versionQuery, retryQuery, refreshQuery, widthQuery, heightQuery, qualityQuery]
+    .filter(Boolean)
+    .join('&')
   if (remote.startsWith('/api/img')) return withQuery(withoutAuthQuery(remote), imageQuery)
   if (remote.startsWith('/api/cloud/play/')) return withQuery(withoutAuthQuery(remote), imageQuery)
   if (remote.startsWith('/api/')) return withQuery(withQuery(remote, tokenQuery()), imageQuery)
   return withQuery(`/api/img?url=${encodeURIComponent(remote)}`, imageQuery)
+}
+
+function positiveImageOption(value?: number): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return 0
+  return Math.round(value)
 }
 
 function withQuery(url: string, query: string): string {
