@@ -316,12 +316,12 @@ export function ResourceSearchDrawer({
         ) : (
           <>
             <form className="shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 py-4 sm:px-6" onSubmit={submitSearch}>
-              <div className="flex gap-2">
+              <div className="flex min-w-0 gap-2">
                 <label className="min-w-0 flex-1">
                   <span className="sr-only">搜索关键词</span>
                   <input
                     autoFocus
-                    className="input-field h-11 py-2.5"
+                    className="input-field h-11 min-w-0 w-full py-2.5 text-base sm:text-sm"
                     value={query}
                     placeholder="输入影片、剧集或资源名称"
                     maxLength={200}
@@ -344,7 +344,7 @@ export function ResourceSearchDrawer({
                     <label className="block">
                       <span className="mb-1 block text-xs font-semibold text-ink-100">入库目录</span>
                       <select
-                        className="input-field h-10 py-2"
+                        className="input-field h-10 py-2 text-base sm:text-sm"
                         value={selectedRootID}
                         onChange={(event) => setSelectedRootID(event.target.value)}
                       >
@@ -583,7 +583,7 @@ function ResourceSearchPagination({
           type="number"
           min={1}
           max={totalPages}
-          className="input-field h-9 w-20 px-2 py-1 text-center"
+          className="input-field h-9 w-20 px-2 py-1 text-center text-base sm:text-sm"
           value={jumpPage}
           disabled={disabled}
           onChange={(event) => onJumpPageChange(event.target.value)}
