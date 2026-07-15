@@ -318,3 +318,22 @@ func TestResourceImportPersistsPipelineCandidateIDForCreate(t *testing.T) {
 		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
 	}
 }
+
+func TestMapPipelineImportStateKeepsUnknownActiveStageRunning(t *testing.T) {
+	status, stage := mapPipelineImportState(resourcePipelineTask{Status: "running", Stage: "future_stage"})
+	if status != ResourceImportStatusRunning || stage != "running" {
+		t.Fatalf("mapped state = %q/%q", status, stage)
+	}
+}
+
+func TestApplyPipelineTaskReportsRawInvalidState(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, _, _, _, _, _ := newResourceImportTestService(t, pipeline)
+	job := model.ResourceImportJob{Attempt: 1}
+	job.ID = "job-1"
+	err := svc.applyPipelineTask(t.Context(), &job, resourcePipelineTask{})
+	var stateErr *resourcePipelineStateError
+	if !errors.As(err, &stateErr) || stateErr.Status != "" || stateErr.Stage != "" {
+		t.Fatalf("state error = %#v", err)
+	}
+}

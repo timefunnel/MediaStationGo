@@ -121,6 +121,15 @@ type ResourceImportDuplicateError struct {
 
 func (e *ResourceImportDuplicateError) Error() string { return e.Message }
 
+type resourcePipelineStateError struct {
+	Status string
+	Stage  string
+}
+
+func (e *resourcePipelineStateError) Error() string {
+	return fmt.Sprintf("media-pipeline import returned an invalid state: status=%q stage=%q", e.Status, e.Stage)
+}
+
 type ResourceImportTask struct {
 	ID              string     `json:"id"`
 	UserID          string     `json:"user_id,omitempty"`
@@ -531,7 +540,9 @@ func (s *ResourceImportService) monitor(id string) {
 	defer s.release(job.UserID)
 	ticker := time.NewTicker(time.Duration(s.cfg.PollSeconds) * time.Second)
 	defer ticker.Stop()
+	invalidStateCount := 0
 	for {
+		waitForStateRecovery := false
 		job, err = s.loadOwnedJob(ctx, "", true, id)
 		if err != nil || resourceImportStatusFinal(job.Status) {
 			return
@@ -543,6 +554,7 @@ func (s *ResourceImportService) monitor(id string) {
 			child, err = s.client.GetImport(ctx, job.UserID, job.PipelineJobID)
 		}
 		if err != nil {
+			invalidStateCount = 0
 			var pipelineErr *resourcePipelineError
 			if job.CancelRequested && errors.As(err, &pipelineErr) && pipelineErr.StatusCode == 409 {
 				_ = s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{
@@ -555,17 +567,33 @@ func (s *ResourceImportService) monitor(id string) {
 			}
 		} else if applyErr := s.applyPipelineTask(ctx, &job, child); applyErr != nil {
 			if s.log != nil {
-				s.log.Error("resource import state persistence failed", zap.String("job_id", job.ID), zap.Error(applyErr))
+				s.log.Error(
+					"resource import state persistence failed",
+					zap.String("job_id", job.ID),
+					zap.String("pipeline_status", child.Status),
+					zap.String("pipeline_stage", child.Stage),
+					zap.Error(applyErr),
+				)
 			}
-			if strings.Contains(applyErr.Error(), "invalid status or stage") {
-				_ = s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{
-					"status": ResourceImportStatusFailed, "stage": "failed",
-					"public_error": applyErr.Error(), "error": applyErr.Error(), "finished_at": time.Now(),
-				}).Error
-				return
+			var stateErr *resourcePipelineStateError
+			if errors.As(applyErr, &stateErr) {
+				invalidStateCount++
+				if invalidStateCount < 3 {
+					waitForStateRecovery = true
+				} else {
+					_ = s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+						"status": ResourceImportStatusFailed, "stage": "failed",
+						"public_error": applyErr.Error(), "error": applyErr.Error(), "finished_at": time.Now(),
+					}).Error
+					return
+				}
+			} else {
+				invalidStateCount = 0
 			}
+		} else {
+			invalidStateCount = 0
 		}
-		if resourceImportStatusFinal(job.Status) {
+		if !waitForStateRecovery && resourceImportStatusFinal(job.Status) {
 			return
 		}
 		select {
@@ -614,7 +642,7 @@ func (s *ResourceImportService) applyPipelineTask(ctx context.Context, job *mode
 	}
 	status, stage := mapPipelineImportState(child)
 	if status == "" || stage == "" {
-		return errors.New("media-pipeline import returned an invalid status or stage")
+		return &resourcePipelineStateError{Status: child.Status, Stage: child.Stage}
 	}
 	if (status == ResourceImportStatusCompleted || status == ResourceImportStatusCompletedWithWarning) && strings.TrimSpace(child.MsgMediaID) == "" {
 		status, stage = ResourceImportStatusFailed, "failed"
@@ -862,9 +890,9 @@ func mapPipelineImportState(task resourcePipelineTask) (string, string) {
 	stage := strings.ToLower(strings.TrimSpace(task.Stage))
 	switch status {
 	case ResourceImportStatusQueued:
-		return ResourceImportStatusQueued, mapPipelineImportStage(stage)
+		return ResourceImportStatusQueued, mapPipelineActiveStage(stage)
 	case ResourceImportStatusRunning:
-		return ResourceImportStatusRunning, mapPipelineImportStage(stage)
+		return ResourceImportStatusRunning, mapPipelineActiveStage(stage)
 	case ResourceImportStatusCompleted:
 		return ResourceImportStatusCompleted, "completed"
 	case ResourceImportStatusCompletedWithWarning:
@@ -876,6 +904,16 @@ func mapPipelineImportState(task resourcePipelineTask) (string, string) {
 	default:
 		return "", ""
 	}
+}
+
+func mapPipelineActiveStage(stage string) string {
+	if mapped := mapPipelineImportStage(stage); mapped != "" {
+		return mapped
+	}
+	if strings.TrimSpace(stage) != "" {
+		return "running"
+	}
+	return ""
 }
 
 func mapPipelineImportStage(stage string) string {
@@ -922,6 +960,8 @@ func resourceImportProgress(status, stage string) int {
 		return 85
 	case "matching_subtitle":
 		return 95
+	case "running":
+		return 25
 	default:
 		return 0
 	}
