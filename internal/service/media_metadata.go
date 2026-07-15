@@ -26,6 +26,7 @@ type MediaMetadataUpdate struct {
 	Languages    *string  `json:"languages"`
 	Countries    *string  `json:"countries"`
 	Genres       *string  `json:"genres"`
+	Actors       *string  `json:"actors"`
 	NSFW         *bool    `json:"nsfw"`
 }
 
@@ -97,6 +98,9 @@ func (s *MediaService) UpdateMetadata(ctx context.Context, id string, req MediaM
 	}
 	if req.Genres != nil {
 		updates["genres"] = normalizeMetadataCSV(*req.Genres)
+	}
+	if req.Actors != nil {
+		updates["actors"] = normalizeMetadataCSV(*req.Actors)
 	}
 	if req.NSFW != nil {
 		updates["nsfw"] = *req.NSFW

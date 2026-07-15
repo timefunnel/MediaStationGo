@@ -13,6 +13,9 @@ const embyResumeItemsLimit = 10
 
 // Item 单条目详情。
 func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[string]any, error) {
+	if personName, ok := embyPersonName(mediaID); ok {
+		return e.personItem(ctx, userID, personName)
+	}
 	if lib, err := e.repo.Library.FindByID(ctx, mediaID); err != nil {
 		return nil, err
 	} else if lib != nil {
@@ -284,7 +287,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"Height":            m.Height,
 		"DateCreated":       m.CreatedAt,
 		"DateModified":      modifiedAt,
-		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path),
+		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path, m.Actors),
 		"Path":              m.Path,
 		"ParentId":          parentID,
 		"SeasonId":          seasonID,
@@ -294,6 +297,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"ImageTags":         imageTags,
 		"BackdropImageTags": backdropTags,
 		"Genres":            splitCSV(m.Genres),
+		"People":            embyPeopleFromCSV(m.Actors),
 		"ProviderIds": map[string]string{
 			"Tmdb":    intToStr(m.TMDbID),
 			"Bangumi": intToStr(m.BangumiID),

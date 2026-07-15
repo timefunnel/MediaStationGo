@@ -20,6 +20,7 @@ type Match struct {
 	Languages     []string `json:"languages,omitempty"`
 	Countries     []string `json:"countries,omitempty"`
 	Genres        []string `json:"genres,omitempty"`
+	Actors        []string `json:"actors,omitempty"`
 	NSFW          bool     `json:"nsfw,omitempty"`
 	SearchKeyword string   `json:"-"`
 }
@@ -39,4 +40,5 @@ type TMDbDetails struct {
 	Languages []string `json:"languages"`
 	Countries []string `json:"countries"`
 	Genres    []string `json:"genres"`
+	Actors    []string `json:"actors"`
 }

@@ -161,6 +161,9 @@ func (s *PipelineScrapeService) propagateEpisodeMatch(ctx context.Context, media
 	if refreshed.Genres != "" {
 		updates["genres"] = refreshed.Genres
 	}
+	if refreshed.Actors != "" {
+		updates["actors"] = refreshed.Actors
+	}
 	if refreshed.NSFW {
 		updates["nsfw"] = refreshed.NSFW
 	}
@@ -211,6 +214,7 @@ func pipelineManualScrapeRequestFromMatch(match ExternalMediaResult) ManualScrap
 		Languages:     append([]string(nil), match.Languages...),
 		Countries:     append([]string(nil), match.Countries...),
 		Genres:        append([]string(nil), match.Genres...),
+		Actors:        append([]string(nil), match.Actors...),
 		NSFW:          match.NSFW,
 		EpisodeImages: &episodeArtwork,
 	}

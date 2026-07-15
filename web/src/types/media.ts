@@ -36,6 +36,7 @@ export interface Media {
   languages?: string
   countries?: string
   genres?: string
+  actors?: string
   nsfw: boolean
   strm_url?: string
   file_hash?: string

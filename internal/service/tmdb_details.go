@@ -4,13 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"go.uber.org/zap"
 )
 
+type tmdbCreditCast struct {
+	Name string `json:"name"`
+}
+
 // GetDetails fetches extended metadata for a TMDb ID.
-// It calls /movie/{id} or /tv/{id} with append_to_response=genres
-// and extracts languages, production countries, and genres.
+// It calls /movie/{id} or /tv/{id} with appended credits and extracts
+// languages, production countries, genres, and top-billed cast.
 // mediaType should be "movie" or "tv".
 func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType string) (*TMDbDetails, error) {
 	apiKey := t.resolveAPIKey(ctx)
@@ -27,7 +32,7 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 	q := url.Values{}
 	q.Set("api_key", apiKey)
 	q.Set("language", "zh-CN")
-	q.Set("append_to_response", "genres")
+	q.Set("append_to_response", "credits")
 	u := base + path + "?" + q.Encode()
 
 	// Response structs for /movie/{id} and /tv/{id}
@@ -42,20 +47,27 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		SpokenLanguages []struct {
 			Iso639_1 string `json:"iso_639_1"`
 		} `json:"spoken_languages"`
-		Genres []genre `json:"genres"`
+		Genres  []genre `json:"genres"`
+		Credits struct {
+			Cast []tmdbCreditCast `json:"cast"`
+		} `json:"credits"`
 	}
 	type tvResult struct {
 		OriginCountry   []string `json:"origin_country"`
 		SpokenLanguages []struct {
 			Iso639_1 string `json:"iso_639_1"`
 		} `json:"spoken_languages"`
-		Genres []genre `json:"genres"`
+		Genres  []genre `json:"genres"`
+		Credits struct {
+			Cast []tmdbCreditCast `json:"cast"`
+		} `json:"credits"`
 	}
 
 	var (
 		languages []string
 		countries []string
 		genres    []string
+		actors    []string
 	)
 
 	if mediaType == "tv" {
@@ -73,6 +85,7 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		for _, g := range r.Genres {
 			genres = append(genres, g.Name)
 		}
+		actors = topTMDbActors(r.Credits.Cast)
 	} else {
 		var r movieResult
 		if err := t.getJSON(ctx, u, &r); err != nil {
@@ -94,12 +107,14 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		for _, g := range r.Genres {
 			genres = append(genres, g.Name)
 		}
+		actors = topTMDbActors(r.Credits.Cast)
 	}
 
 	// Deduplicate
 	languages = deduplicate(languages)
 	countries = deduplicate(countries)
 	genres = deduplicate(genres)
+	actors = deduplicate(actors)
 
 	t.log.Debug("tmdb: getDetails",
 		zap.Int("tmdb_id", tmdbID),
@@ -107,11 +122,29 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		zap.Strings("languages", languages),
 		zap.Strings("countries", countries),
 		zap.Strings("genres", genres),
+		zap.Strings("actors", actors),
 	)
 
 	return &TMDbDetails{
 		Languages: languages,
 		Countries: countries,
 		Genres:    genres,
+		Actors:    actors,
 	}, nil
+}
+
+func topTMDbActors(cast []tmdbCreditCast) []string {
+	const maxActors = 30
+	out := make([]string, 0, min(len(cast), maxActors))
+	for _, person := range cast {
+		name := strings.TrimSpace(person.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
+		if len(out) >= maxActors {
+			break
+		}
+	}
+	return deduplicate(out)
 }

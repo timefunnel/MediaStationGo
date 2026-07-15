@@ -26,6 +26,7 @@ func metadataFromDoc(doc *nfoDocument, baseDir string, seriesLike bool) *LocalMe
 		SeasonNum:    int(doc.Season),
 		EpisodeNum:   int(doc.Episode),
 		Genres:       joinNFOValues(adultAwareGenres(doc)),
+		Actors:       joinNFOValues(nfoActorNames(doc.Actors)),
 		Countries:    joinNFOValues(doc.Countries),
 		Languages:    joinNFOValues(doc.Languages),
 		HasNFO:       true,
@@ -61,7 +62,7 @@ func adultAwareGenres(doc *nfoDocument) []string {
 	if doc == nil {
 		return nil
 	}
-	values := make([]string, 0, len(doc.Genres)+len(doc.Tags)+len(doc.Actors)+4)
+	values := make([]string, 0, len(doc.Genres)+len(doc.Tags)+4)
 	values = append(values, doc.Genres...)
 	values = append(values, doc.Tags...)
 	for _, value := range []string{doc.Studio, doc.Maker, doc.Publisher, doc.Label} {
@@ -74,14 +75,19 @@ func adultAwareGenres(doc *nfoDocument) []string {
 			values = append(values, cleanXMLText(value))
 		}
 	}
-	for _, actor := range doc.Actors {
-		if cleanXMLText(actor.Name) != "" {
-			values = append(values, cleanXMLText(actor.Name))
-		} else if cleanXMLText(actor.Role) != "" {
-			values = append(values, cleanXMLText(actor.Role))
+	return values
+}
+
+func nfoActorNames(actors []nfoActor) []string {
+	out := make([]string, 0, len(actors))
+	for _, actor := range actors {
+		if name := cleanXMLText(actor.Name); name != "" {
+			out = append(out, name)
+		} else if role := cleanXMLText(actor.Role); role != "" {
+			out = append(out, role)
 		}
 	}
-	return values
+	return out
 }
 
 // mergeEpisodeMetadata 把单集 sidecar NFO(<episodedetails>)合并进整剧元数据
@@ -136,6 +142,9 @@ func mergeEpisodeMetadata(dst, episode *LocalMetadata, doc *nfoDocument) {
 	// 题材/地区/语言为整剧级,单集 NFO 偶尔携带时仅在整剧未提供时回填。
 	if dst.Genres == "" && episode.Genres != "" {
 		dst.Genres = episode.Genres
+	}
+	if dst.Actors == "" && episode.Actors != "" {
+		dst.Actors = episode.Actors
 	}
 	if dst.Countries == "" && episode.Countries != "" {
 		dst.Countries = episode.Countries

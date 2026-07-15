@@ -109,8 +109,8 @@ func (r *MediaRepository) searchFilteredLIKE(ctx context.Context, query string, 
 	for _, term := range terms {
 		like := "%" + escapeLike(term) + "%"
 		q = q.Where(
-			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\')",
-			like, like, like, like, like, like,
+			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(actors, '')) LIKE ? ESCAPE '\\')",
+			like, like, like, like, like, like, like,
 		)
 	}
 	if err := q.Count(&total).Error; err != nil {

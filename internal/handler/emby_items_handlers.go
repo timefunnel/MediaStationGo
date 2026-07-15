@@ -38,6 +38,7 @@ func parseEmbyItemsParams(c *gin.Context) service.ItemsParams {
 		UserID:           uid,
 		ParentID:         firstQueryValue(c, "ParentId", "parentId", "parentid"),
 		IDs:              splitOpt(firstQueryValue(c, "Ids", "ids")),
+		PersonIDs:        splitOpt(firstQueryValue(c, "PersonIds", "personIds", "personids")),
 		SearchTerm:       firstQueryValue(c, "SearchTerm", "searchTerm", "searchterm"),
 		NameStartsWith:   firstQueryValue(c, "NameStartsWith", "nameStartsWith", "namestartswith"),
 		IncludeItemTypes: splitOpt(firstQueryValue(c, "IncludeItemTypes", "includeItemTypes", "includeitemtypes")),
@@ -67,6 +68,17 @@ func embyItemsHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		embyAttachRequestTokenToMediaSources(c, out)
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+func embyPersonsHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		out, err := svc.Emby.Persons(c.Request.Context(), parseEmbyItemsParams(c))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, out)
 	}
 }

@@ -80,6 +80,9 @@ func applyLocalTaxonomyMetadata(m *model.Media, local *LocalMetadata) {
 	if local.Genres != "" {
 		m.Genres = local.Genres
 	}
+	if local.Actors != "" {
+		m.Actors = local.Actors
+	}
 	if local.Countries != "" {
 		m.Countries = local.Countries
 	}
@@ -109,6 +112,7 @@ func localHasDescriptiveMetadata(local *LocalMetadata) bool {
 		local.DoubanID != "" ||
 		local.TheTVDBID != "" ||
 		local.Genres != "" ||
+		local.Actors != "" ||
 		local.Countries != "" ||
 		local.Languages != ""
 }

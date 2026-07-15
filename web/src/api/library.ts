@@ -48,6 +48,7 @@ export interface ManualScrapeCandidate {
   languages?: string[]
   countries?: string[]
   genres?: string[]
+  actors?: string[]
   nsfw?: boolean
 }
 
@@ -78,6 +79,7 @@ export interface MediaMetadataUpdate {
   languages?: string
   countries?: string
   genres?: string
+  actors?: string
   nsfw?: boolean
 }
 

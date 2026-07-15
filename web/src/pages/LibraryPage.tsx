@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
@@ -16,6 +16,8 @@ import { useLibraryAdminActions } from './useLibraryAdminActions'
 import { useLibraryResourceImports } from './useLibraryResourceImports'
 import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
+import { LibraryActorFilter } from './LibraryActorFilter'
+import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
 
 export function LibraryPage() {
   const { id = '' } = useParams()
@@ -107,6 +109,26 @@ export function LibraryPage() {
   })
 
   const resourceImports = useLibraryResourceImports(id, userID, reloadCurrentLibrary)
+  const actorFacets = useMemo(() => buildActorFacets(items), [items])
+  const selectedActor = searchParams.get('actor')?.trim() ?? ''
+  const filteredItems = useMemo(
+    () => selectedActor ? items.filter((media) => mediaHasActor(media, selectedActor)) : items,
+    [items, selectedActor],
+  )
+
+  useEffect(() => {
+    if (loading || !selectedActor || actorFacets.some((actor) => actor.name === selectedActor)) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('actor')
+    setSearchParams(next, { replace: true })
+  }, [actorFacets, loading, searchParams, selectedActor, setSearchParams])
+
+  const selectActor = (actor: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (actor) next.set('actor', actor)
+    else next.delete('actor')
+    setSearchParams(next)
+  }
 
   if (loading) {
     return (
@@ -123,7 +145,7 @@ export function LibraryPage() {
     <div className="space-y-6">
       <LibraryPageHeader
         library={library}
-        itemCount={isSeries ? seriesCards.length : total}
+        itemCount={isSeries ? seriesCards.length : selectedActor ? filteredItems.length : total}
         loadingAllText={loadingAllText}
         scanProgress={scanProgress}
         isAdmin={role === 'admin'}
@@ -154,9 +176,13 @@ export function LibraryPage() {
         onRetryLoad={() => void resourceImports.refresh()}
       />
 
+      {!isSeries && (
+        <LibraryActorFilter actors={actorFacets} selected={selectedActor} onChange={selectActor} />
+      )}
+
       <LibraryMediaSections
         isSeries={isSeries}
-        items={items}
+        items={filteredItems}
         seriesCards={seriesCards}
         selectedSeries={selectedSeries}
         loading={loading}

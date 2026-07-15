@@ -26,6 +26,7 @@ type ManualScrapeRequest struct {
 	Languages      []string `json:"languages"`
 	Countries      []string `json:"countries"`
 	Genres         []string `json:"genres"`
+	Actors         []string `json:"actors"`
 	NSFW           bool     `json:"nsfw"`
 	EpisodeArtwork *bool    `json:"episode_artwork,omitempty"`
 	EpisodeImages  *bool    `json:"episode_images,omitempty"`

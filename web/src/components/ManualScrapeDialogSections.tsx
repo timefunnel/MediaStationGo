@@ -215,6 +215,9 @@ function ManualScrapeCandidateRow({
           {item.year ? <span className="text-xs text-sand-500">{item.year}</span> : null}
         </div>
         <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-50">{item.overview || '暂无简介'}</p>
+        {item.actors && item.actors.length > 0 ? (
+          <p className="mt-2 line-clamp-1 text-xs font-semibold text-ink-100">演员：{item.actors.join('、')}</p>
+        ) : null}
         <p className="mt-2 text-[11px] font-semibold text-sand-500">{candidateIDText(item)}</p>
       </div>
       <button onClick={() => onApply(item)} disabled={disabled} className="btn-outline h-10 w-full shrink-0 justify-center px-3 text-xs sm:w-auto sm:self-center">

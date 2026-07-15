@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"html"
 	"net/url"
 	"regexp"
@@ -42,7 +43,120 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	}
 	match.Year = firstYearInText(body)
 	match.Rating = firstRatingInText(body)
+	match.Actors = firstAdultActors(body)
 	return match
+}
+
+func firstAdultActors(body string) []string {
+	actors := make([]string, 0, 4)
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 3 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		if !adultActorAnchor(attrs) {
+			continue
+		}
+		name := stripAdultHTML(found[2])
+		if name == "" {
+			name = strings.TrimSpace(attrs["title"])
+		}
+		if name == "" {
+			name = adultActorImageName(found[2])
+		}
+		if validAdultActorName(name) {
+			actors = append(actors, name)
+		}
+	}
+	for _, found := range adultJSONLDPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		var value any
+		if json.Unmarshal([]byte(html.UnescapeString(strings.TrimSpace(found[1]))), &value) == nil {
+			actors = append(actors, adultActorsFromJSONLD(value)...)
+		}
+	}
+	return deduplicate(actors)
+}
+
+func adultActorImageName(body string) string {
+	image := adultImagePattern.FindStringSubmatch(body)
+	if len(image) < 2 {
+		return ""
+	}
+	attrs := adultAttrs(image[1])
+	return firstText(attrs["alt"], attrs["title"])
+}
+
+func adultActorAnchor(attrs map[string]string) bool {
+	href := strings.ToLower(strings.TrimSpace(attrs["href"]))
+	class := strings.ToLower(strings.TrimSpace(attrs["class"]))
+	return strings.Contains(href, "/actors/") ||
+		strings.Contains(href, "/actor/") ||
+		strings.Contains(href, "/star/") ||
+		strings.Contains(href, "/actress/") ||
+		strings.Contains(class, "star-name") ||
+		strings.Contains(class, "actor-name") ||
+		strings.Contains(class, "actress-name")
+}
+
+func adultActorsFromJSONLD(value any) []string {
+	actors := make([]string, 0, 4)
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			for key, actorValue := range typed {
+				switch strings.ToLower(strings.TrimSpace(key)) {
+				case "actor", "actors", "performer", "performers":
+					actors = append(actors, adultActorNamesFromJSONValue(actorValue)...)
+				}
+			}
+			if graph, ok := typed["@graph"]; ok {
+				walk(graph)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(value)
+	return actors
+}
+
+func adultActorNamesFromJSONValue(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if validAdultActorName(typed) {
+			return []string{strings.TrimSpace(typed)}
+		}
+	case map[string]any:
+		if name, ok := typed["name"].(string); ok && validAdultActorName(name) {
+			return []string{strings.TrimSpace(name)}
+		}
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, adultActorNamesFromJSONValue(item)...)
+		}
+		return out
+	}
+	return nil
+}
+
+func validAdultActorName(value string) bool {
+	value = strings.TrimSpace(stripAdultHTML(value))
+	if value == "" || len([]rune(value)) > 100 {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "actor", "actors", "actress", "actresses", "performer", "performers", "演员", "演員", "女优", "女優":
+		return false
+	default:
+		return true
+	}
 }
 
 func firstAdultTitle(body, code string) string {

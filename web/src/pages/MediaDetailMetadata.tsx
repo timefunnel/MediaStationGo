@@ -57,6 +57,7 @@ export function MediaDetailMetadata({ media }: MediaDetailMetadataProps) {
       )}
 
       <div className="space-y-4">
+        <MetadataTags label="演员" values={parseCSV(media.actors)} primary />
         <MetadataTags label="类型流派" values={parseCSV(media.genres)} primary />
         <MetadataTags label="语言" values={parseCSV(media.languages)} />
         <MetadataTags label="国家/地区" values={parseCSV(media.countries)} />

@@ -32,6 +32,7 @@ func TestParseAdultDetailHTML(t *testing.T) {
 <h2 class="title"><strong>SSIS-001 测试标题</strong></h2>
 <img class="video-cover" src="/covers/ssis001.jpg">
 <a class="sample-box" href="/samples/1.jpg"></a>
+<a href="/actors/abc">七沢みあ</a>
 <span class="score"><span class="value">4.7</span></span>
 <div>日期 2024-05-01</div>
 </html>`
@@ -48,6 +49,24 @@ func TestParseAdultDetailHTML(t *testing.T) {
 	}
 	if got.Year != 2024 {
 		t.Fatalf("year = %d, want 2024", got.Year)
+	}
+	if len(got.Actors) != 1 || got.Actors[0] != "七沢みあ" {
+		t.Fatalf("actors = %#v", got.Actors)
+	}
+}
+
+func TestParseAdultDetailHTMLReadsJSONLDActors(t *testing.T) {
+	body := `<html>
+<h3>ABF-001 Test</h3>
+<script type="application/ld+json">{"@type":"Movie","actor":[{"name":"Actor A"},{"name":"Actor B"}]}</script>
+</html>`
+
+	got := parseAdultDetailHTML(body, "ABF-001", "javbus", "https://example.com/ABF-001")
+	if got == nil {
+		t.Fatal("parseAdultDetailHTML returned nil")
+	}
+	if len(got.Actors) != 2 || got.Actors[0] != "Actor A" || got.Actors[1] != "Actor B" {
+		t.Fatalf("actors = %#v", got.Actors)
 	}
 }
 

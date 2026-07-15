@@ -171,7 +171,7 @@ func registerEmbyAuthenticatedItemRoutes(auth *gin.RouterGroup, svc *service.Con
 	auth.GET("/Users/:userId/Shows/NextUp", embyEmptyItemsHandler(svc))
 	auth.GET("/MediaSegments/:id", embyEmptyItemsHandler(svc))
 	auth.GET("/Artists", embyEmptyItemsHandler(svc))
-	auth.GET("/Persons", embyEmptyItemsHandler(svc))
+	auth.GET("/Persons", embyPersonsHandler(svc))
 	auth.GET("/Genres", embyEmptyItemsHandler(svc))
 	auth.GET("/Shows/Upcoming", embyEmptyItemsHandler(svc))
 	auth.GET("/Users/:userId/Shows/Upcoming", embyEmptyItemsHandler(svc))

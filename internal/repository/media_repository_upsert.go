@@ -170,6 +170,7 @@ func addMatchedMediaDetailUpdates(updates map[string]any, existing, incoming mod
 	setNonEmptyMediaString(updates, "languages", existing.Languages, incoming.Languages)
 	setNonEmptyMediaString(updates, "countries", existing.Countries, incoming.Countries)
 	setNonEmptyMediaString(updates, "genres", existing.Genres, incoming.Genres)
+	setNonEmptyMediaString(updates, "actors", existing.Actors, incoming.Actors)
 	if incoming.Rating > 0 {
 		setIfChanged(updates, "rating", existing.Rating, incoming.Rating)
 	}

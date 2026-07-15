@@ -107,6 +107,9 @@ func mergeLocalMetadataIntoMatch(match *Match, local *LocalMetadata) {
 	if local.Genres != "" {
 		match.Genres = splitNFOList(local.Genres)
 	}
+	if local.Actors != "" {
+		match.Actors = splitNFOList(local.Actors)
+	}
 	if local.Countries != "" {
 		match.Countries = splitNFOList(local.Countries)
 	}
@@ -233,6 +236,9 @@ func (s *ScraperService) applyLocalMetadataMatch(ctx context.Context, m *model.M
 	}
 	if next.Genres != "" {
 		updates["genres"] = next.Genres
+	}
+	if next.Actors != "" {
+		updates["actors"] = next.Actors
 	}
 	if next.Countries != "" {
 		updates["countries"] = next.Countries

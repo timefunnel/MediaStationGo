@@ -25,6 +25,7 @@ var (
 	adultImagePattern       = regexp.MustCompile(`(?is)<img\b([^>]*)>`)
 	adultJavBusCoverPattern = regexp.MustCompile(`(?is)class="bigImage"[^>]*href="([^"]+)"`)
 	adultSamplePattern      = regexp.MustCompile(`(?is)<a[^>]+class="[^"]*\bsample-box\b[^"]*"[^>]+href="([^"]+)"`)
+	adultJSONLDPattern      = regexp.MustCompile(`(?is)<script\b[^>]*type=["']application/ld\+json["'][^>]*>(.*?)</script>`)
 	adultAttrPattern        = regexp.MustCompile(`(?is)([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*["']([^"']*)["']`)
 )
 
@@ -150,6 +151,9 @@ func adultMatchScore(match *Match) int {
 	}
 	if match.Rating > 0 {
 		score += 1
+	}
+	if len(match.Actors) > 0 {
+		score += 8
 	}
 	return score
 }

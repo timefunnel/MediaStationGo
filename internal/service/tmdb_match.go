@@ -18,6 +18,7 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 	q := url.Values{}
 	q.Set("api_key", apiKey)
 	q.Set("language", "zh-CN")
+	q.Set("append_to_response", "credits")
 	u := base + "/movie/" + fmt.Sprint(tmdbID) + "?" + q.Encode()
 	var r struct {
 		ID               int     `json:"id"`
@@ -38,6 +39,9 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 		SpokenLanguages []struct {
 			Iso639_1 string `json:"iso_639_1"`
 		} `json:"spoken_languages"`
+		Credits struct {
+			Cast []tmdbCreditCast `json:"cast"`
+		} `json:"credits"`
 	}
 	if err := t.getJSON(ctx, u, &r); err != nil {
 		return nil, err
@@ -76,6 +80,7 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 	m.Genres = deduplicate(m.Genres)
 	m.Countries = deduplicate(m.Countries)
 	m.Languages = deduplicate(m.Languages)
+	m.Actors = topTMDbActors(r.Credits.Cast)
 	return m, nil
 }
 
@@ -91,6 +96,7 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 	q := url.Values{}
 	q.Set("api_key", apiKey)
 	q.Set("language", "zh-CN")
+	q.Set("append_to_response", "credits")
 	u := base + "/tv/" + fmt.Sprint(tmdbID) + "?" + q.Encode()
 	var r struct {
 		ID               int      `json:"id"`
@@ -109,6 +115,9 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 		SpokenLanguages []struct {
 			Iso639_1 string `json:"iso_639_1"`
 		} `json:"spoken_languages"`
+		Credits struct {
+			Cast []tmdbCreditCast `json:"cast"`
+		} `json:"credits"`
 	}
 	if err := t.getJSON(ctx, u, &r); err != nil {
 		return nil, err
@@ -144,5 +153,6 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 	}
 	m.Genres = deduplicate(m.Genres)
 	m.Languages = deduplicate(m.Languages)
+	m.Actors = topTMDbActors(r.Credits.Cast)
 	return m, nil
 }

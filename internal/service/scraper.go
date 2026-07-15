@@ -154,6 +154,9 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 	if len(match.Genres) > 0 {
 		updates["genres"] = strings.Join(match.Genres, ",")
 	}
+	if len(match.Actors) > 0 {
+		updates["actors"] = strings.Join(match.Actors, ",")
+	}
 	if len(match.Countries) > 0 {
 		updates["countries"] = strings.Join(match.Countries, ",")
 	}

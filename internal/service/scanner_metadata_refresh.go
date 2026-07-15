@@ -80,6 +80,9 @@ func cloudMetadataNeedsRefresh(existing existingCloudMedia, localMeta *LocalMeta
 	if localMeta.Genres != "" && strings.TrimSpace(existing.Genres) != strings.TrimSpace(localMeta.Genres) {
 		return true
 	}
+	if localMeta.Actors != "" && strings.TrimSpace(existing.Actors) != strings.TrimSpace(localMeta.Actors) {
+		return true
+	}
 	if localMeta.Countries != "" && strings.TrimSpace(existing.Countries) != strings.TrimSpace(localMeta.Countries) {
 		return true
 	}
@@ -169,6 +172,9 @@ func localMetadataNeedsRefresh(existing existingLocalMedia, local *LocalMetadata
 		return true
 	}
 	if local.Genres != "" && strings.TrimSpace(existing.Genres) != strings.TrimSpace(local.Genres) {
+		return true
+	}
+	if local.Actors != "" && strings.TrimSpace(existing.Actors) != strings.TrimSpace(local.Actors) {
 		return true
 	}
 	if local.Countries != "" && strings.TrimSpace(existing.Countries) != strings.TrimSpace(local.Countries) {

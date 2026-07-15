@@ -25,6 +25,7 @@ type LocalMetadata struct {
 	SeasonNum    int
 	EpisodeNum   int
 	Genres       string
+	Actors       string
 	Countries    string
 	Languages    string
 	NSFW         bool

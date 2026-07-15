@@ -34,6 +34,9 @@ func (s *ScraperService) fetchAndSaveTMDbExtendedMetadata(ctx context.Context, m
 	if len(details.Genres) > 0 {
 		updates["genres"] = strings.Join(details.Genres, ",")
 	}
+	if len(details.Actors) > 0 {
+		updates["actors"] = strings.Join(details.Actors, ",")
+	}
 	if len(updates) > 0 {
 		if err := s.repo.DB.Model(&model.Media{}).Where("id = ?", mediaID).
 			Updates(updates).Error; err != nil {
@@ -47,7 +50,8 @@ func (s *ScraperService) fetchAndSaveTMDbExtendedMetadata(ctx context.Context, m
 		zap.String("media_id", mediaID),
 		zap.Strings("languages", details.Languages),
 		zap.Strings("countries", details.Countries),
-		zap.Strings("genres", details.Genres))
+		zap.Strings("genres", details.Genres),
+		zap.Strings("actors", details.Actors))
 }
 
 func (s *ScraperService) fetchAndSaveTMDbEpisodeDetails(ctx context.Context, m *model.Media, tmdbID int, matchYear int, options ScrapeOptions) bool {

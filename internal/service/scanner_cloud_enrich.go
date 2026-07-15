@@ -131,6 +131,9 @@ func mergeMatchIntoLocalMetadata(meta *LocalMetadata, match *Match) {
 	if len(match.Genres) > 0 {
 		meta.Genres = strings.Join(match.Genres, ",")
 	}
+	if len(match.Actors) > 0 {
+		meta.Actors = strings.Join(match.Actors, ",")
+	}
 	if len(match.Countries) > 0 {
 		meta.Countries = strings.Join(match.Countries, ",")
 	}

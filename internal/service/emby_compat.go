@@ -108,6 +108,7 @@ type ItemsParams struct {
 	UserID           string
 	ParentID         string
 	IDs              []string
+	PersonIDs        []string
 	SearchTerm       string
 	NameStartsWith   string
 	IncludeItemTypes []string
