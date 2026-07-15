@@ -38,8 +38,8 @@ type cloudLibraryScanCompletion struct {
 }
 
 type cloudScanRootTarget struct {
-	scanDir      string
-	displayDir   string
+	scanDir       string
+	displayDir    string
 	exactFileName string
 }
 
