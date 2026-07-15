@@ -30,6 +30,7 @@ export function LibraryPage() {
   const [seriesMetadataEditOpen, setSeriesMetadataEditOpen] = useState(false)
   const [manualMovie, setManualMovie] = useState<Media | null>(null)
   const [resourceDrawerOpen, setResourceDrawerOpen] = useState(false)
+  const [resourceInitialQuery, setResourceInitialQuery] = useState('')
   const [resourceTaskID, setResourceTaskID] = useState('')
 
   // 剧集模式：选中某个剧集后展开详情
@@ -111,6 +112,7 @@ export function LibraryPage() {
   const resourceImports = useLibraryResourceImports(id, userID, reloadCurrentLibrary)
   const actorFacets = useMemo(() => buildActorFacets(items), [items])
   const selectedActor = searchParams.get('actor')?.trim() ?? ''
+  const requestedResourceQuery = searchParams.get('resource_query')?.trim() ?? ''
   const filteredItems = useMemo(
     () => selectedActor ? items.filter((media) => mediaHasActor(media, selectedActor)) : items,
     [items, selectedActor],
@@ -122,6 +124,16 @@ export function LibraryPage() {
     next.delete('actor')
     setSearchParams(next, { replace: true })
   }, [actorFacets, loading, searchParams, selectedActor, setSearchParams])
+
+  useEffect(() => {
+    if (loading || !library || !requestedResourceQuery) return
+    setResourceInitialQuery(requestedResourceQuery)
+    setResourceTaskID('')
+    setResourceDrawerOpen(true)
+    const next = new URLSearchParams(searchParams)
+    next.delete('resource_query')
+    setSearchParams(next, { replace: true })
+  }, [library, loading, requestedResourceQuery, searchParams, setSearchParams])
 
   const selectActor = (actor: string) => {
     const next = new URLSearchParams(searchParams)
@@ -158,6 +170,7 @@ export function LibraryPage() {
         onScrape={handleScrape}
         onRepairRescrape={handleRepairRescrape}
         onResourceSearch={() => {
+          setResourceInitialQuery('')
           setResourceTaskID('')
           setResourceDrawerOpen(true)
         }}
@@ -228,6 +241,7 @@ export function LibraryPage() {
 
       <ResourceSearchDrawer
         open={resourceDrawerOpen}
+        initialQuery={resourceInitialQuery}
         libraryID={id}
         libraryName={library?.name ?? '媒体库'}
         libraryRoots={library?.roots ?? []}
@@ -235,7 +249,10 @@ export function LibraryPage() {
         taskID={resourceTaskID}
         onTaskIDChange={setResourceTaskID}
         onTaskChanged={resourceImports.acceptTask}
-        onClose={() => setResourceDrawerOpen(false)}
+        onClose={() => {
+          setResourceDrawerOpen(false)
+          setResourceInitialQuery('')
+        }}
       />
     </div>
   )

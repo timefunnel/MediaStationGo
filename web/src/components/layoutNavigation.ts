@@ -70,24 +70,24 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
   },
   {
     id: 'downloads',
-    label: '下载与订阅',
+    label: '资源与入库',
     icon: CloudDownload,
-    activePaths: ['/downloads', '/download-clients', '/subscriptions', '/site-search', '/sites', '/tasks'],
+    activePaths: ['/downloads', '/download-clients', '/subscriptions', '/site-search', '/sites'],
     items: [
-      { to: '/downloads', label: '下载中心', icon: CloudDownload, permission: 'can_manage_downloads' },
-      { to: '/subscriptions', label: '订阅管理', icon: Rss, permission: 'can_manage_subscriptions' },
-      { to: '/tasks', label: '入库任务', icon: Activity },
-      { to: '/sites', label: '站点管理', icon: Globe, permission: 'can_manage_sites' },
+      { to: '/downloads', label: '下载中心', icon: Activity },
+      { to: '/subscriptions', label: '传统订阅', icon: Rss, permission: 'can_manage_subscriptions' },
+      { to: '/sites', label: 'PT / RSS 站点', icon: Globe, permission: 'can_manage_sites', adminOnly: true },
     ],
   },
   {
     id: 'tools',
     label: '文件与自动化',
     icon: HardDrive,
-    activePaths: ['/storage', '/storage-config', '/files', '/strm', '/duplicates', '/scheduler', '/recycle', '/stats'],
+    activePaths: ['/storage', '/storage-config', '/files', '/strm', '/duplicates', '/scheduler', '/recycle', '/stats', '/tasks'],
     adminOnly: true,
     items: [
       { to: '/storage', label: '存储与文件', icon: HardDrive },
+      { to: '/tasks', label: '系统任务', icon: Activity },
     ],
   },
   {

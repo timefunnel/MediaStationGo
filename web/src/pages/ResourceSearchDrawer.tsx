@@ -40,6 +40,7 @@ import {
 
 type ResourceSearchDrawerProps = {
   open: boolean
+  initialQuery?: string
   libraryID: string
   libraryName: string
   libraryRoots: LibraryRoot[]
@@ -54,6 +55,7 @@ type SearchSource = '' | 'pansou'
 
 export function ResourceSearchDrawer({
   open,
+  initialQuery,
   libraryID,
   libraryName,
   libraryRoots,
@@ -97,6 +99,17 @@ export function ResourceSearchDrawer({
   )
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
   const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
+
+  useEffect(() => {
+    const nextQuery = initialQuery?.trim()
+    if (!open || !nextQuery) return
+    setQuery(nextQuery)
+    setResponse(null)
+    setSearchFailure(null)
+    setSearchError('')
+    setSource('')
+    setJumpPage('1')
+  }, [initialQuery, open])
 
   useEffect(() => {
     setSelectedRootID((current) => resolveResourceRootID(roots, current))

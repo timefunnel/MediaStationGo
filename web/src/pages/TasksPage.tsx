@@ -5,7 +5,6 @@ import { Activity, Copy } from 'lucide-react'
 import { tasksAPI, type BackgroundTask, type TasksSnapshot } from '../api/tasks'
 import { useAuthStore } from '../stores/auth'
 import { TorrentTaskTable, TranscodeTaskTable } from './TaskRuntimeTables'
-import { ResourceImportTasksSection } from './ResourceImportTasksSection'
 
 const metricLabels: Record<string, string> = {
   organized: '新增',
@@ -154,8 +153,7 @@ function BackgroundTaskTable({ tasks, empty }: { tasks: BackgroundTask[]; empty:
   )
 }
 
-// TasksPage shows everything the backend is doing right now: ffmpeg
-// transcodes + qBittorrent downloads. Refreshes every 3 s.
+// TasksPage is the admin-only runtime diagnostics surface.
 export function TasksPage() {
   const [snap, setSnap] = useState<TasksSnapshot | null>(null)
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
@@ -182,10 +180,8 @@ export function TasksPage() {
     <div className="space-y-8">
       <header className="flex items-center gap-3">
         <Activity className="h-6 w-6 text-brand-500" />
-        <h1 className="font-display text-3xl font-bold text-ink-600">实时任务</h1>
+        <h1 className="font-display text-3xl font-bold text-ink-600">系统任务</h1>
       </header>
-
-      <ResourceImportTasksSection isAdmin={isAdmin} />
 
       {isAdmin && !snap && <p className="text-sand-500">正在加载系统任务…</p>}
 

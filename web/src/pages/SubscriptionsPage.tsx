@@ -173,9 +173,9 @@ export function SubscriptionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-3xl font-bold text-ink-600">RSS 订阅</h1>
+      <h1 className="font-display text-3xl font-bold text-ink-600">传统订阅</h1>
       <p className="text-sm text-ink-50">
-        后台统一每 3 小时轮询 RSS / 站点搜索订阅；手动立即执行不受影响。匹配过滤器的项目会自动加入下载队列，启用智能分类后按二级分类写入下载目录。
+        RSS / PT 站点订阅
       </p>
 
       <SubscriptionForm
