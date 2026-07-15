@@ -10,6 +10,7 @@ import {
   resourceImportDuplicateConflict,
   resourceImportError,
   resourceImportProgress,
+  resourceSearchFailure,
   resolveResourceRootID,
   supportsResourceSource,
 } from './resourceImportModel.ts'
@@ -74,4 +75,22 @@ test('嵌套错误对象提取 message，不渲染对象字符串', () => {
     resourceImportError({ response: { data: { error: { code: 'failed', message: '真实错误' } } } }, '兜底'),
     '真实错误',
   )
+})
+
+test('搜索源失败保留可恢复能力，不把其他错误误判为空结果', () => {
+  assert.deepEqual(
+    resourceSearchFailure({
+      response: {
+        data: {
+          error: {
+            code: 'search_failed',
+            message: 'BT4G timed out',
+            capabilities: { pansou: true },
+          },
+        },
+      },
+    }),
+    { code: 'search_failed', message: 'BT4G timed out', capabilities: { pansou: true } },
+  )
+  assert.equal(resourceSearchFailure({ response: { data: { error: { code: 'unauthorized' } } } }), null)
 })

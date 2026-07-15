@@ -33,10 +33,11 @@ type resourcePipelineHTTPClient struct {
 }
 
 type resourcePipelineError struct {
-	StatusCode int
-	Code       string
-	Message    string
-	Duplicate  *ResourceImportDuplicate
+	StatusCode   int
+	Code         string
+	Message      string
+	Capabilities ResourceSearchCapabilities
+	Duplicate    *ResourceImportDuplicate
 }
 
 func (e *resourcePipelineError) Error() string {
@@ -214,8 +215,9 @@ func (c *resourcePipelineHTTPClient) doJSON(ctx context.Context, method, endpoin
 func decodeResourcePipelineError(status int, raw []byte) error {
 	var payload struct {
 		Error struct {
-			Code      string `json:"code"`
-			Message   string `json:"message"`
+			Code         string                     `json:"code"`
+			Message      string                     `json:"message"`
+			Capabilities ResourceSearchCapabilities `json:"capabilities"`
 			Duplicate *struct {
 				CanForce bool   `json:"can_force"`
 				MediaID  string `json:"media_id"`
@@ -225,7 +227,12 @@ func decodeResourcePipelineError(status int, raw []byte) error {
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(raw, &payload)
-	err := &resourcePipelineError{StatusCode: status, Code: payload.Error.Code, Message: payload.Error.Message}
+	err := &resourcePipelineError{
+		StatusCode:   status,
+		Code:         payload.Error.Code,
+		Message:      payload.Error.Message,
+		Capabilities: payload.Error.Capabilities,
+	}
 	if payload.Error.Duplicate != nil {
 		err.Duplicate = &ResourceImportDuplicate{
 			CanForce: payload.Error.Duplicate.CanForce,

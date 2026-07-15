@@ -2,6 +2,7 @@ import type {
   ResourceImportDuplicateConflict,
   ResourceImportTask,
   ResourceSearchCapabilities,
+  ResourceSearchFailure,
   ResourceSearchRoot,
 } from '../api/resourceImports'
 
@@ -106,6 +107,28 @@ export function resourceImportError(error: unknown, fallback: string): string {
     return responseError.message
   }
   return payload.response?.data?.message || payload.message || fallback
+}
+
+export function resourceSearchFailure(error: unknown): ResourceSearchFailure | null {
+  const responseError = (
+    error as {
+      response?: {
+        data?: {
+          error?: {
+            code?: string
+            message?: string
+            capabilities?: ResourceSearchCapabilities
+          }
+        }
+      }
+    }
+  ).response?.data?.error
+  if (!responseError || responseError.code !== 'search_failed') return null
+  return {
+    code: responseError.code,
+    message: responseError.message?.trim() || '资源搜索暂时不可用',
+    capabilities: responseError.capabilities,
+  }
 }
 
 export function resourceImportDuplicateConflict(error: unknown): ResourceImportDuplicateConflict | null {

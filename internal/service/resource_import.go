@@ -100,6 +100,27 @@ type ResourceSearchResponse struct {
 	Results      []ResourceSearchCandidate  `json:"results"`
 }
 
+type ResourceSearchError struct {
+	StatusCode   int
+	Code         string
+	Message      string
+	Capabilities ResourceSearchCapabilities
+}
+
+func (e *ResourceSearchError) Error() string {
+	if e == nil || strings.TrimSpace(e.Message) == "" {
+		return "resource search failed"
+	}
+	return e.Message
+}
+
+func (e *ResourceSearchError) HTTPStatus() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
 type ResourceImportCreateInput struct {
 	SearchSessionID string `json:"search_session_id"`
 	CandidateIndex  int    `json:"candidate_index"`
@@ -273,6 +294,15 @@ func (s *ResourceImportService) Search(ctx context.Context, userID string, libra
 		Limit:    resourceSearchLimit,
 	})
 	if err != nil {
+		var pipelineErr *resourcePipelineError
+		if errors.As(err, &pipelineErr) {
+			return ResourceSearchResponse{}, &ResourceSearchError{
+				StatusCode:   pipelineErr.StatusCode,
+				Code:         pipelineErr.Code,
+				Message:      pipelineErr.Message,
+				Capabilities: pipelineErr.Capabilities,
+			}
+		}
 		return ResourceSearchResponse{}, err
 	}
 	if strings.TrimSpace(pipeline.SessionID) == "" {

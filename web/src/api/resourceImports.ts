@@ -38,6 +38,12 @@ export interface ResourceSearchResponse {
   results: ResourceSearchCandidate[]
 }
 
+export interface ResourceSearchFailure {
+  code: string
+  message: string
+  capabilities?: ResourceSearchCapabilities
+}
+
 export interface ResourceSearchRequest {
   query: string
   source?: string

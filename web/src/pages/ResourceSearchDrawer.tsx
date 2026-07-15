@@ -16,7 +16,9 @@ import {
   resourceImportsAPI,
   type ResourceImportDuplicateConflict,
   type ResourceImportTask,
+  type ResourceSearchCapabilities,
   type ResourceSearchCandidate,
+  type ResourceSearchFailure,
   type ResourceSearchResponse,
   type ResourceSearchRoot,
 } from '../api/resourceImports'
@@ -32,6 +34,7 @@ import {
   resolveResourceRootID,
   resourceImportError,
   resourceImportDuplicateConflict,
+  resourceSearchFailure,
   supportsResourceSource,
 } from './resourceImportModel'
 
@@ -63,6 +66,8 @@ export function ResourceSearchDrawer({
   const [query, setQuery] = useState('')
   const [response, setResponse] = useState<ResourceSearchResponse | null>(null)
   const [source, setSource] = useState<SearchSource>('')
+  const [capabilities, setCapabilities] = useState<ResourceSearchCapabilities>()
+  const [searchFailure, setSearchFailure] = useState<ResourceSearchFailure | null>(null)
   const [selectedRootID, setSelectedRootID] = useState('')
   const [jumpPage, setJumpPage] = useState('1')
   const [searching, setSearching] = useState(false)
@@ -91,6 +96,7 @@ export function ResourceSearchDrawer({
     response?.total_pages,
   )
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
+  const pansouAvailable = supportsResourceSource(capabilities, 'pansou')
 
   useEffect(() => {
     setSelectedRootID((current) => resolveResourceRootID(roots, current))
@@ -155,8 +161,11 @@ export function ResourceSearchDrawer({
       setSearchError('该媒体库有多个目录，请先明确选择入库目录')
       return
     }
+    setSource(nextSource)
     setSearching(true)
     setSearchError('')
+    setSearchFailure(null)
+    setResponse(null)
     setDuplicateConflict(null)
     try {
       const next = await resourceImportsAPI.search(libraryID, {
@@ -170,10 +179,16 @@ export function ResourceSearchDrawer({
         throw new Error('资源搜索响应缺少会话或结果列表')
       }
       setResponse(next)
-      setSource(nextSource)
+      setCapabilities(next.capabilities)
       setJumpPage(String(clampResourcePage(next.page, cappedResourceTotalPages(next.total, next.page_size, next.total_pages))))
     } catch (requestError) {
-      setSearchError(resourceImportError(requestError, '资源搜索失败'))
+      const failure = resourceSearchFailure(requestError)
+      if (failure) {
+        setSearchFailure(failure)
+        if (failure.capabilities) setCapabilities(failure.capabilities)
+      } else {
+        setSearchError(resourceImportError(requestError, '资源搜索失败'))
+      }
     } finally {
       setSearching(false)
     }
@@ -316,21 +331,30 @@ export function ResourceSearchDrawer({
         ) : (
           <>
             <form className="shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 py-4 sm:px-6" onSubmit={submitSearch}>
+              <div className="mb-2.5 flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+                  <Download size={17} />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-ink-600">查找可入库资源</h3>
+                  <p className="text-xs text-sand-500">{source === 'pansou' ? 'Pansou 网盘搜索' : '普通资源搜索'}</p>
+                </div>
+              </div>
               <div className="flex min-w-0 gap-2">
                 <label className="min-w-0 flex-1">
-                  <span className="sr-only">搜索关键词</span>
+                  <span className="sr-only">资源关键词</span>
                   <input
                     autoFocus
                     className="input-field h-11 min-w-0 w-full py-2.5 text-base sm:text-sm"
                     value={query}
-                    placeholder="输入影片、剧集或资源名称"
+                    placeholder="片名、剧名、番号或资源关键词"
                     maxLength={200}
                     onChange={(event) => setQuery(event.target.value)}
                   />
                 </label>
-                <button type="submit" className="btn-primary h-11 shrink-0 px-4" disabled={searching}>
+                <button type="submit" className="btn-primary h-11 min-w-[6.5rem] shrink-0 px-3" disabled={searching}>
                   {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Search size={18} />}
-                  <span className="hidden sm:inline">搜索</span>
+                  <span>{searching ? '查找中' : '查找资源'}</span>
                 </button>
               </div>
 
@@ -358,11 +382,11 @@ export function ResourceSearchDrawer({
                 </div>
               )}
 
-              {response?.capabilities && (
+              {capabilities && (
                 <SearchSourceControl
                   source={source}
                   searching={searching}
-                  pansou={supportsResourceSource(response.capabilities, 'pansou')}
+                  pansou={pansouAvailable}
                   onSelect={(nextSource) => void runSearch(1, nextSource)}
                 />
               )}
@@ -381,34 +405,57 @@ export function ResourceSearchDrawer({
             )}
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
-              {!response && !searching && (
+              {!response && !searching && !searchFailure && (
                 <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
-                  <Search className="mb-3 h-9 w-9" />
-                  <p className="text-sm">在当前媒体库中搜索可入库资源</p>
+                  <Download className="mb-3 h-9 w-9" />
+                  <p className="text-sm">输入关键词查找可入库资源</p>
                 </div>
               )}
 
-              {response && (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 py-3 text-xs text-sand-500">
-                    <span>共 {total} 条{response.total > total ? '，仅展示前 100 条' : ''}</span>
-                    <span>第 {currentPage} / {totalPages} 页</span>
-                  </div>
+              {searching && (
+                <div className="flex min-h-56 flex-col items-center justify-center text-center" aria-live="polite">
+                  <LoaderCircle className="mb-3 h-8 w-8 animate-spin text-brand-500" />
+                  <p className="text-sm font-medium text-ink-100">
+                    {source === 'pansou' ? '正在通过 Pansou 补查…' : '正在查找可入库资源…'}
+                  </p>
+                </div>
+              )}
 
+              {searchFailure && !searching && (
+                <ResourceSearchEmptyState
+                  failed
+                  source={source}
+                  pansouAvailable={pansouAvailable}
+                  onSearchPansou={() => void runSearch(1, 'pansou')}
+                />
+              )}
+
+              {response && !searching && (
+                <>
                   {response.results.length === 0 ? (
-                    <p className="py-12 text-center text-sm text-sand-500">当前搜索没有返回资源</p>
+                    <ResourceSearchEmptyState
+                      source={source}
+                      pansouAvailable={pansouAvailable}
+                      onSearchPansou={() => void runSearch(1, 'pansou')}
+                    />
                   ) : (
-                    <div>
-                      {response.results.slice(0, RESOURCE_SEARCH_PAGE_SIZE).map((candidate) => (
-                        <ResourceCandidateRow
-                          key={`${response.session_id}-${candidate.index}`}
-                          candidate={candidate}
-                          importing={importingIndex === candidate.index}
-                          importDisabled={!selectedRootID || importingIndex !== null}
-                          onImport={() => void importCandidate(candidate)}
-                        />
-                      ))}
-                    </div>
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 py-3 text-xs text-sand-500">
+                        <span>共 {total} 条{response.total > total ? '，仅展示前 100 条' : ''}</span>
+                        <span>第 {currentPage} / {totalPages} 页</span>
+                      </div>
+                      <div>
+                        {response.results.slice(0, RESOURCE_SEARCH_PAGE_SIZE).map((candidate) => (
+                          <ResourceCandidateRow
+                            key={`${response.session_id}-${candidate.index}`}
+                            candidate={candidate}
+                            importing={importingIndex === candidate.index}
+                            importDisabled={!selectedRootID || importingIndex !== null}
+                            onImport={() => void importCandidate(candidate)}
+                          />
+                        ))}
+                      </div>
+                    </>
                   )}
                 </>
               )}
@@ -447,9 +494,21 @@ function SearchSourceControl({
     <div className="mt-3 flex flex-wrap items-center gap-2">
       <span className="text-xs font-semibold text-ink-100">搜索方式</span>
       <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <SourceButton active={source === ''} disabled={searching} onClick={() => onSelect('')}>普通</SourceButton>
+        <SourceButton
+          active={source === ''}
+          disabled={searching}
+          loading={searching && source === ''}
+          onClick={() => onSelect('')}
+        >
+          普通
+        </SourceButton>
         {pansou && (
-          <SourceButton active={source === 'pansou'} disabled={searching} onClick={() => onSelect('pansou')}>
+          <SourceButton
+            active={source === 'pansou'}
+            disabled={searching}
+            loading={searching && source === 'pansou'}
+            onClick={() => onSelect('pansou')}
+          >
             Pansou 补查
           </SourceButton>
         )}
@@ -461,23 +520,59 @@ function SearchSourceControl({
 function SourceButton({
   active,
   disabled,
+  loading,
   children,
   onClick,
 }: {
   active: boolean
   disabled: boolean
+  loading: boolean
   children: React.ReactNode
   onClick: () => void
 }) {
   return (
     <button
       type="button"
-      className={`inline-flex h-9 items-center gap-1.5 border-r border-gray-200 px-3 text-xs font-semibold last:border-r-0 ${active ? 'bg-brand-500 text-white' : 'text-ink-100 hover:bg-gray-50'}`}
+      className={`inline-flex h-9 min-w-20 items-center justify-center gap-1.5 border-r border-gray-200 px-3 text-xs font-semibold transition-colors last:border-r-0 ${active ? 'bg-brand-500 text-white' : 'text-ink-100 hover:bg-gray-50'}`}
       disabled={disabled}
       onClick={onClick}
     >
+      {loading && <LoaderCircle size={14} className="animate-spin" />}
       {children}
     </button>
+  )
+}
+
+function ResourceSearchEmptyState({
+  failed = false,
+  source,
+  pansouAvailable,
+  onSearchPansou,
+}: {
+  failed?: boolean
+  source: SearchSource
+  pansouAvailable: boolean
+  onSearchPansou: () => void
+}) {
+  const canSearchPansou = pansouAvailable && source !== 'pansou'
+  return (
+    <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center" aria-live="polite">
+      <span className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-sand-500">
+        <Search size={21} />
+      </span>
+      <h3 className="text-sm font-semibold text-ink-600">
+        {failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
+      </h3>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-sand-500">
+        {canSearchPansou ? '可以改用 Pansou 继续查找网盘资源。' : '可以调整关键词后重新查找。'}
+      </p>
+      {canSearchPansou && (
+        <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onSearchPansou}>
+          <Search size={16} />
+          Pansou 补查
+        </button>
+      )}
+    </div>
   )
 }
 

@@ -17,6 +17,7 @@ import (
 type fakeResourcePipeline struct {
 	mu             sync.Mutex
 	duplicate      *ResourceImportDuplicate
+	searchErr      error
 	createCalls    int
 	getDelay       time.Duration
 	active         int
@@ -30,6 +31,9 @@ type fakeResourcePipeline struct {
 }
 
 func (f *fakeResourcePipeline) Search(_ context.Context, in resourcePipelineSearchRequest) (resourcePipelineSearchResponse, error) {
+	if f.searchErr != nil {
+		return resourcePipelineSearchResponse{}, f.searchErr
+	}
 	return resourcePipelineSearchResponse{
 		SessionID: "pipeline-session-" + in.OwnerID,
 		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
@@ -38,6 +42,26 @@ func (f *fakeResourcePipeline) Search(_ context.Context, in resourcePipelineSear
 		}},
 		Capabilities: ResourceSearchCapabilities{Pansou: true},
 	}, nil
+}
+
+func TestResourceImportSearchErrorPreservesCapabilities(t *testing.T) {
+	pipeline := &fakeResourcePipeline{searchErr: &resourcePipelineError{
+		StatusCode:   502,
+		Code:         "search_failed",
+		Message:      "BT4G timed out",
+		Capabilities: ResourceSearchCapabilities{Pansou: true},
+	}}
+	svc, _, library, root, _, user := newResourceImportTestService(t, pipeline)
+
+	_, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Missing", RootID: root.ID})
+
+	var searchErr *ResourceSearchError
+	if !errors.As(err, &searchErr) {
+		t.Fatalf("search error = %#v", err)
+	}
+	if searchErr.Code != "search_failed" || !searchErr.Capabilities.Pansou || searchErr.HTTPStatus() != 502 {
+		t.Fatalf("search error details = %+v", searchErr)
+	}
 }
 
 func (f *fakeResourcePipeline) CreateImport(_ context.Context, owner, _ string, in resourcePipelineCreateRequest) (resourcePipelineTask, error) {

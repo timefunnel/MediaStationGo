@@ -222,6 +222,21 @@ func selectResourceImportRoot(library model.Library, rootID string) (model.Libra
 }
 
 func writeResourceImportError(c *gin.Context, err error) {
+	var search *service.ResourceSearchError
+	if errors.As(err, &search) {
+		status := search.HTTPStatus()
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		c.JSON(status, gin.H{
+			"error": gin.H{
+				"code":         search.Code,
+				"message":      search.Error(),
+				"capabilities": search.Capabilities,
+			},
+		})
+		return
+	}
 	var duplicate *service.ResourceImportDuplicateError
 	if errors.As(err, &duplicate) {
 		c.JSON(http.StatusConflict, gin.H{

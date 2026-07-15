@@ -81,3 +81,20 @@ func TestResourcePipelineHTTPClientDecodesNestedDuplicate(t *testing.T) {
 		t.Fatalf("duplicate error = %#v", err)
 	}
 }
+
+func TestResourcePipelineHTTPClientDecodesSearchFailureCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"code":"search_failed","message":"BT4G timed out","capabilities":{"pansou":true}}}`))
+	}))
+	defer server.Close()
+	client, err := newResourcePipelineHTTPClient(config.ResourceImportConfig{PipelineURL: server.URL, PipelineToken: "secret", SearchTimeoutSeconds: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Search(context.Background(), resourcePipelineSearchRequest{})
+	pipelineErr, ok := err.(*resourcePipelineError)
+	if !ok || pipelineErr.Code != "search_failed" || !pipelineErr.Capabilities.Pansou {
+		t.Fatalf("search error = %#v", err)
+	}
+}
