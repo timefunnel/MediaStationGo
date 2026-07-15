@@ -169,6 +169,9 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 		Updates(updates).Error; err != nil {
 		return err
 	}
+	if err := s.persistMatchPeople(ctx, match); err != nil {
+		s.log.Warn("failed to save person metadata", zap.String("media_id", m.ID), zap.Error(err))
+	}
 	s.removeCachedScrapedArtwork(removePoster, removeBackdrop)
 
 	// Fetch extended metadata after the selected match is already saved.

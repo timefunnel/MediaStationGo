@@ -43,12 +43,17 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	}
 	match.Year = firstYearInText(body)
 	match.Rating = firstRatingInText(body)
-	match.Actors = firstAdultActors(body)
+	match.People = firstAdultPeople(body, source, detailURL)
+	match.Actors = personMetadataNames(match.People)
 	return match
 }
 
 func firstAdultActors(body string) []string {
-	actors := make([]string, 0, 4)
+	return personMetadataNames(firstAdultPeople(body, "", ""))
+}
+
+func firstAdultPeople(body, source, detailURL string) []PersonMetadata {
+	people := make([]PersonMetadata, 0, 4)
 	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
 		if len(found) < 3 {
 			continue
@@ -65,7 +70,12 @@ func firstAdultActors(body string) []string {
 			name = adultActorImageName(found[2])
 		}
 		if validAdultActorName(name) {
-			actors = append(actors, name)
+			people = append(people, PersonMetadata{
+				Name:       name,
+				ImageURL:   adultActorImageURL(found[2], detailURL),
+				ProfileURL: absolutizeURL(detailURL, attrs["href"]),
+				Source:     source,
+			})
 		}
 	}
 	for _, found := range adultJSONLDPattern.FindAllStringSubmatch(body, -1) {
@@ -74,10 +84,12 @@ func firstAdultActors(body string) []string {
 		}
 		var value any
 		if json.Unmarshal([]byte(html.UnescapeString(strings.TrimSpace(found[1]))), &value) == nil {
-			actors = append(actors, adultActorsFromJSONLD(value)...)
+			for _, name := range adultActorsFromJSONLD(value) {
+				people = append(people, PersonMetadata{Name: name, Source: source})
+			}
 		}
 	}
-	return deduplicate(actors)
+	return deduplicatePersonMetadata(people)
 }
 
 func adultActorImageName(body string) string {
@@ -87,6 +99,16 @@ func adultActorImageName(body string) string {
 	}
 	attrs := adultAttrs(image[1])
 	return firstText(attrs["alt"], attrs["title"])
+}
+
+func adultActorImageURL(body, detailURL string) string {
+	image := adultImagePattern.FindStringSubmatch(body)
+	if len(image) < 2 {
+		return ""
+	}
+	attrs := adultAttrs(image[1])
+	raw := firstText(attrs["data-src"], attrs["data-original"], attrs["data-lazy-src"], attrs["src"])
+	return absolutizeURL(detailURL, raw)
 }
 
 func adultActorAnchor(attrs map[string]string) bool {

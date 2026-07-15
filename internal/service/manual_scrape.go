@@ -9,27 +9,28 @@ import (
 )
 
 type ManualScrapeRequest struct {
-	Source         string   `json:"source"`
-	MediaType      string   `json:"media_type"`
-	Title          string   `json:"title"`
-	OriginalName   string   `json:"original_name"`
-	Overview       string   `json:"overview"`
-	PosterURL      string   `json:"poster_url"`
-	BackdropURL    string   `json:"backdrop_url"`
-	Year           int      `json:"year"`
-	ReleaseDate    string   `json:"release_date"`
-	Rating         float32  `json:"rating"`
-	TMDbID         int      `json:"tmdb_id"`
-	BangumiID      int      `json:"bangumi_id"`
-	DoubanID       string   `json:"douban_id"`
-	TheTVDBID      string   `json:"thetvdb_id"`
-	Languages      []string `json:"languages"`
-	Countries      []string `json:"countries"`
-	Genres         []string `json:"genres"`
-	Actors         []string `json:"actors"`
-	NSFW           bool     `json:"nsfw"`
-	EpisodeArtwork *bool    `json:"episode_artwork,omitempty"`
-	EpisodeImages  *bool    `json:"episode_images,omitempty"`
+	Source         string           `json:"source"`
+	MediaType      string           `json:"media_type"`
+	Title          string           `json:"title"`
+	OriginalName   string           `json:"original_name"`
+	Overview       string           `json:"overview"`
+	PosterURL      string           `json:"poster_url"`
+	BackdropURL    string           `json:"backdrop_url"`
+	Year           int              `json:"year"`
+	ReleaseDate    string           `json:"release_date"`
+	Rating         float32          `json:"rating"`
+	TMDbID         int              `json:"tmdb_id"`
+	BangumiID      int              `json:"bangumi_id"`
+	DoubanID       string           `json:"douban_id"`
+	TheTVDBID      string           `json:"thetvdb_id"`
+	Languages      []string         `json:"languages"`
+	Countries      []string         `json:"countries"`
+	Genres         []string         `json:"genres"`
+	Actors         []string         `json:"actors"`
+	People         []PersonMetadata `json:"people,omitempty"`
+	NSFW           bool             `json:"nsfw"`
+	EpisodeArtwork *bool            `json:"episode_artwork,omitempty"`
+	EpisodeImages  *bool            `json:"episode_images,omitempty"`
 }
 
 func (r ManualScrapeRequest) EpisodeArtworkOption() *bool {

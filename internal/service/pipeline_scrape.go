@@ -215,6 +215,7 @@ func pipelineManualScrapeRequestFromMatch(match ExternalMediaResult) ManualScrap
 		Countries:     append([]string(nil), match.Countries...),
 		Genres:        append([]string(nil), match.Genres...),
 		Actors:        append([]string(nil), match.Actors...),
+		People:        append([]PersonMetadata(nil), match.People...),
 		NSFW:          match.NSFW,
 		EpisodeImages: &episodeArtwork,
 	}

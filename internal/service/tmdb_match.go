@@ -80,7 +80,8 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 	m.Genres = deduplicate(m.Genres)
 	m.Countries = deduplicate(m.Countries)
 	m.Languages = deduplicate(m.Languages)
-	m.Actors = topTMDbActors(r.Credits.Cast)
+	m.People = topTMDbPeople(r.Credits.Cast, t.imgCDN)
+	m.Actors = personMetadataNames(m.People)
 	return m, nil
 }
 
@@ -153,6 +154,7 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 	}
 	m.Genres = deduplicate(m.Genres)
 	m.Languages = deduplicate(m.Languages)
-	m.Actors = topTMDbActors(r.Credits.Cast)
+	m.People = topTMDbPeople(r.Credits.Cast, t.imgCDN)
+	m.Actors = personMetadataNames(m.People)
 	return m, nil
 }

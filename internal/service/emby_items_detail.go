@@ -267,6 +267,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	if len(watchedAtValues) > 0 && !watchedAtValues[0].IsZero() {
 		userData["LastPlayedDate"] = watchedAtValues[0].UTC().Format(time.RFC3339Nano)
 	}
+	people := e.embyPeopleFromCSV(ctx, m.Actors)
 
 	item := map[string]any{
 		"Id":                m.ID,
@@ -287,7 +288,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"Height":            m.Height,
 		"DateCreated":       m.CreatedAt,
 		"DateModified":      modifiedAt,
-		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path, m.Actors),
+		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path, m.Actors, embyPeopleImageSignature(people)),
 		"Path":              m.Path,
 		"ParentId":          parentID,
 		"SeasonId":          seasonID,
@@ -297,7 +298,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"ImageTags":         imageTags,
 		"BackdropImageTags": backdropTags,
 		"Genres":            splitCSV(m.Genres),
-		"People":            embyPeopleFromCSV(m.Actors),
+		"People":            people,
 		"ProviderIds": map[string]string{
 			"Tmdb":    intToStr(m.TMDbID),
 			"Bangumi": intToStr(m.BangumiID),

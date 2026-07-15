@@ -21,6 +21,16 @@ func (e *EmbyService) ImageURL(ctx context.Context, id, imageType string) (strin
 		}
 		return backdrop
 	}
+	if personName, ok := embyPersonName(id); ok {
+		if strings.ToLower(strings.TrimSpace(imageType)) != "primary" {
+			return "", nil
+		}
+		snapshot, err := e.personMetadataSnapshot(ctx)
+		if err != nil {
+			return "", err
+		}
+		return snapshot[normalizePersonNameKey(personName)].ImageURL, nil
+	}
 	if strings.HasPrefix(id, embyVirtualSeasonPrefix) {
 		if raw, ok := e.cachedArtworkURL(id, imageType); ok {
 			return raw, nil

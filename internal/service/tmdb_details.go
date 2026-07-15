@@ -10,7 +10,9 @@ import (
 )
 
 type tmdbCreditCast struct {
-	Name string `json:"name"`
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	ProfilePath string `json:"profile_path"`
 }
 
 // GetDetails fetches extended metadata for a TMDb ID.
@@ -68,6 +70,7 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		countries []string
 		genres    []string
 		actors    []string
+		people    []PersonMetadata
 	)
 
 	if mediaType == "tv" {
@@ -85,7 +88,8 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		for _, g := range r.Genres {
 			genres = append(genres, g.Name)
 		}
-		actors = topTMDbActors(r.Credits.Cast)
+		people = topTMDbPeople(r.Credits.Cast, t.imgCDN)
+		actors = personMetadataNames(people)
 	} else {
 		var r movieResult
 		if err := t.getJSON(ctx, u, &r); err != nil {
@@ -107,7 +111,8 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		for _, g := range r.Genres {
 			genres = append(genres, g.Name)
 		}
-		actors = topTMDbActors(r.Credits.Cast)
+		people = topTMDbPeople(r.Credits.Cast, t.imgCDN)
+		actors = personMetadataNames(people)
 	}
 
 	// Deduplicate
@@ -130,21 +135,45 @@ func (t *TMDbProvider) GetDetails(ctx context.Context, tmdbID int, mediaType str
 		Countries: countries,
 		Genres:    genres,
 		Actors:    actors,
+		People:    people,
 	}, nil
 }
 
 func topTMDbActors(cast []tmdbCreditCast) []string {
+	return personMetadataNames(topTMDbPeople(cast, ""))
+}
+
+func topTMDbPeople(cast []tmdbCreditCast, imageCDN string) []PersonMetadata {
 	const maxActors = 30
-	out := make([]string, 0, min(len(cast), maxActors))
+	out := make([]PersonMetadata, 0, min(len(cast), maxActors))
+	seen := map[string]struct{}{}
 	for _, person := range cast {
 		name := strings.TrimSpace(person.Name)
 		if name == "" {
 			continue
 		}
-		out = append(out, name)
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		imageURL := ""
+		if profilePath := strings.TrimSpace(person.ProfilePath); profilePath != "" && strings.TrimSpace(imageCDN) != "" {
+			imageURL = strings.TrimRight(imageCDN, "/") + "/w500/" + strings.TrimLeft(profilePath, "/")
+		}
+		sourceID := ""
+		if person.ID > 0 {
+			sourceID = fmt.Sprint(person.ID)
+		}
+		out = append(out, PersonMetadata{
+			Name:     name,
+			ImageURL: imageURL,
+			Source:   "tmdb",
+			SourceID: sourceID,
+		})
 		if len(out) >= maxActors {
 			break
 		}
 	}
-	return deduplicate(out)
+	return out
 }

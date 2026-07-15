@@ -37,6 +37,7 @@ func AllModels() []interface{} {
 		&LibraryRoot{},
 		&Series{},
 		&Media{},
+		&Person{},
 		&PlaybackHistory{},
 		&Favorite{},
 		&Playlist{},

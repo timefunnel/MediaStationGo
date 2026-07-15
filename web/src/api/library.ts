@@ -49,6 +49,13 @@ export interface ManualScrapeCandidate {
   countries?: string[]
   genres?: string[]
   actors?: string[]
+  people?: Array<{
+    name: string
+    image_url?: string
+    profile_url?: string
+    source?: string
+    source_id?: string
+  }>
   nsfw?: boolean
 }
 

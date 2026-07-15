@@ -57,6 +57,7 @@ func (s *ScraperService) ManualSearch(ctx context.Context, media *model.Media, q
 			Countries:        match.Countries,
 			Genres:           match.Genres,
 			Actors:           match.Actors,
+			People:           match.People,
 			NSFW:             match.NSFW,
 		})
 	}

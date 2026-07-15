@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 	"go.uber.org/zap"
@@ -65,6 +66,11 @@ type EmbyService struct {
 
 	readCacheMu       sync.Mutex
 	readCacheInFlight map[string]*embyReadCacheFlight
+
+	personMu           sync.RWMutex
+	personCache        map[string]model.Person
+	personCacheExpires time.Time
+	personCacheVersion uint64
 }
 
 type cloudPlaybackResolver interface {
