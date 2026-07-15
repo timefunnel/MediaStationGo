@@ -218,7 +218,7 @@ func decodeResourcePipelineError(status int, raw []byte) error {
 			Code         string                     `json:"code"`
 			Message      string                     `json:"message"`
 			Capabilities ResourceSearchCapabilities `json:"capabilities"`
-			Duplicate *struct {
+			Duplicate    *struct {
 				CanForce bool   `json:"can_force"`
 				MediaID  string `json:"media_id"`
 				Title    string `json:"title"`
