@@ -13,36 +13,62 @@ export const api = axios.create({
 export const LONG_REQUEST_TIMEOUT = 120_000
 export const BATCH_REQUEST_TIMEOUT = 300_000
 
-// Flag to prevent multiple simultaneous refresh attempts
-let isRefreshing = false
-let refreshSubscribers: Array<{
-  resolve: (token: string) => void
-  reject: (error: unknown) => void
-}> = []
-
-// Subscribe to token refresh
-function subscribeTokenRefresh(resolve: (token: string) => void, reject: (error: unknown) => void) {
-  refreshSubscribers.push({ resolve, reject })
-}
-
-// Notify all subscribers about new token
-function onTokenRefreshed(newToken: string) {
-  refreshSubscribers.forEach((subscriber) => subscriber.resolve(newToken))
-  refreshSubscribers = []
-}
-
-function onTokenRefreshFailed(error: unknown) {
-  refreshSubscribers.forEach((subscriber) => subscriber.reject(error))
-  refreshSubscribers = []
-}
+let refreshPromise: Promise<string> | null = null
 
 function isRefreshRequest(config?: InternalAxiosRequestConfig | null): boolean {
   return Boolean(config?.url?.includes('/auth/refresh'))
 }
 
-// Add auth token to requests
-api.interceptors.request.use((config) => {
+function tokenExpiresSoon(token: string, leewaySeconds = 30): boolean {
+  try {
+    const encoded = token.split('.')[1]
+    if (!encoded) return false
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const payload = JSON.parse(atob(padded)) as { exp?: number }
+    return typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now() + leewaySeconds * 1000
+  } catch {
+    return false
+  }
+}
+
+function redirectToLogin() {
+  useAuthStore.getState().logout()
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
+}
+
+async function refreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshed = await useAuthStore.getState().tokenRefresh()
+      const token = useAuthStore.getState().token
+      if (!refreshed || !token) throw new Error('access token refresh failed')
+      return token
+    })()
+      .catch((error) => {
+        redirectToLogin()
+        throw error
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+export async function ensureAccessToken(): Promise<string | null> {
   const token = useAuthStore.getState().token
+  if (!token || !tokenExpiresSoon(token)) return token
+  return refreshAccessToken()
+}
+
+// Add auth token to requests
+api.interceptors.request.use(async (config) => {
+  const token = isRefreshRequest(config)
+    ? useAuthStore.getState().token
+    : await ensureAccessToken()
   if (token) {
     config.headers = config.headers ?? {}
     config.headers.Authorization = `Bearer ${token}`
@@ -72,50 +98,16 @@ api.interceptors.response.use(
       !originalRequest._retry &&
       !isRefreshRequest(originalRequest)
     ) {
-      if (isRefreshing) {
-        // Wait for token refresh to complete
-        return new Promise((resolve, reject) => {
-          subscribeTokenRefresh((token: string) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${token}`
-            }
-            resolve(api(originalRequest))
-          }, reject)
-        })
-      }
-
       originalRequest._retry = true
-      isRefreshing = true
-
       try {
-        const refreshed = await useAuthStore.getState().tokenRefresh()
-        if (refreshed) {
-          const newToken = useAuthStore.getState().token
-          if (newToken && originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${newToken}`
-          }
-          onTokenRefreshed(newToken || '')
-          isRefreshing = false
-          return api(originalRequest)
+        const newToken = await refreshAccessToken()
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${newToken}`
         }
+        return api(originalRequest)
       } catch (refreshError) {
-        isRefreshing = false
-        onTokenRefreshFailed(refreshError)
-        useAuthStore.getState().logout()
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-          window.location.href = '/login'
-        }
         return Promise.reject(refreshError)
       }
-
-      // Refresh failed, logout
-      isRefreshing = false
-      onTokenRefreshFailed(err)
-      useAuthStore.getState().logout()
-      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-        window.location.href = '/login'
-      }
-      return Promise.reject(err)
     }
 
     // For other errors, just reject

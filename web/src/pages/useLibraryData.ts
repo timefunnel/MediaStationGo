@@ -149,7 +149,7 @@ async function loadAllSeriesCards(
   libraryID: string,
   onPage: (state: { items: SeriesCard[]; total: number; firstPage: boolean }) => void,
 ) {
-  const pageSize = 500
+  const pageSize = 120
   let page = 1
   let collected: SeriesCard[] = []
   for (;;) {
@@ -168,7 +168,7 @@ async function loadAllMedia(
   libraryID: string,
   onPage: (state: { items: Media[]; total: number; firstPage: boolean }) => void,
 ) {
-  const pageSize = 2000
+  const pageSize = 240
   let page = 1
   let collected: Media[] = []
   for (;;) {
