@@ -38,8 +38,9 @@ type cloudLibraryScanCompletion struct {
 }
 
 type cloudScanRootTarget struct {
-	scanDir    string
-	displayDir string
+	scanDir      string
+	displayDir   string
+	exactFileName string
 }
 
 func (s *ScannerService) scanCloudLibrary(ctx context.Context, lib *model.Library, mount CloudMountInfo, autoScrape bool) (*ScanResult, error) {
@@ -81,6 +82,7 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 			provider:         typ,
 			rootDir:          target.scanDir,
 			rootDisplayDir:   target.displayDir,
+			exactFileName:    target.exactFileName,
 			refreshRoot:      true,
 			autoCategoryRoot: autoCategoryRoot,
 			progress:         progress,
@@ -275,10 +277,15 @@ func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []c
 		if displayDir == "" {
 			continue
 		}
+		exactFileName := ""
 		if _, ok := videoExtensions[strings.ToLower(path.Ext(displayDir))]; ok {
+			exactFileName = path.Base(displayDir)
 			displayDir = normalizeCloudMountDir(mount.Provider, path.Dir(displayDir))
 		}
-		if displayDir == "" || displayDir == rootDisplay || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+		if displayDir == "" || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+			continue
+		}
+		if displayDir == rootDisplay && exactFileName == "" {
 			continue
 		}
 		suffix := strings.Trim(strings.TrimPrefix(displayDir, rootDisplay), "/")
@@ -286,12 +293,12 @@ func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []c
 		if suffix != "" {
 			scanDir = strings.Trim(strings.TrimRight(rootScan, "/")+"/"+suffix, "/")
 		}
-		key := scanDir + "\x00" + displayDir
+		key := scanDir + "\x00" + displayDir + "\x00" + strings.ToLower(exactFileName)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir})
+		out = append(out, cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir, exactFileName: exactFileName})
 	}
 	return out
 }

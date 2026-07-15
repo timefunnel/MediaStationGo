@@ -96,7 +96,7 @@ export function ResourceSearchDrawer({
     response?.total_pages,
   )
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
-  const pansouAvailable = supportsResourceSource(capabilities, 'pansou')
+  const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
 
   useEffect(() => {
     setSelectedRootID((current) => resolveResourceRootID(roots, current))
@@ -337,7 +337,7 @@ export function ResourceSearchDrawer({
                 </span>
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-ink-600">查找可入库资源</h3>
-                  <p className="text-xs text-sand-500">{source === 'pansou' ? 'Pansou 网盘搜索' : '普通资源搜索'}</p>
+                  <p className="text-xs text-sand-500">{source === 'pansou' ? '网盘资源搜索' : '普通资源搜索'}</p>
                 </div>
               </div>
               <div className="flex min-w-0 gap-2">
@@ -382,14 +382,12 @@ export function ResourceSearchDrawer({
                 </div>
               )}
 
-              {capabilities && (
-                <SearchSourceControl
-                  source={source}
-                  searching={searching}
-                  pansou={pansouAvailable}
-                  onSelect={(nextSource) => void runSearch(1, nextSource)}
-                />
-              )}
+              <SearchSourceControl
+                source={source}
+                searching={searching}
+                pansou={pansouAvailable}
+                onSelect={(nextSource) => void runSearch(1, nextSource)}
+              />
 
               {searchError && <InlineError message={searchError} className="mt-3" />}
             </form>
@@ -416,7 +414,7 @@ export function ResourceSearchDrawer({
                 <div className="flex min-h-56 flex-col items-center justify-center text-center" aria-live="polite">
                   <LoaderCircle className="mb-3 h-8 w-8 animate-spin text-brand-500" />
                   <p className="text-sm font-medium text-ink-100">
-                    {source === 'pansou' ? '正在通过 Pansou 补查…' : '正在查找可入库资源…'}
+                    {source === 'pansou' ? '正在搜索网盘资源…' : '正在查找可入库资源…'}
                   </p>
                 </div>
               )}
@@ -489,10 +487,9 @@ function SearchSourceControl({
   pansou: boolean
   onSelect: (source: SearchSource) => void
 }) {
-  if (!pansou) return null
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
-      <span className="text-xs font-semibold text-ink-100">搜索方式</span>
+      <span className="text-xs font-semibold text-ink-100">搜索模式</span>
       <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
         <SourceButton
           active={source === ''}
@@ -509,7 +506,7 @@ function SearchSourceControl({
             loading={searching && source === 'pansou'}
             onClick={() => onSelect('pansou')}
           >
-            Pansou 补查
+            网盘
           </SourceButton>
         )}
       </div>
@@ -564,12 +561,12 @@ function ResourceSearchEmptyState({
         {failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
       </h3>
       <p className="mt-1 max-w-sm text-xs leading-5 text-sand-500">
-        {canSearchPansou ? '可以改用 Pansou 继续查找网盘资源。' : '可以调整关键词后重新查找。'}
+        {canSearchPansou ? '可以改用网盘搜索继续查找。' : '可以调整关键词后重新查找。'}
       </p>
       {canSearchPansou && (
         <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onSearchPansou}>
           <Search size={16} />
-          Pansou 补查
+          网盘搜索
         </button>
       )}
     </div>
@@ -589,7 +586,7 @@ function ResourceCandidateRow({
 }) {
   const metadata = [
     candidate.size_text || (candidate.size_bytes ? formatSize(candidate.size_bytes) : ''),
-    candidate.source ? `来源 ${candidate.source}` : '',
+    candidate.source ? `来源 ${resourceSourceLabel(candidate.source)}` : '',
     candidate.seeders !== undefined ? `做种 ${candidate.seeders}` : '',
     candidate.resolution,
     candidate.subtitle,
@@ -621,6 +618,10 @@ function ResourceCandidateRow({
       </div>
     </article>
   )
+}
+
+function resourceSourceLabel(source: string): string {
+  return source.trim().toLowerCase() === 'pansou' ? '网盘' : source
 }
 
 function ResourceSearchPagination({
