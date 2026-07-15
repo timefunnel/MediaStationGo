@@ -371,9 +371,14 @@ export function ResourceSearchDrawer({
                     onChange={(event) => setQuery(event.target.value)}
                   />
                 </label>
-                <button type="submit" className="btn-primary h-11 min-w-[6.5rem] shrink-0 px-3" disabled={searching}>
+                <button
+                  type="submit"
+                  className="btn-primary h-11 w-11 shrink-0 p-0"
+                  title={searching ? '查找中' : '查找资源'}
+                  aria-label={searching ? '查找中' : '查找资源'}
+                  disabled={searching}
+                >
                   {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Globe size={18} />}
-                  <span>{searching ? '查找中' : '查找资源'}</span>
                 </button>
               </div>
 
