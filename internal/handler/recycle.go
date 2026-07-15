@@ -3,11 +3,13 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ShukeBta/MediaStationGo/internal/middleware"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
@@ -17,7 +19,7 @@ type recycleBatchReq struct {
 
 func deleteMediaHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if err := svc.Media.SoftDelete(c.Request.Context(), c.Param("id")); err != nil {
+		if err := svc.Media.SoftDeleteBy(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), "media"); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -27,7 +29,9 @@ func deleteMediaHandler(svc *service.Container) gin.HandlerFunc {
 
 func listRecycleHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		items, err := svc.Media.ListRecycleBin(c.Request.Context(), 200)
+		items, err := svc.Media.ListRecycleBinForUser(
+			c.Request.Context(), middleware.GetUserID(c), middleware.IsAdmin(c), 200,
+		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -38,8 +42,8 @@ func listRecycleHandler(svc *service.Container) gin.HandlerFunc {
 
 func restoreMediaHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if err := svc.Media.RestoreDeleted(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := svc.Media.RestoreDeletedForUser(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), middleware.IsAdmin(c)); err != nil {
+			writeMediaVersionError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -53,7 +57,10 @@ func restoreMediaBatchHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		applied, errorsOut := runRecycleBatch(c, compactManualScrapeIDs(req.MediaIDs), svc.Media.RestoreDeleted)
+		action := func(ctx context.Context, id string) error {
+			return svc.Media.RestoreDeletedForUser(ctx, id, middleware.GetUserID(c), middleware.IsAdmin(c))
+		}
+		applied, errorsOut := runRecycleBatch(c, compactManualScrapeIDs(req.MediaIDs), action)
 		if applied == 0 && len(errorsOut) > 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": strings.Join(errorsOut, "\n")})
 			return
@@ -64,8 +71,8 @@ func restoreMediaBatchHandler(svc *service.Container) gin.HandlerFunc {
 
 func purgeMediaHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if err := svc.Media.PurgeDeleted(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := svc.Media.PurgeDeletedForUser(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), middleware.IsAdmin(c)); err != nil {
+			writeMediaVersionError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -79,12 +86,70 @@ func purgeMediaBatchHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		applied, errorsOut := runRecycleBatch(c, compactManualScrapeIDs(req.MediaIDs), svc.Media.PurgeDeleted)
+		action := func(ctx context.Context, id string) error {
+			return svc.Media.PurgeDeletedForUser(ctx, id, middleware.GetUserID(c), middleware.IsAdmin(c))
+		}
+		applied, errorsOut := runRecycleBatch(c, compactManualScrapeIDs(req.MediaIDs), action)
 		if applied == 0 && len(errorsOut) > 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": strings.Join(errorsOut, "\n")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"applied": applied, "errors": errorsOut})
+	}
+}
+
+func getMediaVersionsHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		result, err := svc.Media.ListMediaVersions(
+			c.Request.Context(), media.ID, middleware.GetUserID(c), middleware.IsAdmin(c),
+		)
+		if err != nil {
+			writeMediaVersionError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func deleteMediaVersionHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		result, err := svc.Media.DeleteMediaVersion(
+			c.Request.Context(), media.ID, c.Param("version_id"), middleware.GetUserID(c), middleware.IsAdmin(c),
+		)
+		if err != nil {
+			writeMediaVersionError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func writeMediaVersionError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrMediaVersionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrMediaVersionForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权管理该片源版本"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	}
 }
 

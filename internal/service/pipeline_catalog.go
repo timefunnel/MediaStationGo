@@ -96,6 +96,7 @@ type pipelineDeletedMediaRow struct {
 	LibraryRootID string
 	Path          string
 	DeletedAt     time.Time
+	DeletionKind  string
 	LibraryType   string
 	RootPath      string
 }
@@ -113,7 +114,7 @@ func (s *PipelineMaintenanceService) ListDeletedMediaHideCandidates(ctx context.
 	limit = pipelineBoundedLimit(limit, 100, 1000)
 	var rows []pipelineDeletedMediaRow
 	err := s.repos.DB.WithContext(ctx).Unscoped().Table("media AS m").
-		Select("m.id, m.library_id, m.library_root_id, m.path, m.deleted_at, l.type AS library_type, r.path AS root_path").
+		Select("m.id, m.library_id, m.library_root_id, m.path, m.deleted_at, m.deletion_kind, l.type AS library_type, r.path AS root_path").
 		Joins("LEFT JOIN libraries AS l ON l.id = m.library_id").
 		Joins("LEFT JOIN library_roots AS r ON r.id = m.library_root_id").
 		Where("m.deleted_at IS NOT NULL").
@@ -135,7 +136,7 @@ func (s *PipelineMaintenanceService) ListDeletedMediaHideCandidates(ctx context.
 		category := normalizePipelineCategory(row.LibraryType)
 		targetPath := mediaPath
 		targetKind := "file"
-		if category != "tv" && category != "anime" {
+		if !strings.EqualFold(strings.TrimSpace(row.DeletionKind), "version") && category != "tv" && category != "anime" {
 			var workErr error
 			targetPath, targetKind, workErr = pipelineMediaWorkItemPath(mediaPath, rootPath)
 			if workErr != nil {

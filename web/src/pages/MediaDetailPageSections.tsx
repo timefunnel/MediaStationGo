@@ -5,11 +5,12 @@ import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
 import { ManualScrapeDialog } from '../components/ManualScrapeDialog'
 import { MetadataEditDialog } from '../components/MetadataEditDialog'
 import { OrganizeMediaDialog } from '../components/OrganizeMediaDialog'
-import type { Media } from '../types'
+import type { Media, MediaVersion } from '../types'
 import { MediaDetailAdminPanel } from './MediaDetailAdminPanel'
 import { MediaDetailPoster } from './MediaDetailArtwork'
 import { MediaDetailMetadata } from './MediaDetailMetadata'
 import { mediaDetailScrapeMediaType } from './MediaDetailPageModel'
+import { MediaDetailVersions } from './MediaDetailVersions'
 
 interface MediaDetailPlaybackActionsProps {
   media: Media
@@ -30,6 +31,10 @@ interface MediaDetailMainContentProps extends MediaDetailPlaybackActionsProps {
   onProbe: () => void
   onExportNFO: () => void
   onSoftDelete: () => void
+  versions: MediaVersion[]
+  versionsLoading: boolean
+  versionDeletingID: string
+  onDeleteVersion: (version: MediaVersion) => void
 }
 
 interface MediaDetailDialogsProps {
@@ -151,6 +156,10 @@ export function MediaDetailMainContent({
   onProbe,
   onExportNFO,
   onSoftDelete,
+  versions,
+  versionsLoading,
+  versionDeletingID,
+  onDeleteVersion,
 }: MediaDetailMainContentProps) {
   return (
     <div className="relative z-10 p-6 sm:p-10 flex flex-col md:flex-row gap-8 lg:gap-12">
@@ -166,6 +175,12 @@ export function MediaDetailMainContent({
             onToggleFavourite={onToggleFavourite}
             onUpgrade={onUpgrade}
             upgradeOpening={upgradeOpening}
+          />
+          <MediaDetailVersions
+            versions={versions}
+            loading={versionsLoading}
+            deletingID={versionDeletingID}
+            onDelete={onDeleteVersion}
           />
           {isAdmin && (
             <MediaDetailAdminPanel

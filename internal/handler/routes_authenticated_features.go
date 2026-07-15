@@ -79,9 +79,9 @@ func registerAuthedSiteRoutes(authed *gin.RouterGroup, svc *service.Container) {
 }
 
 func registerAuthedRecycleAndRealtimeRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/recycle", middleware.AdminRequired(), listRecycleHandler(svc))
-	authed.POST("/recycle/restore", middleware.AdminRequired(), restoreMediaBatchHandler(svc))
-	authed.POST("/recycle/purge", middleware.AdminRequired(), purgeMediaBatchHandler(svc))
+	authed.GET("/recycle", listRecycleHandler(svc))
+	authed.POST("/recycle/restore", restoreMediaBatchHandler(svc))
+	authed.POST("/recycle/purge", purgeMediaBatchHandler(svc))
 
 	authed.GET("/ws", wsHandler(svc))
 	authed.GET("/events", sseHandler(svc))

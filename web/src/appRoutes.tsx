@@ -93,7 +93,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'duplicates', element: <DuplicatesPage />, adminOnly: true },
   { path: 'scheduler', element: <SchedulerPage />, adminOnly: true },
   { path: 'tasks', element: <TasksPage />, adminOnly: true },
-  { path: 'recycle', element: <RecycleBinPage />, adminOnly: true },
+  { path: 'recycle', element: <RecycleBinPage /> },
   { path: 'strm', element: <StrmPage />, adminOnly: true },
   { path: 'notify-channels', element: <NotifyChannelsPage />, adminOnly: true },
   { path: 'settings', element: <SettingsPage />, adminOnly: true },

@@ -1,11 +1,12 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
-import { libraryAPI } from '../api/library'
+import { libraryAPI, mediaAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
+import { confirmAction } from '../components/confirmAction'
 import { useAuthStore } from '../stores/auth'
-import type { Library } from '../types'
+import type { Library, MediaVersion } from '../types'
 import { MediaDetailBackdrop } from './MediaDetailArtwork'
 import {
   MediaDetailBackButton,
@@ -27,22 +28,49 @@ export function MediaDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [upgradeLibrary, setUpgradeLibrary] = useState<Library | null>(null)
   const [upgradeRootID, setUpgradeRootID] = useState('')
+  const [upgradeTargetID, setUpgradeTargetID] = useState('')
   const [upgradeTasks, setUpgradeTasks] = useState<ResourceImportTask[]>([])
   const [upgradeTaskID, setUpgradeTaskID] = useState('')
+  const [versions, setVersions] = useState<MediaVersion[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(true)
+  const [versionDeletingID, setVersionDeletingID] = useState('')
+
+  const loadVersions = useCallback(async () => {
+    if (!id) return
+    setVersionsLoading(true)
+    try {
+      const result = await mediaAPI.listVersions(id)
+      setVersions(result.items ?? [])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    loadVersions().catch((error: unknown) => {
+      setVersions([])
+      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || '片源版本加载失败')
+    })
+  }, [loadVersions])
 
   const openUpgrade = useCallback(async () => {
     if (!detail.media || upgradeOpening) return
     const currentMedia = detail.media
+    const currentVersion = versions.find((version) => version.id === currentMedia.id)
+    const manageableVersion = versions.find((version) => version.can_manage)
+    const upgradeTarget = role === 'admin' ? (currentVersion ?? currentMedia) : (manageableVersion ?? currentVersion ?? currentMedia)
     setUpgradeOpening(true)
     try {
-      const library = await libraryAPI.get(currentMedia.library_id)
+      const library = await libraryAPI.get(upgradeTarget.library_id)
       const enabledRoots = (library.roots ?? []).filter((root) => root.enabled)
-      const rootID = enabledRoots.some((root) => root.id === currentMedia.library_root_id)
-        ? currentMedia.library_root_id ?? ''
+      const rootID = enabledRoots.some((root) => root.id === upgradeTarget.library_root_id)
+        ? upgradeTarget.library_root_id ?? ''
         : enabledRoots.length === 1 ? enabledRoots[0].id : ''
       if (!rootID) throw new Error('当前作品缺少明确的媒体库目录，无法升级片源')
       setUpgradeLibrary(library)
       setUpgradeRootID(rootID)
+      setUpgradeTargetID(upgradeTarget.id)
       setUpgradeTaskID('')
       setUpgradeOpen(true)
     } catch (error) {
@@ -50,11 +78,45 @@ export function MediaDetailPage() {
     } finally {
       setUpgradeOpening(false)
     }
-  }, [detail.media, upgradeOpening])
+  }, [detail.media, role, upgradeOpening, versions])
 
   const acceptUpgradeTask = useCallback((task: ResourceImportTask) => {
     setUpgradeTasks((current) => mergeResourceImportTasks(current, [task]))
-  }, [])
+    if (
+      task.keep_old_version === false &&
+      task.media_id &&
+      (task.status === 'completed' || task.status === 'completed_with_warning')
+    ) {
+      setUpgradeOpen(false)
+      navigate(`/media/${task.media_id}`, { replace: true })
+    }
+  }, [navigate])
+
+  const deleteVersion = useCallback(async (version: MediaVersion) => {
+    if (!detail.media || versionDeletingID) return
+    const confirmed = await confirmAction({
+      title: '删除这个片源版本',
+      message: `将「${version.path}」移入回收站？其他版本不受影响，云盘文件会在回收站彻底删除时才移除。`,
+      confirmText: '移入回收站',
+    })
+    if (!confirmed) return
+    setVersionDeletingID(version.id)
+    try {
+      const result = await mediaAPI.deleteVersion(detail.media.id, version.id)
+      toast.success('该片源版本已移入回收站')
+      if (version.id === detail.media.id) {
+        if (result.next_media_id) navigate(`/media/${result.next_media_id}`, { replace: true })
+        else detail.goBack()
+        return
+      }
+      await loadVersions()
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || '删除片源版本失败')
+    } finally {
+      setVersionDeletingID('')
+    }
+  }, [detail, loadVersions, navigate, versionDeletingID])
 
   if (detail.loading) return <MediaDetailLoading />
   if (!detail.media) return <MediaDetailMissing />
@@ -82,6 +144,10 @@ export function MediaDetailPage() {
         onProbe={detail.reprobe}
         onExportNFO={detail.exportNFO}
         onSoftDelete={detail.softDelete}
+        versions={versions}
+        versionsLoading={versionsLoading}
+        versionDeletingID={versionDeletingID}
+        onDeleteVersion={(version) => void deleteVersion(version)}
       />
       <MediaDetailDialogs
         media={media}
@@ -99,9 +165,10 @@ export function MediaDetailPage() {
       {upgradeLibrary && (
         <ResourceSearchDrawer
           open={upgradeOpen}
-          initialQuery={media.display_title?.trim() || media.title}
-          upgradeMediaID={media.id}
+          initialQuery={versions.find((version) => version.id === upgradeTargetID)?.original_name?.trim() || media.original_name?.trim() || media.title}
+          upgradeMediaID={upgradeTargetID || media.id}
           fixedRootID={upgradeRootID}
+          canRemoveOldVersion={role === 'admin' || Boolean(versions.find((version) => version.id === upgradeTargetID)?.can_manage)}
           libraryID={upgradeLibrary.id}
           libraryName={upgradeLibrary.name}
           libraryRoots={upgradeLibrary.roots ?? []}

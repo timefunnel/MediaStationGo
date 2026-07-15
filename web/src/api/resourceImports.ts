@@ -32,9 +32,14 @@ export interface ResourceSearchResponse {
   page: number
   page_size: number
   total: number
+  unfiltered_total: number
   total_pages: number
   roots?: ResourceSearchRoot[]
   capabilities?: ResourceSearchCapabilities
+  facets?: {
+    sources?: string[]
+    resolutions?: string[]
+  }
   results: ResourceSearchCandidate[]
 }
 
@@ -50,6 +55,11 @@ export interface ResourceSearchRequest {
   page?: number
   page_size?: number
   root_id?: string
+  result_query?: string
+  source_filter?: string
+  resolution_filter?: string
+  subtitle_filter?: string
+  sort_by?: string
 }
 
 export interface ResourceImportTask {
@@ -71,6 +81,7 @@ export interface ResourceImportTask {
   error?: string
   media_id?: string
   upgrade_media_id?: string
+  keep_old_version?: boolean
   created_at?: string
   updated_at?: string
   finished_at?: string
@@ -115,6 +126,7 @@ export const resourceImportsAPI = {
       root_id: string
       force_duplicate?: boolean
       upgrade_media_id?: string
+      keep_old_version?: boolean
     },
   ) =>
     api

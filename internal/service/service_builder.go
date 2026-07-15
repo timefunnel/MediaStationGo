@@ -174,6 +174,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.PlayProfiles = NewPlayProfileService(b.log, b.repos)
 	b.c.Permissions = NewPermissionService(b.log, b.repos)
 	b.c.StorageCfg = NewStorageConfigService(b.log, b.repos, b.c.Crypto)
+	b.c.Media.SetCloudMediaDeleter(b.c.StorageCfg)
 	b.c.STRM = NewSTRMService(b.log, b.repos, b.cfg)
 	b.c.Scan.SetStorageConfig(b.c.StorageCfg)
 	b.c.Subtitle.SetStorageConfig(b.c.StorageCfg)

@@ -107,7 +107,9 @@ export function ResourceImportTaskView({
                 <span className="max-w-full truncate">目录：{task.root_name || task.root_id}</span>
               )}
               {task.source && <span>来源：{task.source}</span>}
-              {task.upgrade_media_id && <span>类型：升级片源</span>}
+              {task.upgrade_media_id && (
+                <span>类型：升级片源 · {task.keep_old_version === false ? '替换旧版本' : '保留旧版本'}</span>
+              )}
               <span>更新：{formatTaskTime(task.updated_at || task.created_at)}</span>
             </div>
           )}
@@ -186,6 +188,7 @@ function resourceImportStageLabel(stage: string): string {
     scanning: '扫描媒体库',
     scraping: '刮削元数据',
     matching_subtitle: '匹配字幕',
+    finalizing_upgrade: '处理旧版本',
     completed: '完成',
   }
   return labels[stage] || stage

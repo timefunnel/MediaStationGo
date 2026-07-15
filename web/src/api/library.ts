@@ -1,5 +1,5 @@
 import { api, BATCH_REQUEST_TIMEOUT, LONG_REQUEST_TIMEOUT } from './client'
-import type { Library, LibraryRoot, Media, ScanResult } from '../types'
+import type { Library, LibraryRoot, Media, MediaVersionList, ScanResult } from '../types'
 import type { SeriesCard } from '../utils/groupSeries'
 
 export interface MediaPage {
@@ -185,6 +185,13 @@ export const mediaAPI = {
       .then((r) => r.data),
 
   get: (id: string) => api.get<Media>(`/media/${id}`).then((r) => r.data),
+
+  listVersions: (id: string) => api.get<MediaVersionList>(`/media/${id}/versions`).then((r) => r.data),
+
+  deleteVersion: (id: string, versionID: string) =>
+    api
+      .delete<{ deleted_id: string; next_media_id?: string }>(`/media/${id}/versions/${versionID}`)
+      .then((r) => r.data),
 
   updateMetadata: (id: string, payload: MediaMetadataUpdate) =>
     api.patch<Media>(`/media/${id}/metadata`, payload, { timeout: LONG_REQUEST_TIMEOUT }).then((r) => r.data),

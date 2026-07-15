@@ -49,6 +49,16 @@ export interface Media {
   updated_at: string
 }
 
+export interface MediaVersion extends Media {
+  can_manage: boolean
+  is_current: boolean
+}
+
+export interface MediaVersionList {
+  items: MediaVersion[]
+  can_manage_versions: boolean
+}
+
 export interface Playlist {
   id: string
   user_id: string

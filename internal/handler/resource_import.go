@@ -222,6 +222,10 @@ func selectResourceImportRoot(library model.Library, rootID string) (model.Libra
 }
 
 func writeResourceImportError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrMediaVersionForbidden) {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": err.Error()}})
+		return
+	}
 	var search *service.ResourceSearchError
 	if errors.As(err, &search) {
 		status := search.HTTPStatus()

@@ -88,6 +88,22 @@ func (s *StorageConfigService) CloudMove(ctx context.Context, typ, ref, targetDi
 	return movable.Move(ctx, ref, targetDir, name)
 }
 
+func (s *StorageConfigService) DeleteCloudFile(ctx context.Context, typ, ref string) error {
+	p, err := s.CloudProvider(ctx, typ)
+	if err != nil {
+		return err
+	}
+	deletable, ok := p.(cloud.DeletableProvider)
+	if !ok {
+		return fmt.Errorf("%s does not support file deletion", typ)
+	}
+	if err := deletable.Delete(ctx, ref); err != nil {
+		return err
+	}
+	s.clearResolveCacheForType(typ)
+	return nil
+}
+
 // cloudLibraryName maps a provider type to a friendly Chinese library name.
 func cloudLibraryName(typ string) string {
 	switch typ {

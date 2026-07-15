@@ -85,6 +85,12 @@ type Media struct {
 	IsDuplicate bool   `gorm:"default:false" json:"is_duplicate"`
 	DuplicateOf string `gorm:"size:128" json:"duplicate_of,omitempty"`
 
+	// DeletionKind records whether the recycle-bin row represents an entire
+	// media entry or one precise source version. DeletedByUserID is retained for
+	// audit only; both fields stay out of normal media responses.
+	DeletionKind    string `gorm:"index;size:32" json:"-"`
+	DeletedByUserID string `gorm:"index;size:36" json:"-"`
+
 	PreserveSourceTitle bool `gorm:"-" json:"-"`
 }
 

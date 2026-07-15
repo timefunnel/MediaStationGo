@@ -8,6 +8,8 @@ import {
   Download,
   Globe,
   LoaderCircle,
+  RotateCcw,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 
@@ -44,6 +46,7 @@ type ResourceSearchDrawerProps = {
   initialQuery?: string
   upgradeMediaID?: string
   fixedRootID?: string
+  canRemoveOldVersion?: boolean
   libraryID: string
   libraryName: string
   libraryRoots: LibraryRoot[]
@@ -56,12 +59,29 @@ type ResourceSearchDrawerProps = {
 
 type SearchSource = '' | 'pansou'
 
+type ResourceViewFilters = {
+  resultQuery: string
+  source: string
+  resolution: string
+  subtitle: string
+  sortBy: string
+}
+
+const emptyResourceFilters = (): ResourceViewFilters => ({
+  resultQuery: '',
+  source: '',
+  resolution: '',
+  subtitle: '',
+  sortBy: 'relevance',
+})
+
 export function ResourceSearchDrawer({
   open,
   embedded = false,
   initialQuery,
   upgradeMediaID,
   fixedRootID,
+  canRemoveOldVersion = false,
   libraryID,
   libraryName,
   libraryRoots,
@@ -79,6 +99,10 @@ export function ResourceSearchDrawer({
   const [selectedRootID, setSelectedRootID] = useState('')
   const [jumpPage, setJumpPage] = useState('1')
   const [searching, setSearching] = useState(false)
+  const [filtering, setFiltering] = useState(false)
+  const [keepOldVersion, setKeepOldVersion] = useState(true)
+  const [filters, setFilters] = useState<ResourceViewFilters>(emptyResourceFilters)
+  const [appliedFilters, setAppliedFilters] = useState<ResourceViewFilters>(emptyResourceFilters)
   const [importingIndex, setImportingIndex] = useState<number | null>(null)
   const [searchError, setSearchError] = useState('')
   const [taskError, setTaskError] = useState('')
@@ -106,6 +130,7 @@ export function ResourceSearchDrawer({
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
   const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
   const upgrading = Boolean(upgradeMediaID?.trim())
+  const hasAppliedFilters = resourceFiltersActive(appliedFilters)
 
   useEffect(() => {
     const nextQuery = initialQuery?.trim()
@@ -116,7 +141,13 @@ export function ResourceSearchDrawer({
     setSearchError('')
     setSource('')
     setJumpPage('1')
+    setFilters(emptyResourceFilters())
+    setAppliedFilters(emptyResourceFilters())
   }, [initialQuery, open])
+
+  useEffect(() => {
+    setKeepOldVersion(true)
+  }, [upgradeMediaID])
 
   useEffect(() => {
     setSelectedRootID((current) => {
@@ -176,7 +207,12 @@ export function ResourceSearchDrawer({
 
   if (!open) return null
 
-  const runSearch = async (page: number, nextSource: SearchSource = source) => {
+  const runSearch = async (
+    page: number,
+    nextSource: SearchSource = source,
+    nextFilters: ResourceViewFilters = appliedFilters,
+    cachedView = false,
+  ) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery) {
       setSearchError('请输入要查找的影片或剧集名称')
@@ -193,10 +229,11 @@ export function ResourceSearchDrawer({
       return
     }
     setSource(nextSource)
-    setSearching(true)
+    if (cachedView) setFiltering(true)
+    else setSearching(true)
     setSearchError('')
     setSearchFailure(null)
-    setResponse(null)
+    if (!cachedView) setResponse(null)
     setDuplicateConflict(null)
     try {
       const next = await resourceImportsAPI.search(libraryID, {
@@ -205,11 +242,17 @@ export function ResourceSearchDrawer({
         page,
         page_size: RESOURCE_SEARCH_PAGE_SIZE,
         root_id: effectiveRootID || undefined,
+        result_query: nextFilters.resultQuery.trim() || undefined,
+        source_filter: nextFilters.source || undefined,
+        resolution_filter: nextFilters.resolution || undefined,
+        subtitle_filter: nextFilters.subtitle || undefined,
+        sort_by: nextFilters.sortBy === 'relevance' ? undefined : nextFilters.sortBy,
       })
       if (!next.session_id || !Array.isArray(next.results)) {
         throw new Error('资源搜索响应缺少会话或结果列表')
       }
       setResponse(next)
+      setAppliedFilters({ ...nextFilters })
       setCapabilities(next.capabilities)
       setJumpPage(String(clampResourcePage(next.page, cappedResourceTotalPages(next.total, next.page_size, next.total_pages))))
     } catch (requestError) {
@@ -221,13 +264,34 @@ export function ResourceSearchDrawer({
         setSearchError(resourceImportError(requestError, '资源搜索失败'))
       }
     } finally {
-      setSearching(false)
+      if (cachedView) setFiltering(false)
+      else setSearching(false)
     }
   }
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault()
-    void runSearch(1)
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    void runSearch(1, source, cleared)
+  }
+
+  const submitFilters = (event: FormEvent) => {
+    event.preventDefault()
+    void runSearch(1, source, filters, true)
+  }
+
+  const resetFilters = () => {
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    void runSearch(1, source, cleared, true)
+  }
+
+  const searchPansou = () => {
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    setAppliedFilters(cleared)
+    void runSearch(1, 'pansou', cleared)
   }
 
   const selectSource = (nextSource: SearchSource) => {
@@ -238,6 +302,8 @@ export function ResourceSearchDrawer({
     setSearchError('')
     setDuplicateConflict(null)
     setJumpPage('1')
+    setFilters(emptyResourceFilters())
+    setAppliedFilters(emptyResourceFilters())
   }
 
   const importCandidate = async (candidate: ResourceSearchCandidate, forceDuplicate = false) => {
@@ -257,6 +323,7 @@ export function ResourceSearchDrawer({
         root_id: importRootID,
         force_duplicate: forceDuplicate || undefined,
         upgrade_media_id: upgradeMediaID?.trim() || undefined,
+        keep_old_version: upgrading ? keepOldVersion : undefined,
       })
       setLocalTask(task)
       onTaskChanged(task)
@@ -439,6 +506,17 @@ export function ResourceSearchDrawer({
                 </div>
               )}
 
+              {upgrading && canRemoveOldVersion && (
+                <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-ink-100">
+                  <input
+                    type="checkbox"
+                    checked={keepOldVersion}
+                    onChange={(event) => setKeepOldVersion(event.target.checked)}
+                  />
+                  <span>保留旧版本</span>
+                </label>
+              )}
+
               {searchError && <InlineError message={searchError} className="mt-3" />}
             </form>
 
@@ -454,6 +532,18 @@ export function ResourceSearchDrawer({
             )}
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
+              {response && !searching && (
+                <ResourceSearchFilters
+                  filters={filters}
+                  sources={response.facets?.sources ?? []}
+                  resolutions={response.facets?.resolutions ?? []}
+                  busy={filtering}
+                  onChange={setFilters}
+                  onSubmit={submitFilters}
+                  onReset={resetFilters}
+                />
+              )}
+
               {!response && !searching && !searchFailure && (
                 <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
                   <Globe className="mb-3 h-9 w-9" />
@@ -475,7 +565,7 @@ export function ResourceSearchDrawer({
                   failed
                   source={source}
                   pansouAvailable={pansouAvailable}
-                  onSearchPansou={() => void runSearch(1, 'pansou')}
+                  onSearchPansou={searchPansou}
                 />
               )}
 
@@ -485,12 +575,18 @@ export function ResourceSearchDrawer({
                     <ResourceSearchEmptyState
                       source={source}
                       pansouAvailable={pansouAvailable}
-                      onSearchPansou={() => void runSearch(1, 'pansou')}
+                      filtered={hasAppliedFilters}
+                      onResetFilters={resetFilters}
+                      onSearchPansou={searchPansou}
                     />
                   ) : (
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 py-3 text-xs text-sand-500">
-                        <span>共 {total} 条{response.total > total ? '，仅展示前 100 条' : ''}</span>
+                        <span>
+                          {response.unfiltered_total > response.total
+                            ? `筛选后 ${total} / ${response.unfiltered_total} 条`
+                            : `共 ${total} 条`}
+                        </span>
                         <span>第 {currentPage} / {totalPages} 页</span>
                       </div>
                       <div>
@@ -516,9 +612,9 @@ export function ResourceSearchDrawer({
                 page={currentPage}
                 totalPages={totalPages}
                 jumpPage={jumpPage}
-                disabled={searching}
+                disabled={searching || filtering}
                 onJumpPageChange={setJumpPage}
-                onPageChange={(page) => void runSearch(clampResourcePage(page, totalPages))}
+                onPageChange={(page) => void runSearch(clampResourcePage(page, totalPages), source, appliedFilters, true)}
               />
             )}
           </>
@@ -579,6 +675,103 @@ function SearchSourceControl({
   )
 }
 
+function ResourceSearchFilters({
+  filters,
+  sources,
+  resolutions,
+  busy,
+  onChange,
+  onSubmit,
+  onReset,
+}: {
+  filters: ResourceViewFilters
+  sources: string[]
+  resolutions: string[]
+  busy: boolean
+  onChange: (filters: ResourceViewFilters) => void
+  onSubmit: (event: FormEvent) => void
+  onReset: () => void
+}) {
+  return (
+    <form className="border-b border-gray-200 py-3" onSubmit={onSubmit}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-100">
+          <SlidersHorizontal size={14} />
+          筛选与排序
+        </span>
+        <button
+          type="button"
+          className="rounded-md p-1.5 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
+          title="重置筛选"
+          aria-label="重置筛选"
+          disabled={busy}
+          onClick={onReset}
+        >
+          <RotateCcw size={15} />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <input
+          className="input-field col-span-2 h-10 py-2 text-base sm:text-sm"
+          value={filters.resultQuery}
+          placeholder="筛选当前结果"
+          maxLength={200}
+          disabled={busy}
+          onChange={(event) => onChange({ ...filters, resultQuery: event.target.value })}
+        />
+        <select
+          className="input-field h-10 py-2 text-base sm:text-sm"
+          value={filters.source}
+          disabled={busy}
+          aria-label="来源筛选"
+          onChange={(event) => onChange({ ...filters, source: event.target.value })}
+        >
+          <option value="">全部来源</option>
+          {sources.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <select
+          className="input-field h-10 py-2 text-base sm:text-sm"
+          value={filters.resolution}
+          disabled={busy}
+          aria-label="清晰度筛选"
+          onChange={(event) => onChange({ ...filters, resolution: event.target.value })}
+        >
+          <option value="">全部清晰度</option>
+          {resolutions.map((value) => <option key={value} value={value}>{resourceResolutionLabel(value)}</option>)}
+        </select>
+        <select
+          className="input-field h-10 py-2 text-base sm:text-sm"
+          value={filters.subtitle}
+          disabled={busy}
+          aria-label="字幕筛选"
+          onChange={(event) => onChange({ ...filters, subtitle: event.target.value })}
+        >
+          <option value="">全部字幕</option>
+          <option value="chinese">中文字幕</option>
+          <option value="with_subtitle">有字幕标注</option>
+        </select>
+        <select
+          className="input-field h-10 py-2 text-base sm:text-sm"
+          value={filters.sortBy}
+          disabled={busy}
+          aria-label="结果排序"
+          onChange={(event) => onChange({ ...filters, sortBy: event.target.value })}
+        >
+          <option value="relevance">综合排序</option>
+          <option value="resolution_desc">清晰度优先</option>
+          <option value="seeders_desc">做种数优先</option>
+          <option value="size_desc">体积从大到小</option>
+          <option value="size_asc">体积从小到大</option>
+        </select>
+      </div>
+      <button type="submit" className="btn-outline mt-2 h-9 px-3" disabled={busy}>
+        {busy ? <LoaderCircle size={15} className="animate-spin" /> : <SlidersHorizontal size={15} />}
+        应用
+      </button>
+    </form>
+  )
+}
+
 function SourceButton({
   active,
   disabled,
@@ -609,11 +802,15 @@ function ResourceSearchEmptyState({
   failed = false,
   source,
   pansouAvailable,
+  filtered = false,
+  onResetFilters,
   onSearchPansou,
 }: {
   failed?: boolean
   source: SearchSource
   pansouAvailable: boolean
+  filtered?: boolean
+  onResetFilters?: () => void
   onSearchPansou: () => void
 }) {
   const canSearchPansou = pansouAvailable && source !== 'pansou'
@@ -623,12 +820,17 @@ function ResourceSearchEmptyState({
         <Globe size={21} />
       </span>
       <h3 className="text-sm font-semibold text-ink-600">
-        {failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
+        {filtered ? '当前筛选没有结果' : failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
       </h3>
       <p className="mt-1 max-w-sm text-xs leading-5 text-sand-500">
-        {canSearchPansou ? '可以改用网盘搜索继续查找。' : '可以调整关键词后重新查找。'}
+        {filtered ? '可以重置筛选条件后继续查看。' : canSearchPansou ? '可以改用网盘搜索继续查找。' : '可以调整关键词后重新查找。'}
       </p>
-      {canSearchPansou && (
+      {filtered && onResetFilters ? (
+        <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onResetFilters}>
+          <RotateCcw size={16} />
+          重置筛选
+        </button>
+      ) : canSearchPansou && (
         <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onSearchPansou}>
           <Globe size={16} />
           网盘查找
@@ -689,6 +891,23 @@ function ResourceCandidateRow({
 
 function resourceSourceLabel(source: string): string {
   return source.trim().toLowerCase() === 'pansou' ? '网盘' : source
+}
+
+function resourceResolutionLabel(value: string): string {
+  if (value === '2160p') return '4K / 2160p'
+  if (value === '1080p') return '1080p'
+  if (value === '720p') return '720p'
+  return '其他'
+}
+
+function resourceFiltersActive(filters: ResourceViewFilters): boolean {
+  return Boolean(
+    filters.resultQuery.trim()
+    || filters.source
+    || filters.resolution
+    || filters.subtitle
+    || (filters.sortBy && filters.sortBy !== 'relevance'),
+  )
 }
 
 function ResourceSearchPagination({

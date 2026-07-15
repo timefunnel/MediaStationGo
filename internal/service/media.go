@@ -2,6 +2,9 @@
 package service
 
 import (
+	"context"
+	"sync"
+
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
@@ -11,10 +14,16 @@ import (
 
 // MediaService offers high-level CRUD over libraries and media items.
 type MediaService struct {
-	cfg   *config.Config
-	log   *zap.Logger
-	repo  *repository.Container
-	cache *RuntimeCacheService
+	cfg          *config.Config
+	log          *zap.Logger
+	repo         *repository.Container
+	cache        *RuntimeCacheService
+	cloudDeleter CloudMediaDeleter
+	purgeMu      sync.Mutex
+}
+
+type CloudMediaDeleter interface {
+	DeleteCloudFile(ctx context.Context, provider, ref string) error
 }
 
 type MediaVisibility struct {
@@ -57,6 +66,13 @@ func NewMediaService(cfg *config.Config, log *zap.Logger, repo *repository.Conta
 func (s *MediaService) SetRuntimeCache(cache *RuntimeCacheService) *MediaService {
 	if s != nil {
 		s.cache = cache
+	}
+	return s
+}
+
+func (s *MediaService) SetCloudMediaDeleter(deleter CloudMediaDeleter) *MediaService {
+	if s != nil {
+		s.cloudDeleter = deleter
 	}
 	return s
 }

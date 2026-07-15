@@ -371,6 +371,10 @@ func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
 		pipeline.mu.Unlock()
 		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
 	}
+	if !pipeline.createRequests[0].KeepOldVersion {
+		pipeline.mu.Unlock()
+		t.Fatal("default upgrade should keep the old version")
+	}
 	pipeline.mu.Unlock()
 	var job model.ResourceImportJob
 	if err := repos.DB.First(&job, "id = ?", task.ID).Error; err != nil {
@@ -378,6 +382,63 @@ func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
 	}
 	if job.UpgradeMediaID != target.ID {
 		t.Fatalf("persisted upgrade_media_id = %q, want %q", job.UpgradeMediaID, target.ID)
+	}
+	if !job.KeepOldVersion {
+		t.Fatal("persisted upgrade should keep the old version by default")
+	}
+}
+
+func TestResourceImportOwnerCanReplaceOwnVersionButOtherUserCannot(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	target := model.Media{
+		LibraryID: library.ID, LibraryRootID: root.ID,
+		Title: "Sintel", Path: "cloud://openlist/115/电影/Sintel/Sintel.mkv",
+	}
+	if err := repos.DB.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	ownerJob := model.ResourceImportJob{
+		UserID: user.ID, LibraryID: library.ID, LibraryRootID: root.ID,
+		SearchSessionID: "owner-session", CandidateJSON: "{}", CandidateTitle: "Sintel",
+		IdempotencyKey: "owner-job", Status: ResourceImportStatusCompleted, Stage: "completed",
+		PipelineJobID: "owner-pipeline", MediaID: target.ID, Attempt: 1,
+	}
+	if err := repos.DB.Create(&ownerJob).Error; err != nil {
+		t.Fatal(err)
+	}
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Sintel 4K", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keepOld := false
+	if _, err := svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID,
+		UpgradeMediaID: target.ID, KeepOldVersion: &keepOld,
+	}); err != nil {
+		t.Fatalf("owner replace: %v", err)
+	}
+	pipeline.mu.Lock()
+	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].KeepOldVersion {
+		pipeline.mu.Unlock()
+		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
+	}
+	pipeline.mu.Unlock()
+
+	other := model.User{Username: "user-b", PasswordHash: "x", Role: "user", IsActive: true}
+	if err := repos.DB.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherSearch, err := svc.Search(t.Context(), other.ID, library, root, ResourceSearchInput{Query: "Sintel 8K", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Create(t.Context(), other.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: otherSearch.SessionID, CandidateIndex: 0, RootID: root.ID,
+		UpgradeMediaID: target.ID, KeepOldVersion: &keepOld,
+	})
+	if !errors.Is(err, ErrMediaVersionForbidden) {
+		t.Fatalf("non-owner replace err = %v", err)
 	}
 }
 

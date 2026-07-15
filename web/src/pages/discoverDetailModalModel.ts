@@ -5,6 +5,10 @@ export function discoverSubscriptionKeyword(item: DiscoverItem): string {
   return item.subscribe_keyword || buildSubscribeKeyword(item)
 }
 
+export function discoverResourceSearchKeyword(item: DiscoverItem): string {
+  return item.original_name?.trim() || item.title.trim()
+}
+
 export function discoverItemMetaText(item: DiscoverItem): string {
   return [
     item.media_type,

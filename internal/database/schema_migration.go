@@ -8,8 +8,17 @@ import (
 
 // AutoMigrate creates tables for every model registered in the model package.
 func AutoMigrate(db *gorm.DB) error {
+	resourceImportTableExisted := db.Migrator().HasTable(&model.ResourceImportJob{})
+	hadKeepOldVersion := resourceImportTableExisted && db.Migrator().HasColumn(&model.ResourceImportJob{}, "keep_old_version")
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		return err
+	}
+	if resourceImportTableExisted && !hadKeepOldVersion {
+		if err := db.Model(&model.ResourceImportJob{}).
+			Where("upgrade_media_id <> ''").
+			Update("keep_old_version", true).Error; err != nil {
+			return err
+		}
 	}
 	if err := ensurePostgresColumnCompatibility(db); err != nil {
 		return err

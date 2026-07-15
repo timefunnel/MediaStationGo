@@ -92,6 +92,13 @@ type MovableProvider interface {
 	Move(ctx context.Context, ref, targetDir, name string) (*FileEntry, error)
 }
 
+// DeletableProvider permanently removes one provider entry. Callers must pass
+// the exact file reference; implementations must reject the provider root.
+type DeletableProvider interface {
+	Provider
+	Delete(ctx context.Context, ref string) error
+}
+
 // New constructs a provider of the given type from a free-form config map
 // (as persisted by StorageConfigService). The client is shared so callers can
 // inject timeouts / test transports.

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,18 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
+
+type fakeCloudMediaDeleter struct {
+	provider string
+	ref      string
+	err      error
+}
+
+func (f *fakeCloudMediaDeleter) DeleteCloudFile(_ context.Context, provider, ref string) error {
+	f.provider = provider
+	f.ref = ref
+	return f.err
+}
 
 func TestListRecycleBinPrunesOldRowsOverLimit(t *testing.T) {
 	db := newServiceTestDB(t, &model.Media{})
@@ -127,5 +141,95 @@ func TestSoftDeleteInvalidatesMediaAndStatsCache(t *testing.T) {
 	var statsCache map[string]int
 	if cache.GetJSON(t.Context(), "stats:snapshot:base", &statsCache) {
 		t.Fatal("soft delete should invalidate stats cache")
+	}
+}
+
+func TestPurgeDeletedCloudMediaDeletesProviderFileBeforeDatabaseRow(t *testing.T) {
+	db := newServiceTestDB(t, &model.Media{})
+	repos := repository.New(db)
+	media := model.Media{
+		Base:  model.Base{ID: "cloud-media", DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}},
+		Title: "Sintel", Path: "cloud://openlist/115/电影/Sintel/Sintel.mkv",
+	}
+	if err := db.Unscoped().Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleter := &fakeCloudMediaDeleter{}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos).SetCloudMediaDeleter(deleter)
+	if err := svc.PurgeDeleted(t.Context(), media.ID); err != nil {
+		t.Fatal(err)
+	}
+	if deleter.provider != "openlist" || deleter.ref != "115/电影/Sintel/Sintel.mkv" {
+		t.Fatalf("cloud delete = provider %q ref %q", deleter.provider, deleter.ref)
+	}
+	var count int64
+	if err := db.Unscoped().Model(&model.Media{}).Where("id = ?", media.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("database row should be purged after cloud delete succeeds")
+	}
+}
+
+func TestPurgeDeletedCloudMediaKeepsTombstoneWhenProviderDeleteFails(t *testing.T) {
+	db := newServiceTestDB(t, &model.Media{})
+	repos := repository.New(db)
+	media := model.Media{
+		Base:  model.Base{ID: "cloud-media", DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}},
+		Title: "Sintel", Path: "cloud://openlist/115/电影/Sintel/Sintel.mkv",
+	}
+	if err := db.Unscoped().Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleter := &fakeCloudMediaDeleter{err: errors.New("upstream rejected delete")}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos).SetCloudMediaDeleter(deleter)
+	if err := svc.PurgeDeleted(t.Context(), media.ID); err == nil {
+		t.Fatal("purge should fail when cloud delete fails")
+	}
+	var count int64
+	if err := db.Unscoped().Model(&model.Media{}).Where("id = ? AND deleted_at IS NOT NULL", media.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("cloud tombstone must remain when provider delete fails")
+	}
+}
+
+func TestRecycleBinForUserOnlyListsOwnedImports(t *testing.T) {
+	db := newServiceTestDB(t, &model.User{}, &model.Media{}, &model.ResourceImportJob{})
+	repos := repository.New(db)
+	user := model.User{Username: "owner", PasswordHash: "x", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	owned := model.Media{Base: model.Base{DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}}, Title: "Owned", Path: "cloud://openlist/Movies/Owned.mkv", DeletionKind: "version"}
+	other := model.Media{Base: model.Base{DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}}, Title: "Other", Path: "cloud://openlist/Movies/Other.mkv", DeletionKind: "version"}
+	if err := db.Unscoped().Create(&owned).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Unscoped().Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	job := model.ResourceImportJob{
+		UserID: user.ID, SearchSessionID: "session", CandidateJSON: "{}", CandidateTitle: "Owned",
+		IdempotencyKey: "owned-recycle", Status: ResourceImportStatusCompleted, Stage: "completed", MediaID: owned.ID, Attempt: 1,
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	items, err := NewMediaService(&config.Config{}, zap.NewNop(), repos).
+		ListRecycleBinForUser(t.Context(), user.ID, false, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != owned.ID || items[0].DeletionKind != "version" || !items[0].CanManage {
+		t.Fatalf("user recycle items = %+v", items)
+	}
+}
+
+func TestCloudMediaFileTargetRejectsDirectoryLikePath(t *testing.T) {
+	_, _, isCloud, err := cloudMediaFileTarget("cloud://openlist/115/电影/Sintel")
+	if !isCloud || err == nil {
+		t.Fatalf("directory-like cloud path should be rejected: is_cloud=%v err=%v", isCloud, err)
 	}
 }

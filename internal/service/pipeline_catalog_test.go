@@ -45,12 +45,13 @@ func TestPipelineMaintenanceListsDeletedMediaHideCandidates(t *testing.T) {
 	rows := []model.Media{
 		{LibraryID: movieLib.ID, LibraryRootID: movieRoot.ID, Title: "Movie", Path: "cloud://openlist/115/movie/Movie/Movie.mkv"},
 		{LibraryID: animeLib.ID, LibraryRootID: animeRoot.ID, Title: "Episode", Path: "cloud://openlist/115/anime/Show/S01E01.mkv"},
+		{LibraryID: movieLib.ID, LibraryRootID: movieRoot.ID, Title: "Movie 4K", Path: "cloud://openlist/115/movie/Movie/Movie.2160p.mkv", DeletionKind: "version"},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := db.Model(&model.Media{}).Where("id IN ?", []string{rows[0].ID, rows[1].ID}).Update("deleted_at", now).Error; err != nil {
+	if err := db.Model(&model.Media{}).Where("id IN ?", []string{rows[0].ID, rows[1].ID, rows[2].ID}).Update("deleted_at", now).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,7 +59,7 @@ func TestPipelineMaintenanceListsDeletedMediaHideCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Items) != 2 {
+	if len(result.Items) != 3 {
 		t.Fatalf("items=%#v", result.Items)
 	}
 	byID := make(map[string]PipelineDeletedMediaHideCandidate, len(result.Items))
@@ -70,6 +71,9 @@ func TestPipelineMaintenanceListsDeletedMediaHideCandidates(t *testing.T) {
 	}
 	if item := byID[rows[1].ID]; item.TargetOpenListPath != "/115/anime/Show/S01E01.mkv" || item.HidePath != "/115/anime/Show" || item.HidePattern != `^S01E01\.mkv$` {
 		t.Fatalf("anime candidate=%#v", item)
+	}
+	if item := byID[rows[2].ID]; item.TargetOpenListPath != "/115/movie/Movie/Movie.2160p.mkv" || item.HidePath != "/115/movie/Movie" || item.HidePattern != `^Movie\.2160p\.mkv$` {
+		t.Fatalf("version candidate=%#v", item)
 	}
 }
 

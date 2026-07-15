@@ -1,8 +1,14 @@
 import { api } from './client'
 import type { Media } from '../types'
 
+export interface RecycleBinItem extends Media {
+  deleted_at: string
+  deletion_kind: 'media' | 'version'
+  can_manage: boolean
+}
+
 export const recycleAPI = {
-  list: () => api.get<{ items: Media[] }>('/recycle').then((r) => r.data.items),
+  list: () => api.get<{ items: RecycleBinItem[] }>('/recycle').then((r) => r.data.items),
 
   softDelete: (id: string) => api.delete(`/media/${id}`).then((r) => r.data),
 

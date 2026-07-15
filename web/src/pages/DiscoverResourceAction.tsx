@@ -5,7 +5,7 @@ import type { DiscoverItem } from '../api/discover'
 import { libraryAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
 import type { Library } from '../types'
-import { discoverSubscriptionKeyword } from './discoverDetailModalModel'
+import { discoverResourceSearchKeyword } from './discoverDetailModalModel'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { mergeResourceImportTasks } from './resourceImportModel'
 
@@ -86,7 +86,7 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
               key={selectedLibrary.id}
               embedded
               open
-              initialQuery={discoverSubscriptionKeyword(item)}
+              initialQuery={discoverResourceSearchKeyword(item)}
               libraryID={selectedLibrary.id}
               libraryName={selectedLibrary.name}
               libraryRoots={selectedLibrary.roots ?? []}

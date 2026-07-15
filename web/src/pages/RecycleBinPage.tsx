@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Home, RotateCcw, Square, CheckSquare, Trash2 } from 'lucide-react'
 
-import { recycleAPI } from '../api/recycle'
+import { recycleAPI, type RecycleBinItem } from '../api/recycle'
 import { confirmAction } from '../components/confirmAction'
-import type { Media } from '../types'
+import { formatSize } from './libraryPageModel'
 
 export function RecycleBinPage() {
-  const [items, setItems] = useState<Media[]>([])
+  const [items, setItems] = useState<RecycleBinItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [batchBusy, setBatchBusy] = useState('')
@@ -37,7 +37,7 @@ export function RecycleBinPage() {
     if (selectedIds.length === 0) return
     if (mode === 'purge' && !(await confirmAction({
       title: '批量彻底删除记录',
-      message: `彻底删除选中的 ${selectedIds.length} 条记录? (磁盘文件保留)`,
+      message: `彻底删除选中的 ${selectedIds.length} 条记录？云盘媒体会同步删除对应源文件，本地磁盘文件仍保留。`,
       confirmText: '彻底删除',
     }))) return
     setBatchBusy(mode)
@@ -82,9 +82,9 @@ export function RecycleBinPage() {
         <div>
           <h1 className="font-display text-3xl font-bold text-ink-600">回收站</h1>
           <p className="mt-2 text-sm text-ink-50">
-            软删除的媒体保留在数据库中,可以恢复。彻底删除不会移除磁盘上的文件,只会从数据库清除条目。
+            软删除的媒体可以恢复。彻底删除云盘媒体时会同步删除对应源文件；本地磁盘文件仍保留。
           </p>
-          <p className="mt-1 text-xs text-sand-500">系统最多保留最新 200 条回收站记录，超过后会自动清理旧记录。</p>
+          <p className="mt-1 text-xs text-sand-500">本地媒体最多展示最新 200 条；云盘记录会保留到手动恢复或彻底删除。</p>
         </div>
         <Link to="/" className="btn-outline shrink-0 py-2.5 px-4 text-sm">
           <Home size={15} />
@@ -129,7 +129,7 @@ export function RecycleBinPage() {
                   </button>
                 </th>
                 <th className="py-2">标题</th>
-                <th>路径</th>
+                <th>版本与路径</th>
                 <th className="text-right">操作</th>
               </tr>
             </thead>
@@ -141,12 +141,21 @@ export function RecycleBinPage() {
                       {selectedIds.includes(m.id) ? <CheckSquare size={16} /> : <Square size={16} />}
                     </button>
                   </td>
-                  <td className="py-2 text-ink-600">{m.title}</td>
-                  <td className="max-w-md truncate text-ink-50" title={m.path}>
-                    {m.path}
+                  <td className="py-2 text-ink-600">
+                    <div>{m.title}</div>
+                    <div className="mt-0.5 text-xs text-sand-500">
+                      {m.deletion_kind === 'version' ? '片源版本' : '媒体记录'} · {new Date(m.deleted_at).toLocaleString()}
+                    </div>
+                  </td>
+                  <td className="max-w-md text-ink-50">
+                    <div>{[m.width && m.height ? `${m.width}x${m.height}` : '', m.container?.toUpperCase(), m.size_bytes ? formatSize(m.size_bytes) : ''].filter(Boolean).join(' · ') || '未探测版本'}</div>
+                    <div className="truncate text-xs text-sand-500" title={m.path}>{m.path}</div>
                   </td>
                   <td className="space-x-2 py-2 text-right">
                     <button
+                      type="button"
+                      title="恢复这条记录"
+                      aria-label={`恢复 ${m.title}`}
                       className="rounded-lg border border-primary-400/40 px-2 py-1 text-xs text-brand-500 hover:bg-primary-400/10"
                       onClick={async () => {
                         await recycleAPI.restore(m.id)
@@ -157,9 +166,12 @@ export function RecycleBinPage() {
                       <RotateCcw size={12} />
                     </button>
                     <button
+                      type="button"
+                      title="彻底删除这条记录"
+                      aria-label={`彻底删除 ${m.title}`}
                       className="rounded-lg border border-red-400/40 px-2 py-1 text-xs text-red-400 hover:bg-red-400/10"
                       onClick={async () => {
-                        if (!(await confirmAction({ title: '彻底删除记录', message: `彻底删除「${m.title}」? (磁盘文件保留)`, confirmText: '彻底删除' }))) return
+                        if (!(await confirmAction({ title: '彻底删除记录', message: `彻底删除「${m.title}」？云盘媒体会同步删除对应源文件，本地磁盘文件仍保留。`, confirmText: '彻底删除' }))) return
                         await recycleAPI.purge(m.id)
                         toast.success('已彻底删除')
                         await refresh()

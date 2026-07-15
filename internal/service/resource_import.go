@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,11 +54,16 @@ type ResourceImportService struct {
 }
 
 type ResourceSearchInput struct {
-	Query    string `json:"query"`
-	Source   string `json:"source,omitempty"`
-	Page     int    `json:"page,omitempty"`
-	PageSize int    `json:"page_size,omitempty"`
-	RootID   string `json:"root_id,omitempty"`
+	Query            string `json:"query"`
+	Source           string `json:"source,omitempty"`
+	Page             int    `json:"page,omitempty"`
+	PageSize         int    `json:"page_size,omitempty"`
+	RootID           string `json:"root_id,omitempty"`
+	ResultQuery      string `json:"result_query,omitempty"`
+	SourceFilter     string `json:"source_filter,omitempty"`
+	ResolutionFilter string `json:"resolution_filter,omitempty"`
+	SubtitleFilter   string `json:"subtitle_filter,omitempty"`
+	SortBy           string `json:"sort_by,omitempty"`
 }
 
 type ResourceSearchCapabilities struct {
@@ -89,15 +95,22 @@ type ResourceSearchRoot struct {
 }
 
 type ResourceSearchResponse struct {
-	SessionID    string                     `json:"session_id"`
-	Query        string                     `json:"query"`
-	Page         int                        `json:"page"`
-	PageSize     int                        `json:"page_size"`
-	Total        int                        `json:"total"`
-	TotalPages   int                        `json:"total_pages"`
-	Roots        []ResourceSearchRoot       `json:"roots,omitempty"`
-	Capabilities ResourceSearchCapabilities `json:"capabilities,omitempty"`
-	Results      []ResourceSearchCandidate  `json:"results"`
+	SessionID       string                     `json:"session_id"`
+	Query           string                     `json:"query"`
+	Page            int                        `json:"page"`
+	PageSize        int                        `json:"page_size"`
+	Total           int                        `json:"total"`
+	UnfilteredTotal int                        `json:"unfiltered_total"`
+	TotalPages      int                        `json:"total_pages"`
+	Roots           []ResourceSearchRoot       `json:"roots,omitempty"`
+	Capabilities    ResourceSearchCapabilities `json:"capabilities,omitempty"`
+	Facets          ResourceSearchFacets       `json:"facets"`
+	Results         []ResourceSearchCandidate  `json:"results"`
+}
+
+type ResourceSearchFacets struct {
+	Sources     []string `json:"sources"`
+	Resolutions []string `json:"resolutions"`
 }
 
 type ResourceSearchError struct {
@@ -127,6 +140,7 @@ type ResourceImportCreateInput struct {
 	RootID          string `json:"root_id"`
 	ForceDuplicate  bool   `json:"force_duplicate,omitempty"`
 	UpgradeMediaID  string `json:"upgrade_media_id,omitempty"`
+	KeepOldVersion  *bool  `json:"keep_old_version,omitempty"`
 }
 
 type ResourceImportDuplicate struct {
@@ -173,6 +187,7 @@ type ResourceImportTask struct {
 	MediaID         string     `json:"media_id,omitempty"`
 	MediaTitle      string     `json:"media_title,omitempty"`
 	UpgradeMediaID  string     `json:"upgrade_media_id,omitempty"`
+	KeepOldVersion  bool       `json:"keep_old_version"`
 	CancelRequested bool       `json:"cancel_requested"`
 	Attempt         int        `json:"attempt"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -255,6 +270,9 @@ func (s *ResourceImportService) Search(ctx context.Context, userID string, libra
 	if len(query) > 512 {
 		return ResourceSearchResponse{}, errors.New("query is too long")
 	}
+	if err := validateResourceSearchView(in); err != nil {
+		return ResourceSearchResponse{}, err
+	}
 	source := strings.ToLower(strings.TrimSpace(in.Source))
 	if source == "" {
 		source = "default"
@@ -278,7 +296,7 @@ func (s *ResourceImportService) Search(ctx context.Context, userID string, libra
 			return ResourceSearchResponse{}, errors.New("cached resource search session data is invalid")
 		}
 		if storedResourceSearchValid(stored) {
-			return resourceSearchPage(cached, stored, root, in.Page, in.PageSize), nil
+			return resourceSearchPage(cached, stored, root, in), nil
 		}
 		if err := s.repos.DB.WithContext(ctx).Unscoped().Delete(&cached).Error; err != nil {
 			return ResourceSearchResponse{}, err
@@ -337,7 +355,7 @@ func (s *ResourceImportService) Search(ctx context.Context, userID string, libra
 	if err := s.repos.DB.WithContext(ctx).Create(&record).Error; err != nil {
 		return ResourceSearchResponse{}, err
 	}
-	return resourceSearchPage(record, stored, root, in.Page, in.PageSize), nil
+	return resourceSearchPage(record, stored, root, in), nil
 }
 
 func (s *ResourceImportService) Create(ctx context.Context, userID string, library model.Library, root model.LibraryRoot, in ResourceImportCreateInput) (ResourceImportTask, error) {
@@ -362,7 +380,22 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 	if err := s.validateUpgradeTarget(ctx, library, root, upgradeMediaID); err != nil {
 		return ResourceImportTask{}, err
 	}
-	idempotencyKey := resourceImportIdempotencyKey(userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.ForceDuplicate, upgradeMediaID)
+	keepOldVersion := true
+	if upgradeMediaID != "" && in.KeepOldVersion != nil {
+		keepOldVersion = *in.KeepOldVersion
+	}
+	if upgradeMediaID != "" && !keepOldVersion {
+		allowed, err := userCanManageMediaVersion(ctx, s.repos, userID, false, upgradeMediaID)
+		if err != nil {
+			return ResourceImportTask{}, err
+		}
+		if !allowed {
+			return ResourceImportTask{}, fmt.Errorf("%w: 只有管理员或该片源的入库用户可以在升级成功后移除旧版本", ErrMediaVersionForbidden)
+		}
+	}
+	idempotencyKey := resourceImportIdempotencyKey(
+		userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.ForceDuplicate, upgradeMediaID, keepOldVersion,
+	)
 	if existing, found, err := s.findJobByIdempotencyKey(ctx, idempotencyKey); err != nil {
 		return ResourceImportTask{}, err
 	} else if found {
@@ -380,6 +413,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		MediaType:        mediaType,
 		ForceDuplicate:   in.ForceDuplicate,
 		UpgradeMediaID:   upgradeMediaID,
+		KeepOldVersion:   keepOldVersion,
 	})
 	if err != nil {
 		var pipelineErr *resourcePipelineError
@@ -407,8 +441,8 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		CandidateJSON: string(candidateJSON), CandidateTitle: candidate.Title,
 		CandidateSource: candidate.Source, CandidateSize: candidate.SizeBytes,
 		Attempt: 1, IdempotencyKey: idempotencyKey, ForceDuplicate: in.ForceDuplicate,
-		UpgradeMediaID: upgradeMediaID,
-		Status:         status, Stage: stage, Message: safePipelineMessage(pipelineTask.Message),
+		UpgradeMediaID: upgradeMediaID, KeepOldVersion: keepOldVersion,
+		Status: status, Stage: stage, Message: safePipelineMessage(pipelineTask.Message),
 		PipelineJobID: pipelineTask.ID, MediaID: pipelineTask.MsgMediaID,
 		MediaTitle: pipelineTask.MsgMediaTitle, CancelRequested: pipelineTask.CancelRequested,
 	}
@@ -803,6 +837,7 @@ func (s *ResourceImportService) taskDTO(ctx context.Context, job model.ResourceI
 		Status: job.Status, Stage: job.Stage, Progress: resourceImportProgress(job.Status, job.Stage),
 		Message: job.Message, Error: job.PublicError,
 		MediaID: job.MediaID, MediaTitle: job.MediaTitle, UpgradeMediaID: job.UpgradeMediaID,
+		KeepOldVersion:  job.KeepOldVersion,
 		CancelRequested: job.CancelRequested,
 		Attempt:         job.Attempt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
 		StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
@@ -836,14 +871,17 @@ func (s *ResourceImportService) taskDTO(ctx context.Context, job model.ResourceI
 	return item, nil
 }
 
-func resourceSearchPage(record model.ResourceSearchSession, stored storedResourceSearch, root model.LibraryRoot, page, pageSize int) ResourceSearchResponse {
+func resourceSearchPage(record model.ResourceSearchSession, stored storedResourceSearch, root model.LibraryRoot, in ResourceSearchInput) ResourceSearchResponse {
+	page, pageSize := in.Page, in.PageSize
 	if pageSize <= 0 {
 		pageSize = 20
 	}
 	if pageSize > resourceSearchLimit {
 		pageSize = resourceSearchLimit
 	}
-	total := len(stored.Candidates)
+	candidates := filterResourceSearchCandidates(stored.Candidates, in)
+	sortResourceSearchCandidates(candidates, in.SortBy)
+	total := len(candidates)
 	totalPages := (total + pageSize - 1) / pageSize
 	if totalPages < 1 {
 		totalPages = 1
@@ -860,15 +898,155 @@ func resourceSearchPage(record model.ResourceSearchSession, stored storedResourc
 		end = total
 	}
 	results := make([]ResourceSearchCandidate, 0, end-start)
-	for _, candidate := range stored.Candidates[start:end] {
+	for _, candidate := range candidates[start:end] {
 		results = append(results, candidate.ResourceSearchCandidate)
 	}
 	return ResourceSearchResponse{
 		SessionID: record.ID, Query: record.Query, Page: page, PageSize: pageSize,
-		Total: total, TotalPages: totalPages,
+		Total: total, UnfilteredTotal: len(stored.Candidates), TotalPages: totalPages,
 		Roots:        []ResourceSearchRoot{{ID: root.ID, Name: root.Name, Path: root.Path, Enabled: root.Enabled}},
-		Capabilities: stored.Capabilities, Results: results,
+		Capabilities: stored.Capabilities, Facets: resourceSearchFacets(stored.Candidates), Results: results,
 	}
+}
+
+func validateResourceSearchView(in ResourceSearchInput) error {
+	if len([]rune(strings.TrimSpace(in.ResultQuery))) > 200 {
+		return errors.New("result_query is too long")
+	}
+	resolution := strings.ToLower(strings.TrimSpace(in.ResolutionFilter))
+	if resolution != "" && resolution != "all" && resolution != "2160p" && resolution != "1080p" && resolution != "720p" && resolution != "other" {
+		return errors.New("unsupported resolution_filter")
+	}
+	subtitle := strings.ToLower(strings.TrimSpace(in.SubtitleFilter))
+	if subtitle != "" && subtitle != "all" && subtitle != "chinese" && subtitle != "with_subtitle" {
+		return errors.New("unsupported subtitle_filter")
+	}
+	sortBy := strings.ToLower(strings.TrimSpace(in.SortBy))
+	if sortBy != "" && sortBy != "relevance" && sortBy != "size_desc" && sortBy != "size_asc" && sortBy != "seeders_desc" && sortBy != "resolution_desc" {
+		return errors.New("unsupported sort_by")
+	}
+	return nil
+}
+
+func filterResourceSearchCandidates(candidates []storedResourceCandidate, in ResourceSearchInput) []storedResourceCandidate {
+	query := strings.ToLower(strings.TrimSpace(in.ResultQuery))
+	source := strings.ToLower(strings.TrimSpace(in.SourceFilter))
+	resolution := strings.ToLower(strings.TrimSpace(in.ResolutionFilter))
+	subtitle := strings.ToLower(strings.TrimSpace(in.SubtitleFilter))
+	out := make([]storedResourceCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if query != "" && !strings.Contains(strings.ToLower(resourceCandidateSearchText(candidate.ResourceSearchCandidate)), query) {
+			continue
+		}
+		if source != "" && source != "all" && !strings.EqualFold(strings.TrimSpace(candidate.Source), source) {
+			continue
+		}
+		if resolution != "" && resolution != "all" && resourceCandidateResolution(candidate.ResourceSearchCandidate) != resolution {
+			continue
+		}
+		if subtitle == "chinese" && !resourceCandidateHasChineseSubtitle(candidate.ResourceSearchCandidate) {
+			continue
+		}
+		if subtitle == "with_subtitle" && !resourceCandidateHasSubtitle(candidate.ResourceSearchCandidate) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func sortResourceSearchCandidates(candidates []storedResourceCandidate, sortBy string) {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "size_desc":
+		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].SizeBytes > candidates[j].SizeBytes })
+	case "size_asc":
+		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].SizeBytes < candidates[j].SizeBytes })
+	case "seeders_desc":
+		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Seeders > candidates[j].Seeders })
+	case "resolution_desc":
+		sort.SliceStable(candidates, func(i, j int) bool {
+			return resourceResolutionScore(resourceCandidateResolution(candidates[i].ResourceSearchCandidate)) >
+				resourceResolutionScore(resourceCandidateResolution(candidates[j].ResourceSearchCandidate))
+		})
+	}
+}
+
+func resourceSearchFacets(candidates []storedResourceCandidate) ResourceSearchFacets {
+	sources := make(map[string]string)
+	resolutions := make(map[string]bool)
+	for _, candidate := range candidates {
+		if source := strings.TrimSpace(candidate.Source); source != "" {
+			key := strings.ToLower(source)
+			if _, exists := sources[key]; !exists {
+				sources[key] = source
+			}
+		}
+		resolutions[resourceCandidateResolution(candidate.ResourceSearchCandidate)] = true
+	}
+	sourceValues := make([]string, 0, len(sources))
+	for _, source := range sources {
+		sourceValues = append(sourceValues, source)
+	}
+	sort.Slice(sourceValues, func(i, j int) bool { return strings.ToLower(sourceValues[i]) < strings.ToLower(sourceValues[j]) })
+	resolutionValues := make([]string, 0, 4)
+	for _, value := range []string{"2160p", "1080p", "720p", "other"} {
+		if resolutions[value] {
+			resolutionValues = append(resolutionValues, value)
+		}
+	}
+	return ResourceSearchFacets{Sources: sourceValues, Resolutions: resolutionValues}
+}
+
+func resourceCandidateSearchText(candidate ResourceSearchCandidate) string {
+	return strings.Join([]string{
+		candidate.Title, candidate.Source, candidate.Resolution, candidate.Subtitle,
+		candidate.ResourceType, candidate.Summary, candidate.SizeText,
+	}, " ")
+}
+
+func resourceCandidateResolution(candidate ResourceSearchCandidate) string {
+	text := strings.ToLower(resourceCandidateSearchText(candidate))
+	switch {
+	case strings.Contains(text, "2160") || strings.Contains(text, "4k") || strings.Contains(text, "uhd"):
+		return "2160p"
+	case strings.Contains(text, "1080") || strings.Contains(text, "fullhd") || strings.Contains(text, "full hd"):
+		return "1080p"
+	case strings.Contains(text, "720"):
+		return "720p"
+	default:
+		return "other"
+	}
+}
+
+func resourceResolutionScore(value string) int {
+	switch value {
+	case "2160p":
+		return 4
+	case "1080p":
+		return 3
+	case "720p":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func resourceCandidateHasSubtitle(candidate ResourceSearchCandidate) bool {
+	if strings.TrimSpace(candidate.Subtitle) != "" {
+		return true
+	}
+	text := strings.ToLower(resourceCandidateSearchText(candidate))
+	return strings.Contains(text, "subtitle") || strings.Contains(text, "subbed") || strings.Contains(text, "字幕") || strings.Contains(text, "中字")
+}
+
+func resourceCandidateHasChineseSubtitle(candidate ResourceSearchCandidate) bool {
+	text := strings.ToLower(resourceCandidateSearchText(candidate))
+	for _, marker := range []string{"中文字幕", "中字", "简中", "繁中", "中文", "chinese", "chs", "cht", "zh-cn", "zh-tw"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeResourceCandidates(items []map[string]any) ([]storedResourceCandidate, error) {
@@ -941,8 +1119,11 @@ func resourceRootOpenListPath(value string) (string, error) {
 	return openListPath, nil
 }
 
-func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, force bool, upgradeMediaID string) string {
-	raw := strings.Join([]string{userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strconv.FormatBool(force), strings.TrimSpace(upgradeMediaID)}, "\x00")
+func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, force bool, upgradeMediaID string, keepOldVersion bool) string {
+	raw := strings.Join([]string{
+		userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strconv.FormatBool(force),
+		strings.TrimSpace(upgradeMediaID), strconv.FormatBool(keepOldVersion),
+	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return "msg-resource-import:" + hex.EncodeToString(sum[:])
 }
@@ -994,6 +1175,8 @@ func mapPipelineImportStage(stage string) string {
 		return "scraping"
 	case "subtitles":
 		return "matching_subtitle"
+	case "removing_old_version":
+		return "finalizing_upgrade"
 	case "completed", "completed_with_warning":
 		return "completed"
 	case "failed", "canceled", "cancelled":
@@ -1022,6 +1205,8 @@ func resourceImportProgress(status, stage string) int {
 		return 85
 	case "matching_subtitle":
 		return 95
+	case "finalizing_upgrade":
+		return 98
 	case "running":
 		return 25
 	default:

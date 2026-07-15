@@ -18,6 +18,7 @@ import {
   Settings,
   Sliders,
   Sparkles,
+  Trash2,
   User,
 } from 'lucide-react'
 
@@ -61,11 +62,12 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     id: 'personal',
     label: '个人观影',
     icon: User,
-    activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/profile', '/play-profiles'],
+    activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/profile', '/play-profiles', '/recycle'],
     items: [
       { to: '/favourites', label: '我的收藏', icon: Heart },
       { to: '/playlists', label: '播放列表', icon: ListMusic },
       { to: '/history', label: '观看历史', icon: Clock },
+      { to: '/recycle', label: '回收站', icon: Trash2 },
     ],
   },
   {

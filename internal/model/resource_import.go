@@ -33,6 +33,7 @@ type ResourceImportJob struct {
 	IdempotencyKey  string     `gorm:"uniqueIndex;size:255;not null" json:"-"`
 	ForceDuplicate  bool       `gorm:"not null;default:false" json:"force_duplicate"`
 	UpgradeMediaID  string     `gorm:"index;size:36" json:"upgrade_media_id,omitempty"`
+	KeepOldVersion  bool       `gorm:"not null;default:false" json:"keep_old_version"`
 	Status          string     `gorm:"index;size:32;not null" json:"status"`
 	Stage           string     `gorm:"index;size:32;not null" json:"stage"`
 	Message         string     `gorm:"type:text" json:"-"`
