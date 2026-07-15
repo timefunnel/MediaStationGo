@@ -18,7 +18,7 @@ export function DiscoverDetailModal({ item, onClose }: { item: DiscoverItem; onC
           <DiscoverArtworkPanel item={item} />
           <div className="space-y-5">
             <DiscoverOverviewPanel overview={item.overview} />
-            <DiscoverResourceAction item={item} onNavigate={onClose} />
+            <DiscoverResourceAction item={item} />
           </div>
         </div>
       </div>

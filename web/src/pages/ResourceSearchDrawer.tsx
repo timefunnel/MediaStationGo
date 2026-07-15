@@ -40,6 +40,7 @@ import {
 
 type ResourceSearchDrawerProps = {
   open: boolean
+  embedded?: boolean
   initialQuery?: string
   libraryID: string
   libraryName: string
@@ -55,6 +56,7 @@ type SearchSource = '' | 'pansou'
 
 export function ResourceSearchDrawer({
   open,
+  embedded = false,
   initialQuery,
   libraryID,
   libraryName,
@@ -116,7 +118,7 @@ export function ResourceSearchDrawer({
   }, [roots])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || embedded) return
     const previousOverflow = document.body.style.overflow
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -127,7 +129,7 @@ export function ResourceSearchDrawer({
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [onClose, open])
+  }, [embedded, onClose, open])
 
   useEffect(() => {
     if (!taskID) {
@@ -289,15 +291,13 @@ export function ResourceSearchDrawer({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`${libraryName} 查找资源`}>
-      <button
-        type="button"
-        className="absolute inset-0 hidden bg-black/35 backdrop-blur-sm sm:block"
-        aria-label="关闭查找资源面板"
-        onClick={onClose}
-      />
-      <aside className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl">
+  const panel = (
+    <aside
+      className={embedded
+        ? 'flex h-[65vh] min-h-[26rem] max-h-[42rem] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)]'
+        : 'absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl'}
+      aria-label={embedded ? `${libraryName} 查找资源` : undefined}
+    >
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-[var(--app-panel)] px-4 sm:px-6">
           {taskID && (
             <button
@@ -317,15 +317,17 @@ export function ResourceSearchDrawer({
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>
-          <button
-            type="button"
-            className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
-            title="关闭"
-            aria-label="关闭查找资源面板"
-            onClick={onClose}
-          >
-            <X size={20} />
-          </button>
+          {!embedded && (
+            <button
+              type="button"
+              className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
+              title="关闭"
+              aria-label="关闭查找资源面板"
+              onClick={onClose}
+            >
+              <X size={20} />
+            </button>
+          )}
         </header>
 
         {taskID ? (
@@ -376,7 +378,7 @@ export function ResourceSearchDrawer({
                 <label className="min-w-0 flex-1">
                   <span className="sr-only">资源关键词</span>
                   <input
-                    autoFocus
+                    autoFocus={!embedded}
                     className="input-field h-11 min-w-0 w-full py-2.5 text-base sm:text-sm"
                     value={query}
                     placeholder="片名、剧名、番号或资源关键词"
@@ -501,7 +503,20 @@ export function ResourceSearchDrawer({
             )}
           </>
         )}
-      </aside>
+    </aside>
+  )
+
+  if (embedded) return panel
+
+  return (
+    <div className="fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label={`${libraryName} 查找资源`}>
+      <button
+        type="button"
+        className="absolute inset-0 hidden bg-black/35 backdrop-blur-sm sm:block"
+        aria-label="关闭查找资源面板"
+        onClick={onClose}
+      />
+      {panel}
     </div>
   )
 }

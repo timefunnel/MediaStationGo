@@ -150,7 +150,7 @@ function ExternalDetailModal({
               </div>
             )}
 
-            <DiscoverResourceAction item={discoverItem} onNavigate={onClose} />
+            <DiscoverResourceAction item={discoverItem} />
 
             <div className="flex justify-end pt-2">
               <button onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-ink-100 hover:bg-gray-50">关闭</button>
