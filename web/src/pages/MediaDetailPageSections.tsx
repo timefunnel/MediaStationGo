@@ -1,4 +1,4 @@
-import { ArrowLeft, Heart, Play, RefreshCw } from 'lucide-react'
+import { ArrowLeft, CircleArrowUp, Heart, LoaderCircle, Play, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
@@ -15,6 +15,8 @@ interface MediaDetailPlaybackActionsProps {
   media: Media
   favourite: boolean
   onToggleFavourite: () => void
+  onUpgrade: () => void
+  upgradeOpening: boolean
 }
 
 interface MediaDetailMainContentProps extends MediaDetailPlaybackActionsProps {
@@ -87,6 +89,8 @@ export function MediaDetailPlaybackActions({
   media,
   favourite,
   onToggleFavourite,
+  onUpgrade,
+  upgradeOpening,
 }: MediaDetailPlaybackActionsProps) {
   return (
     <div className="flex flex-wrap gap-3">
@@ -104,6 +108,16 @@ export function MediaDetailPlaybackActions({
       </Link>
 
       <ExternalPlayerButton mediaId={media.id} />
+
+      <button
+        type="button"
+        onClick={onUpgrade}
+        disabled={upgradeOpening}
+        className="btn-outline gap-2 border-brand-500/30 text-[#c9954a] hover:border-brand-500 hover:bg-brand-50"
+      >
+        {upgradeOpening ? <LoaderCircle size={15} className="animate-spin" /> : <CircleArrowUp size={15} />}
+        <span>升级片源</span>
+      </button>
 
       <button
         onClick={onToggleFavourite}
@@ -127,6 +141,8 @@ export function MediaDetailMainContent({
   favourite,
   scrapeEpisodeArtwork,
   onToggleFavourite,
+  onUpgrade,
+  upgradeOpening,
   onScrapeEpisodeArtworkChange,
   onSmartScrape,
   onManualScrape,
@@ -144,7 +160,13 @@ export function MediaDetailMainContent({
         <MediaDetailMetadata media={media} />
         <div className="divider border-gray-200/60" />
         <div className="flex flex-col gap-5">
-          <MediaDetailPlaybackActions media={media} favourite={favourite} onToggleFavourite={onToggleFavourite} />
+          <MediaDetailPlaybackActions
+            media={media}
+            favourite={favourite}
+            onToggleFavourite={onToggleFavourite}
+            onUpgrade={onUpgrade}
+            upgradeOpening={upgradeOpening}
+          />
           {isAdmin && (
             <MediaDetailAdminPanel
               media={media}

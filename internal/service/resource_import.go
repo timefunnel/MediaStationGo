@@ -126,6 +126,7 @@ type ResourceImportCreateInput struct {
 	CandidateIndex  int    `json:"candidate_index"`
 	RootID          string `json:"root_id"`
 	ForceDuplicate  bool   `json:"force_duplicate,omitempty"`
+	UpgradeMediaID  string `json:"upgrade_media_id,omitempty"`
 }
 
 type ResourceImportDuplicate struct {
@@ -171,6 +172,7 @@ type ResourceImportTask struct {
 	PipelineJobID   string     `json:"pipeline_job_id,omitempty"`
 	MediaID         string     `json:"media_id,omitempty"`
 	MediaTitle      string     `json:"media_title,omitempty"`
+	UpgradeMediaID  string     `json:"upgrade_media_id,omitempty"`
 	CancelRequested bool       `json:"cancel_requested"`
 	Attempt         int        `json:"attempt"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -356,7 +358,11 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 	if err != nil {
 		return ResourceImportTask{}, err
 	}
-	idempotencyKey := resourceImportIdempotencyKey(userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.ForceDuplicate)
+	upgradeMediaID := strings.TrimSpace(in.UpgradeMediaID)
+	if err := s.validateUpgradeTarget(ctx, library, root, upgradeMediaID); err != nil {
+		return ResourceImportTask{}, err
+	}
+	idempotencyKey := resourceImportIdempotencyKey(userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.ForceDuplicate, upgradeMediaID)
 	if existing, found, err := s.findJobByIdempotencyKey(ctx, idempotencyKey); err != nil {
 		return ResourceImportTask{}, err
 	} else if found {
@@ -373,6 +379,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		Provider:         provider,
 		MediaType:        mediaType,
 		ForceDuplicate:   in.ForceDuplicate,
+		UpgradeMediaID:   upgradeMediaID,
 	})
 	if err != nil {
 		var pipelineErr *resourcePipelineError
@@ -400,7 +407,8 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		CandidateJSON: string(candidateJSON), CandidateTitle: candidate.Title,
 		CandidateSource: candidate.Source, CandidateSize: candidate.SizeBytes,
 		Attempt: 1, IdempotencyKey: idempotencyKey, ForceDuplicate: in.ForceDuplicate,
-		Status: status, Stage: stage, Message: safePipelineMessage(pipelineTask.Message),
+		UpgradeMediaID: upgradeMediaID,
+		Status:         status, Stage: stage, Message: safePipelineMessage(pipelineTask.Message),
 		PipelineJobID: pipelineTask.ID, MediaID: pipelineTask.MsgMediaID,
 		MediaTitle: pipelineTask.MsgMediaTitle, CancelRequested: pipelineTask.CancelRequested,
 	}
@@ -422,6 +430,29 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 	}
 	s.schedule(record.ID)
 	return s.taskDTO(ctx, record, false)
+}
+
+func (s *ResourceImportService) validateUpgradeTarget(ctx context.Context, library model.Library, root model.LibraryRoot, mediaID string) error {
+	if mediaID == "" {
+		return nil
+	}
+	if s.repos.Media == nil {
+		return errors.New("upgrade_media_id 无效：媒体服务不可用")
+	}
+	media, err := s.repos.Media.FindByID(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if media == nil {
+		return errors.New("upgrade_media_id 无效：目标作品不存在")
+	}
+	if media.LibraryID != library.ID {
+		return errors.New("upgrade_media_id 无效：目标作品不属于当前媒体库")
+	}
+	if media.LibraryRootID != "" && media.LibraryRootID != root.ID {
+		return errors.New("upgrade_media_id 无效：目标作品不属于当前入库目录")
+	}
+	return nil
 }
 
 func (s *ResourceImportService) Recover(ctx context.Context) (int, error) {
@@ -771,8 +802,9 @@ func (s *ResourceImportService) taskDTO(ctx context.Context, job model.ResourceI
 		CandidateTitle: job.CandidateTitle, Source: job.CandidateSource,
 		Status: job.Status, Stage: job.Stage, Progress: resourceImportProgress(job.Status, job.Stage),
 		Message: job.Message, Error: job.PublicError,
-		MediaID: job.MediaID, MediaTitle: job.MediaTitle, CancelRequested: job.CancelRequested,
-		Attempt: job.Attempt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
+		MediaID: job.MediaID, MediaTitle: job.MediaTitle, UpgradeMediaID: job.UpgradeMediaID,
+		CancelRequested: job.CancelRequested,
+		Attempt:         job.Attempt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
 		StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
 	}
 	if s.repos != nil && s.repos.Library != nil {
@@ -909,8 +941,8 @@ func resourceRootOpenListPath(value string) (string, error) {
 	return openListPath, nil
 }
 
-func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, force bool) string {
-	raw := strings.Join([]string{userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strconv.FormatBool(force)}, "\x00")
+func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, force bool, upgradeMediaID string) string {
+	raw := strings.Join([]string{userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strconv.FormatBool(force), strings.TrimSpace(upgradeMediaID)}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return "msg-resource-import:" + hex.EncodeToString(sum[:])
 }

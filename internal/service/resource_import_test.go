@@ -125,7 +125,7 @@ func newResourceImportTestService(t *testing.T, pipeline *fakeResourcePipeline) 
 	t.Helper()
 	db := newServiceTestDB(t,
 		&model.User{}, &model.Library{}, &model.LibraryRoot{},
-		&model.ResourceSearchSession{}, &model.ResourceImportJob{},
+		&model.Media{}, &model.ResourceSearchSession{}, &model.ResourceImportJob{},
 	)
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
@@ -340,6 +340,87 @@ func TestResourceImportPersistsPipelineCandidateIDForCreate(t *testing.T) {
 	defer pipeline.mu.Unlock()
 	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].CandidateID != "candidate-1" {
 		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
+	}
+}
+
+func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	target := model.Media{
+		LibraryID: library.ID, LibraryRootID: root.ID,
+		Title: "Sintel", Path: "cloud://openlist/115/电影/Sintel/Sintel.mkv",
+	}
+	if err := repos.DB.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Sintel 4K", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID, UpgradeMediaID: target.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.UpgradeMediaID != target.ID {
+		t.Fatalf("task upgrade_media_id = %q, want %q", task.UpgradeMediaID, target.ID)
+	}
+	pipeline.mu.Lock()
+	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].UpgradeMediaID != target.ID {
+		pipeline.mu.Unlock()
+		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
+	}
+	pipeline.mu.Unlock()
+	var job model.ResourceImportJob
+	if err := repos.DB.First(&job, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if job.UpgradeMediaID != target.ID {
+		t.Fatalf("persisted upgrade_media_id = %q, want %q", job.UpgradeMediaID, target.ID)
+	}
+}
+
+func TestResourceImportUpgradeRejectsMediaOutsideTargetLibraryOrRoot(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	otherLibrary := model.Library{Name: "Other", Path: "cloud://openlist/115%2F其他", Type: "movie", Enabled: true}
+	if err := repos.DB.Create(&otherLibrary).Error; err != nil {
+		t.Fatal(err)
+	}
+	wrongLibrary := model.Media{LibraryID: otherLibrary.ID, Title: "Sintel", Path: "cloud://openlist/115/其他/Sintel.mkv"}
+	wrongRoot := model.Media{LibraryID: library.ID, LibraryRootID: "other-root", Title: "Sintel", Path: "cloud://openlist/115/电影/Sintel-2.mkv"}
+	if err := repos.DB.Create(&wrongLibrary).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.DB.Create(&wrongRoot).Error; err != nil {
+		t.Fatal(err)
+	}
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Sintel 4K", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		mediaID string
+		message string
+	}{
+		{name: "library", mediaID: wrongLibrary.ID, message: "不属于当前媒体库"},
+		{name: "root", mediaID: wrongRoot.ID, message: "不属于当前入库目录"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+				SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID, UpgradeMediaID: test.mediaID,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("upgrade error = %v, want %q", err, test.message)
+			}
+		})
+	}
+	pipeline.mu.Lock()
+	defer pipeline.mu.Unlock()
+	if pipeline.createCalls != 0 {
+		t.Fatalf("pipeline create calls = %d", pipeline.createCalls)
 	}
 }
 

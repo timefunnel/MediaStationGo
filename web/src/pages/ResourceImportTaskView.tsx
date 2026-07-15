@@ -107,6 +107,7 @@ export function ResourceImportTaskView({
                 <span className="max-w-full truncate">目录：{task.root_name || task.root_id}</span>
               )}
               {task.source && <span>来源：{task.source}</span>}
+              {task.upgrade_media_id && <span>类型：升级片源</span>}
               <span>更新：{formatTaskTime(task.updated_at || task.created_at)}</span>
             </div>
           )}

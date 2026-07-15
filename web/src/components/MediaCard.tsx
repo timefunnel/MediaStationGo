@@ -20,6 +20,7 @@ export const MediaCard = ({
   const href = linkTo ?? `/media/${media.id}`
   const [posterFit, setPosterFit] = useState<'cover' | 'contain'>('cover')
   const posterSrc = imageURL(media.poster_url, media.updated_at, { maxWidth: 360, quality: 80 })
+  const displayTitle = media.display_title?.trim() || media.title
   const displayRating = rating ?? media.rating
   const versionCount = media.versions?.length ?? 0
 
@@ -50,7 +51,7 @@ export const MediaCard = ({
               )}
               <img
                 src={posterSrc}
-                alt={media.title}
+                alt={displayTitle}
                 loading="lazy"
                 decoding="async"
                 onLoad={(event) => {
@@ -126,7 +127,7 @@ export const MediaCard = ({
         {/* Media Metadata Info */}
         <div className="space-y-1 border-t border-[var(--app-border)] bg-[var(--app-panel)] p-4">
           <p className="truncate text-sm font-bold text-[var(--app-text)] transition-colors duration-200 group-hover:text-brand-500">
-            {media.title}
+            {displayTitle}
           </p>
           <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[var(--app-muted)]">
             <span>{media.year > 0 ? media.year : "未知年份"}</span>

@@ -41,6 +41,14 @@ func (s *MediaService) attachLibraryMetadata(ctx context.Context, items []model.
 				items[i].LibraryPath = lib.Path
 			}
 		}
+		items[i].DisplayTitle = adultDisplayNameForMedia(
+			&items[i],
+			items[i].Title,
+			items[i].NSFW || (hasOwn && LibraryLooksAdult(own)),
+		)
+		if items[i].DisplayTitle == items[i].Title {
+			items[i].DisplayTitle = ""
+		}
 	}
 }
 

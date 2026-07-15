@@ -33,7 +33,7 @@ func TestResourcePipelineHTTPClientUsesBearerOwnerAndIdempotency(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.OwnerID != "user-a" || body.SearchSessionID != "session" || body.CandidateID != "candidate" {
+			if body.OwnerID != "user-a" || body.SearchSessionID != "session" || body.CandidateID != "candidate" || body.UpgradeMediaID != "media-existing" {
 				t.Fatalf("create body = %+v", body)
 			}
 			_ = json.NewEncoder(w).Encode(resourcePipelineTask{ID: "job", OwnerID: "user-a", Status: "queued", Stage: "queued"})
@@ -57,7 +57,7 @@ func TestResourcePipelineHTTPClientUsesBearerOwnerAndIdempotency(t *testing.T) {
 	if _, err := client.Search(context.Background(), resourcePipelineSearchRequest{OwnerID: "user-a", Query: "Movie", Category: "movie", Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CreateImport(context.Background(), "user-a", "idem", resourcePipelineCreateRequest{SearchSessionID: "session", CandidateID: "candidate"}); err != nil {
+	if _, err := client.CreateImport(context.Background(), "user-a", "idem", resourcePipelineCreateRequest{SearchSessionID: "session", CandidateID: "candidate", UpgradeMediaID: "media-existing"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.GetImport(context.Background(), "user-a", "job"); err != nil {

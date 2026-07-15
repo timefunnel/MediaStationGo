@@ -70,6 +70,7 @@ export interface ResourceImportTask {
   message?: string
   error?: string
   media_id?: string
+  upgrade_media_id?: string
   created_at?: string
   updated_at?: string
   finished_at?: string
@@ -113,6 +114,7 @@ export const resourceImportsAPI = {
       candidate_index: number
       root_id: string
       force_duplicate?: boolean
+      upgrade_media_id?: string
     },
   ) =>
     api

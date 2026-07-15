@@ -42,6 +42,8 @@ type ResourceSearchDrawerProps = {
   open: boolean
   embedded?: boolean
   initialQuery?: string
+  upgradeMediaID?: string
+  fixedRootID?: string
   libraryID: string
   libraryName: string
   libraryRoots: LibraryRoot[]
@@ -58,6 +60,8 @@ export function ResourceSearchDrawer({
   open,
   embedded = false,
   initialQuery,
+  upgradeMediaID,
+  fixedRootID,
   libraryID,
   libraryName,
   libraryRoots,
@@ -101,6 +105,7 @@ export function ResourceSearchDrawer({
   )
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
   const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
+  const upgrading = Boolean(upgradeMediaID?.trim())
 
   useEffect(() => {
     const nextQuery = initialQuery?.trim()
@@ -114,8 +119,14 @@ export function ResourceSearchDrawer({
   }, [initialQuery, open])
 
   useEffect(() => {
-    setSelectedRootID((current) => resolveResourceRootID(roots, current))
-  }, [roots])
+    setSelectedRootID((current) => {
+      const lockedRootID = fixedRootID?.trim()
+      if (lockedRootID && roots.some((root) => root.enabled !== false && root.id === lockedRootID)) {
+        return lockedRootID
+      }
+      return resolveResourceRootID(roots, current)
+    })
+  }, [fixedRootID, roots])
 
   useEffect(() => {
     if (!open || embedded) return
@@ -171,7 +182,12 @@ export function ResourceSearchDrawer({
       setSearchError('请输入要查找的影片或剧集名称')
       return
     }
-    const effectiveRootID = resolveResourceRootID(roots, selectedRootID)
+    const lockedRootID = fixedRootID?.trim() ?? ''
+    const effectiveRootID = lockedRootID || resolveResourceRootID(roots, selectedRootID)
+    if (lockedRootID && !roots.some((root) => root.enabled !== false && root.id === lockedRootID)) {
+      setSearchError('当前作品的媒体库目录不可用，无法升级片源')
+      return
+    }
     if (roots.length > 1 && !effectiveRootID) {
       setSearchError('该媒体库有多个目录，请先明确选择入库目录')
       return
@@ -226,7 +242,8 @@ export function ResourceSearchDrawer({
 
   const importCandidate = async (candidate: ResourceSearchCandidate, forceDuplicate = false) => {
     if (!response) return
-    if (!selectedRootID) {
+    const importRootID = fixedRootID?.trim() || selectedRootID
+    if (!importRootID) {
       setSearchError('该媒体库有多个目录，请先明确选择入库目录')
       return
     }
@@ -237,8 +254,9 @@ export function ResourceSearchDrawer({
       const task = await resourceImportsAPI.create(libraryID, {
         search_session_id: response.session_id,
         candidate_index: candidate.index,
-        root_id: selectedRootID,
+        root_id: importRootID,
         force_duplicate: forceDuplicate || undefined,
+        upgrade_media_id: upgradeMediaID?.trim() || undefined,
       })
       setLocalTask(task)
       onTaskChanged(task)
@@ -313,7 +331,7 @@ export function ResourceSearchDrawer({
           <div className="min-w-0 flex-1">
             <h2 className="flex min-w-0 items-center gap-2 font-display text-lg font-bold text-ink-600">
               {!taskID && <Globe size={19} className="shrink-0 text-brand-600" />}
-              <span className="truncate">{taskID ? '资源入库进度' : '查找资源'}</span>
+              <span className="truncate">{taskID ? '资源入库进度' : upgrading ? '升级片源' : '查找资源'}</span>
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>
@@ -362,7 +380,7 @@ export function ResourceSearchDrawer({
                   <Globe size={17} />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-ink-600">查找资源</h3>
+                  <h3 className="text-sm font-semibold text-ink-600">{upgrading ? '查找更高质量版本' : '查找资源'}</h3>
                   <p className="text-xs text-sand-500">{source === 'pansou' ? '网盘资源' : '普通资源'}</p>
                 </div>
               </div>
@@ -399,9 +417,9 @@ export function ResourceSearchDrawer({
 
               {roots.length > 0 && (
                 <div className="mt-3">
-                  {roots.length === 1 ? (
-                    <p className="truncate text-xs text-sand-500" title={roots[0].path}>
-                      入库目录：{rootLabel(roots[0])}
+                  {fixedRootID || roots.length === 1 ? (
+                    <p className="truncate text-xs text-sand-500" title={(roots.find((root) => root.id === selectedRootID) ?? roots[0]).path}>
+                      {upgrading ? '升级目录' : '入库目录'}：{rootLabel(roots.find((root) => root.id === selectedRootID) ?? roots[0])}
                     </p>
                   ) : (
                     <label className="block">
@@ -429,6 +447,7 @@ export function ResourceSearchDrawer({
                 candidate={duplicateConflict.candidate}
                 conflict={duplicateConflict.conflict}
                 importing={importingIndex !== null}
+                upgrading={upgrading}
                 onForce={() => void importCandidate(duplicateConflict.candidate, true)}
                 onCancel={() => setDuplicateConflict(null)}
               />
@@ -480,7 +499,8 @@ export function ResourceSearchDrawer({
                             key={`${response.session_id}-${candidate.index}`}
                             candidate={candidate}
                             importing={importingIndex === candidate.index}
-                            importDisabled={!selectedRootID || importingIndex !== null}
+                            importDisabled={!(fixedRootID?.trim() || selectedRootID) || importingIndex !== null}
+                            upgrading={upgrading}
                             onImport={() => void importCandidate(candidate)}
                           />
                         ))}
@@ -622,11 +642,13 @@ function ResourceCandidateRow({
   candidate,
   importing,
   importDisabled,
+  upgrading,
   onImport,
 }: {
   candidate: ResourceSearchCandidate
   importing: boolean
   importDisabled: boolean
+  upgrading: boolean
   onImport: () => void
 }) {
   const metadata = [
@@ -658,7 +680,7 @@ function ResourceCandidateRow({
           onClick={onImport}
         >
           {importing ? <LoaderCircle size={17} className="animate-spin" /> : <Download size={17} />}
-          <span className="hidden sm:inline">入库</span>
+          <span className="hidden sm:inline">{upgrading ? '升级' : '入库'}</span>
         </button>
       </div>
     </article>
@@ -743,12 +765,14 @@ function DuplicateConfirmation({
   candidate,
   conflict,
   importing,
+  upgrading,
   onForce,
   onCancel,
 }: {
   candidate: ResourceSearchCandidate
   conflict: ResourceImportDuplicateConflict
   importing: boolean
+  upgrading: boolean
   onForce: () => void
   onCancel: () => void
 }) {
@@ -757,11 +781,11 @@ function DuplicateConfirmation({
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-amber-900">检测到重复资源</h3>
+          <h3 className="text-sm font-semibold text-amber-900">{upgrading ? '无法将该资源作为升级版本入库' : '检测到重复资源'}</h3>
           <p className="mt-1 break-words text-sm text-amber-800">{conflict.message}</p>
           <p className="mt-1 truncate text-xs text-amber-700" title={candidate.title}>{candidate.title}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {conflict.can_force ? (
+            {conflict.can_force && !upgrading ? (
               <>
                 <button type="button" className="btn-primary px-4 py-2" disabled={importing} onClick={onForce}>
                   {importing && <LoaderCircle size={16} className="animate-spin" />}

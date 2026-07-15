@@ -16,8 +16,12 @@ var (
 )
 
 func (e *EmbyService) adultDisplayName(ctx context.Context, m *model.Media, currentName string) string {
+	return adultDisplayNameForMedia(m, currentName, e.mediaLooksAdultForEmbyTitle(ctx, m))
+}
+
+func adultDisplayNameForMedia(m *model.Media, currentName string, adult bool) string {
 	name := strings.TrimSpace(currentName)
-	if m == nil || name == "" || !e.mediaLooksAdultForEmbyTitle(ctx, m) {
+	if m == nil || name == "" || !adult {
 		return name
 	}
 	code := firstNonEmpty(
