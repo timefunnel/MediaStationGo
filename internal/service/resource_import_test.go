@@ -24,6 +24,7 @@ type fakeResourcePipeline struct {
 	activeByOwner  map[string]int
 	maxByOwner     map[string]int
 	createdOwners  []string
+	createRequests []resourcePipelineCreateRequest
 	canceledOwners []string
 	retriedOwners  []string
 }
@@ -39,11 +40,12 @@ func (f *fakeResourcePipeline) Search(_ context.Context, in resourcePipelineSear
 	}, nil
 }
 
-func (f *fakeResourcePipeline) CreateImport(_ context.Context, owner, _ string, _ resourcePipelineCreateRequest) (resourcePipelineTask, error) {
+func (f *fakeResourcePipeline) CreateImport(_ context.Context, owner, _ string, in resourcePipelineCreateRequest) (resourcePipelineTask, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCalls++
 	f.createdOwners = append(f.createdOwners, owner)
+	f.createRequests = append(f.createRequests, in)
 	if f.duplicate != nil {
 		return resourcePipelineTask{}, &resourcePipelineError{
 			StatusCode: 409, Code: "duplicate_media", Message: "duplicate",
@@ -288,5 +290,31 @@ func TestStoredResourceSearchDoesNotExposePipelineCandidateID(t *testing.T) {
 	}
 	if string(encoded) != `{"index":0,"title":"Movie"}` {
 		t.Fatalf("public candidate JSON = %s", encoded)
+	}
+}
+
+func TestResourceImportPersistsPipelineCandidateIDForCreate(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Sintel", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var session model.ResourceSearchSession
+	if err := repos.DB.First(&session, "id = ?", search.SessionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(session.ResultsJSON, `"candidate_id":"candidate-1"`) {
+		t.Fatalf("stored search session has no pipeline candidate id: %s", session.ResultsJSON)
+	}
+	if _, err := svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pipeline.mu.Lock()
+	defer pipeline.mu.Unlock()
+	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].CandidateID != "candidate-1" {
+		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
 	}
 }

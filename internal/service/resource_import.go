@@ -167,7 +167,12 @@ type ResourceImportListResult struct {
 type storedResourceSearch struct {
 	PipelineSessionID string                     `json:"pipeline_session_id"`
 	Capabilities      ResourceSearchCapabilities `json:"capabilities"`
-	Candidates        []ResourceSearchCandidate  `json:"candidates"`
+	Candidates        []storedResourceCandidate  `json:"candidates"`
+}
+
+type storedResourceCandidate struct {
+	ResourceSearchCandidate
+	CandidateID string `json:"candidate_id"`
 }
 
 func NewResourceImportService(cfg config.ResourceImportConfig, log *zap.Logger, repos *repository.Container, ctx context.Context) (*ResourceImportService, error) {
@@ -240,7 +245,15 @@ func (s *ResourceImportService) Search(ctx context.Context, userID string, libra
 		if err := json.Unmarshal([]byte(cached.ResultsJSON), &stored); err != nil {
 			return ResourceSearchResponse{}, errors.New("cached resource search session data is invalid")
 		}
-		return resourceSearchPage(cached, stored, root, in.Page, in.PageSize), nil
+		if storedResourceSearchValid(stored) {
+			return resourceSearchPage(cached, stored, root, in.Page, in.PageSize), nil
+		}
+		if err := s.repos.DB.WithContext(ctx).Unscoped().Delete(&cached).Error; err != nil {
+			return ResourceSearchResponse{}, err
+		}
+		if s.log != nil {
+			s.log.Warn("discarded invalid resource search cache", zap.String("session_id", cached.ID))
+		}
 	}
 
 	pipeline, err := s.client.Search(ctx, resourcePipelineSearchRequest{
@@ -297,7 +310,8 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 	if in.CandidateIndex < 0 || in.CandidateIndex >= len(stored.Candidates) {
 		return ResourceImportTask{}, errors.New("candidate_index is out of range")
 	}
-	candidate := stored.Candidates[in.CandidateIndex]
+	storedCandidate := stored.Candidates[in.CandidateIndex]
+	candidate := storedCandidate.ResourceSearchCandidate
 	category, provider, mediaType := resourceTargetMetadata(library.Type)
 	rootOpenListPath, err := resourceRootOpenListPath(root.Path)
 	if err != nil {
@@ -312,7 +326,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 
 	pipelineTask, err := s.client.CreateImport(ctx, userID, idempotencyKey, resourcePipelineCreateRequest{
 		SearchSessionID:  stored.PipelineSessionID,
-		CandidateID:      candidate.CandidateID,
+		CandidateID:      storedCandidate.CandidateID,
 		Category:         category,
 		LibraryID:        library.ID,
 		RootID:           root.ID,
@@ -664,6 +678,9 @@ func (s *ResourceImportService) loadOwnedSearch(ctx context.Context, userID, lib
 	if err := json.Unmarshal([]byte(row.ResultsJSON), &stored); err != nil {
 		return row, stored, errors.New("resource search session data is invalid")
 	}
+	if !storedResourceSearchValid(stored) {
+		return row, stored, errors.New("resource search session data is invalid; search again")
+	}
 	return row, stored, nil
 }
 
@@ -752,7 +769,10 @@ func resourceSearchPage(record model.ResourceSearchSession, stored storedResourc
 	if end > total {
 		end = total
 	}
-	results := append([]ResourceSearchCandidate(nil), stored.Candidates[start:end]...)
+	results := make([]ResourceSearchCandidate, 0, end-start)
+	for _, candidate := range stored.Candidates[start:end] {
+		results = append(results, candidate.ResourceSearchCandidate)
+	}
 	return ResourceSearchResponse{
 		SessionID: record.ID, Query: record.Query, Page: page, PageSize: pageSize,
 		Total: total, TotalPages: totalPages,
@@ -761,30 +781,45 @@ func resourceSearchPage(record model.ResourceSearchSession, stored storedResourc
 	}
 }
 
-func normalizeResourceCandidates(items []map[string]any) ([]ResourceSearchCandidate, error) {
+func normalizeResourceCandidates(items []map[string]any) ([]storedResourceCandidate, error) {
 	if len(items) > resourceSearchLimit {
 		items = items[:resourceSearchLimit]
 	}
-	out := make([]ResourceSearchCandidate, 0, len(items))
+	out := make([]storedResourceCandidate, 0, len(items))
 	for index, raw := range items {
 		title := resourceString(raw, "title", "name")
 		candidateID := resourceString(raw, "candidate_id")
 		if title == "" || candidateID == "" {
 			return nil, errors.New("media-pipeline search returned an invalid candidate")
 		}
-		out = append(out, ResourceSearchCandidate{
-			Index: index, Title: title, CandidateID: candidateID,
-			SizeBytes:    resourceInt64(raw, "size_bytes", "size"),
-			SizeText:     resourceString(raw, "size_text", "size_label"),
-			Source:       resourceString(raw, "source", "indexer", "source_name"),
-			Seeders:      int(resourceInt64(raw, "seeders", "seed")),
-			Resolution:   resourceString(raw, "resolution", "quality"),
-			Subtitle:     resourceString(raw, "subtitle", "subtitles"),
-			ResourceType: resourceString(raw, "resource_type", "type"),
-			Summary:      truncateResourceText(resourceString(raw, "summary", "description"), 600),
+		out = append(out, storedResourceCandidate{
+			ResourceSearchCandidate: ResourceSearchCandidate{
+				Index: index, Title: title,
+				SizeBytes:    resourceInt64(raw, "size_bytes", "size"),
+				SizeText:     resourceString(raw, "size_text", "size_label"),
+				Source:       resourceString(raw, "source", "indexer", "source_name"),
+				Seeders:      int(resourceInt64(raw, "seeders", "seed")),
+				Resolution:   resourceString(raw, "resolution", "quality"),
+				Subtitle:     resourceString(raw, "subtitle", "subtitles"),
+				ResourceType: resourceString(raw, "resource_type", "type"),
+				Summary:      truncateResourceText(resourceString(raw, "summary", "description"), 600),
+			},
+			CandidateID: candidateID,
 		})
 	}
 	return out, nil
+}
+
+func storedResourceSearchValid(stored storedResourceSearch) bool {
+	if strings.TrimSpace(stored.PipelineSessionID) == "" {
+		return false
+	}
+	for _, candidate := range stored.Candidates {
+		if strings.TrimSpace(candidate.CandidateID) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func resourceTargetMetadata(libraryType string) (category, provider, mediaType string) {
