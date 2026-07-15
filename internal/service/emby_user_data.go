@@ -57,6 +57,11 @@ func (e *EmbyService) MarkPlayed(ctx context.Context, userID, mediaID string, pl
 
 // RecordProgress 记录播放进度（来自 Emby 客户端的 /Sessions/Playing/Progress）。
 func (e *EmbyService) RecordProgress(ctx context.Context, userID, mediaID string, positionTicks, runtimeTicks int64) error {
+	if e.playback != nil {
+		if err := e.playback.ValidateProgressWrite(ctx, userID, mediaID); err != nil {
+			return err
+		}
+	}
 	pos := positionTicks / 10_000
 	dur := runtimeTicks / 10_000
 	if dur <= 0 {

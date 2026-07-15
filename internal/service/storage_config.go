@@ -30,6 +30,7 @@ type StorageConfigService struct {
 	resolveMu     sync.Mutex
 	resolveCache  map[string]cloudResolveCacheEntry
 	resolveFlight map[string]*cloudResolveCall
+	resolveGen    map[string]uint64
 	changeMu      sync.RWMutex
 	onChange      func(string)
 }
@@ -64,6 +65,7 @@ func NewStorageConfigService(log *zap.Logger, repo *repository.Container, crypto
 		client:        &http.Client{Timeout: 120 * time.Second},
 		resolveCache:  make(map[string]cloudResolveCacheEntry),
 		resolveFlight: make(map[string]*cloudResolveCall),
+		resolveGen:    make(map[string]uint64),
 	}
 }
 

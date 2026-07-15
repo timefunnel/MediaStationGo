@@ -13,6 +13,8 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
+const cloudPlaybackMediaIDContextKey = "cloud_playback_media_id"
+
 func enforceScopedPlaybackToken(c *gin.Context, mediaID string) bool {
 	mediaID = strings.TrimSpace(mediaID)
 	purpose, _ := c.Get(middleware.CtxTokenPurpose)
@@ -35,7 +37,13 @@ func enforceScopedCloudPlaybackToken(c *gin.Context, svc *service.Container, typ
 	purpose, _ := c.Get(middleware.CtxTokenPurpose)
 	if strings.TrimSpace(toString(purpose)) == "" {
 		role, _ := c.Get(middleware.CtxUserRole)
-		if strings.TrimSpace(toString(role)) == "admin" || cloudPlaybackSidecarRef(ref) {
+		if cloudPlaybackSidecarRef(ref) {
+			return true
+		}
+		if strings.TrimSpace(toString(role)) == "admin" {
+			if m := cloudPlaybackMediaForRequest(c, svc, typ, ref); m != nil && cloudPlaybackTargetMatchesMedia(m, typ, ref) {
+				c.Set(cloudPlaybackMediaIDContextKey, m.ID)
+			}
 			return true
 		}
 		userID := currentUserID(c)
@@ -47,6 +55,7 @@ func enforceScopedCloudPlaybackToken(c *gin.Context, svc *service.Container, typ
 			c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
 			return false
 		}
+		c.Set(cloudPlaybackMediaIDContextKey, m.ID)
 		return true
 	}
 	if strings.TrimSpace(toString(purpose)) != service.ExternalPlaybackTokenPurpose {
@@ -68,6 +77,7 @@ func enforceScopedCloudPlaybackToken(c *gin.Context, svc *service.Container, typ
 		c.JSON(http.StatusForbidden, gin.H{"error": "playback token target mismatch"})
 		return false
 	}
+	c.Set(cloudPlaybackMediaIDContextKey, m.ID)
 	return true
 }
 

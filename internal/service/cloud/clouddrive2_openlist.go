@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-const openListParentWarmupReuseWindow = time.Second
+const (
+	openListParentWarmupReuseWindow = time.Second
+	openListParentWarmupMaxDuration = 10 * time.Second
+)
 
 type openListAPIResponseError struct {
 	provider string
@@ -130,17 +133,27 @@ func (p *cloudDrive2Provider) listOpenListAPIWithRefresh(ctx context.Context, di
 }
 
 func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, fileRef string) (*DirectLink, error) {
-	link, err := p.resolveOpenListAPIDirectOnce(ctx, fileRef)
+	target := normalizeCloudDAVPath(fileRef)
+	parent := path.Dir(target)
+	var warmErr error
+	if parent != "." && parent != "/" {
+		warmCtx, cancel := context.WithTimeout(ctx, openListParentWarmupMaxDuration)
+		warmErr = p.warmOpenListParent(warmCtx, parent)
+		cancel()
+	}
+
+	link, err := p.resolveOpenListAPIDirectOnce(ctx, target)
 	if err == nil || !isOpenListObjectCacheMiss(err) {
+		if err != nil && warmErr != nil {
+			return nil, fmt.Errorf("%s: list parent %s before api get failed: %v (api get: %w)", p.name, parent, warmErr, err)
+		}
 		return link, err
 	}
 
-	target := normalizeCloudDAVPath(fileRef)
-	parent := path.Dir(target)
 	if parent == "." || parent == "/" {
 		return nil, err
 	}
-	if warmErr := p.warmOpenListParent(ctx, parent); warmErr != nil {
+	if warmErr != nil {
 		return nil, fmt.Errorf("%s: list parent %s after api get cache miss failed: %w (initial get: %v)", p.name, parent, warmErr, err)
 	}
 	link, retryErr := p.resolveOpenListAPIDirectOnce(ctx, target)

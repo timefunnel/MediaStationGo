@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/middleware"
@@ -57,6 +58,81 @@ func TestProxyCloudResolvedLinkUsesHEADWithoutSyntheticRange(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Fatalf("HEAD response body length = %d, want 0", rec.Body.Len())
+	}
+}
+
+func TestCloudPlaybackAuthorizesProgressOnlyAfterSuccessfulResolve(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var getSucceeds bool
+	openList := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/fs/list":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
+		case "/api/fs/get":
+			if !getSucceeds {
+				_, _ = w.Write([]byte(`{"code":500,"message":"driver unavailable"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv"}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer openList.Close()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Library{}, &model.Media{}, &model.PlaybackHistory{}, &model.StorageConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.New(db)
+	if err := db.Create(&model.User{Base: model.Base{ID: "user-1"}, Username: "user-1", PasswordHash: "x", IsActive: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	lib := model.Library{Base: model.Base{ID: "library-1"}, Name: "Cloud", Path: "cloud://openlist/Movies", Type: "movie", Enabled: true}
+	if err := db.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{Base: model.Base{ID: "media-1"}, LibraryID: lib.ID, Title: "Movie", Path: "cloud://openlist/Movies/Movie.mkv"}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	log := zap.NewNop()
+	storage := service.NewStorageConfigService(log, repos, service.NewCryptoService("test-secret", log))
+	if _, err := storage.Save(t.Context(), service.StorageInput{Type: "openlist", Config: map[string]any{"server": openList.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	playback := service.NewPlaybackService(log, repos)
+	svc := &service.Container{Repo: repos, StorageCfg: storage, Playback: playback, Log: log}
+
+	failedRecorder := httptest.NewRecorder()
+	failedContext, _ := gin.CreateTestContext(failedRecorder)
+	failedContext.Set(middleware.CtxUserID, "user-1")
+	failedContext.Set(cloudPlaybackMediaIDContextKey, media.ID)
+	failedContext.Request = httptest.NewRequest(http.MethodGet, "/api/cloud/play/openlist?ref=%2FMovies%2FMovie.mkv&media_id=media-1", nil)
+	serveCloudResolvedLink(svc, failedContext, "openlist", "/Movies/Movie.mkv")
+	if failedRecorder.Code != http.StatusBadGateway {
+		t.Fatalf("failed status = %d body=%s", failedRecorder.Code, failedRecorder.Body.String())
+	}
+	if err := playback.ValidateProgressWrite(t.Context(), "user-1", media.ID); err != service.ErrCloudPlaybackNotResolved {
+		t.Fatalf("failed resolve grant error = %v", err)
+	}
+
+	getSucceeds = true
+	successRecorder := httptest.NewRecorder()
+	successContext, _ := gin.CreateTestContext(successRecorder)
+	successContext.Set(middleware.CtxUserID, "user-1")
+	successContext.Set(cloudPlaybackMediaIDContextKey, media.ID)
+	successContext.Request = httptest.NewRequest(http.MethodGet, "/api/cloud/play/openlist?ref=%2FMovies%2FMovie.mkv&media_id=media-1", nil)
+	serveCloudResolvedLink(svc, successContext, "openlist", "/Movies/Movie.mkv")
+	if successRecorder.Code != http.StatusFound {
+		t.Fatalf("success status = %d body=%s", successRecorder.Code, successRecorder.Body.String())
+	}
+	if err := playback.ValidateProgressWrite(t.Context(), "user-1", media.ID); err != nil {
+		t.Fatalf("successful resolve did not authorize progress: %v", err)
 	}
 }
 

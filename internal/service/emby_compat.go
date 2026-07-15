@@ -52,6 +52,7 @@ type EmbyService struct {
 	probe    cloudPlaybackProber
 	subtitle *SubtitleService
 	cache    *RuntimeCacheService
+	playback *PlaybackService
 
 	virtualMu      sync.RWMutex
 	virtualSeries  map[string]embySeriesCacheEntry
@@ -96,6 +97,12 @@ func (e *EmbyService) SetRuntimeCache(cache *RuntimeCacheService) *EmbyService {
 func (e *EmbyService) SetSubtitleService(subtitle *SubtitleService) {
 	if e != nil {
 		e.subtitle = subtitle
+	}
+}
+
+func (e *EmbyService) SetPlaybackService(playback *PlaybackService) {
+	if e != nil {
+		e.playback = playback
 	}
 }
 

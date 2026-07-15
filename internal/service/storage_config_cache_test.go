@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +18,10 @@ import (
 func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
 	var resolves atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -107,6 +114,10 @@ func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
 	var resolves atomic.Int32
 	expiry := time.Now().Add(time.Hour).Unix()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -168,6 +179,10 @@ func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
 	var resolves atomic.Int32
 	expiry := time.Now().Add(time.Hour).Unix()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -222,4 +237,160 @@ func TestStorageConfigSaveNotifiesChangeHandler(t *testing.T) {
 	if changed != "openlist" {
 		t.Fatalf("changed=%q, want openlist", changed)
 	}
+}
+
+func TestCloudResolveContinuesAfterOwnerContextCanceled(t *testing.T) {
+	var resolves atomic.Int32
+	getStarted := make(chan struct{})
+	releaseGet := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			if resolves.Add(1) == 1 {
+				close(getStarted)
+			}
+			<-releaseGet
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"code":200,"data":{"raw_url":"http://cdn.local/movie.mkv"}}`)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	ownerCtx, cancelOwner := context.WithCancel(t.Context())
+	ownerErr := make(chan error, 1)
+	go func() {
+		_, err := storage.CloudResolve(ownerCtx, "openlist", "/Movies/f1.mkv", "Player/1")
+		ownerErr <- err
+	}()
+	select {
+	case <-getStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cold resolve did not start")
+	}
+	cancelOwner()
+	if err := <-ownerErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("owner error = %v, want context canceled", err)
+	}
+
+	waiterResult := make(chan *cloud.DirectLink, 1)
+	waiterErr := make(chan error, 1)
+	go func() {
+		link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+		waiterResult <- link
+		waiterErr <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	if resolves.Load() != 1 {
+		t.Fatalf("resolve calls = %d, want one shared flight", resolves.Load())
+	}
+	close(releaseGet)
+	if err := <-waiterErr; err != nil {
+		t.Fatal(err)
+	}
+	if link := <-waiterResult; link == nil || link.URL != "http://cdn.local/movie.mkv" {
+		t.Fatalf("waiter link = %#v", link)
+	}
+	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	if err != nil || link == nil || link.URL != "http://cdn.local/movie.mkv" || resolves.Load() != 1 {
+		t.Fatalf("cached link=%#v err=%v resolves=%d", link, err, resolves.Load())
+	}
+}
+
+func TestCloudResolveKeepsDifferentUserAgentsIndependent(t *testing.T) {
+	var resolves atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			resolves.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.URL == second.URL || resolves.Load() != 2 {
+		t.Fatalf("first=%q second=%q resolves=%d, want UA-specific links", first.URL, second.URL, resolves.Load())
+	}
+}
+
+func TestCloudResolveConfigChangePreventsOldFlightCacheWrite(t *testing.T) {
+	var resolves atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			call := resolves.Add(1)
+			if call == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	oldResult := make(chan error, 1)
+	go func() {
+		_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+		oldResult <- err
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old flight did not start")
+	}
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token-2"}}); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirst)
+	if err := <-oldResult; err == nil || !strings.Contains(err.Error(), "storage config changed") {
+		t.Fatalf("old flight error = %v, want config changed", err)
+	}
+	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.URL != "http://cdn.local/2.mkv" || resolves.Load() != 2 {
+		t.Fatalf("link=%#v resolves=%d, old result was cached", link, resolves.Load())
+	}
+}
+
+func writeOpenListCacheList(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprint(w, `{"code":200,"data":{"content":[],"total":0}}`)
 }

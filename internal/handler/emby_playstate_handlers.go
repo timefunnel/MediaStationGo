@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
@@ -24,7 +27,10 @@ func embyPlayingProgressHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		var req embyPlayingReq
-		_ = c.ShouldBindJSON(&req)
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid playback progress"})
+			return
+		}
 		if req.ItemId == "" {
 			req.ItemId = c.Query("ItemId")
 		}
@@ -43,7 +49,21 @@ func embyPlayingProgressHandler(svc *service.Container) gin.HandlerFunc {
 			c.Status(http.StatusUnauthorized)
 			return
 		}
-		_ = svc.Emby.RecordProgress(c.Request.Context(), uid, req.ItemId, req.PositionTicks, req.RunTimeTicks)
+		if err := svc.Emby.RecordProgress(c.Request.Context(), uid, req.ItemId, req.PositionTicks, req.RunTimeTicks); err != nil {
+			if errors.Is(err, service.ErrCloudPlaybackNotResolved) {
+				if svc.Log != nil {
+					svc.Log.Warn("ignored playback progress without successful cloud resolve",
+						zap.String("user_id", uid),
+						zap.String("media_id", req.ItemId))
+				}
+			} else {
+				if svc.Log != nil {
+					svc.Log.Error("record playback progress failed", zap.Error(err))
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "record playback progress failed"})
+				return
+			}
+		}
 		stopped := strings.Contains(strings.ToLower(c.FullPath()+" "+c.Request.URL.Path), "stopped")
 		if svc.Sessions != nil {
 			svc.Sessions.RecordPlayback(c.Request.Context(), uid, "",

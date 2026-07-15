@@ -9,6 +9,8 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,13 +21,23 @@ import (
 
 // PlaybackService bundles history / favourite / playlist business logic.
 type PlaybackService struct {
-	log  *zap.Logger
-	repo *repository.Container
+	log          *zap.Logger
+	repo         *repository.Container
+	resolvedMu   sync.Mutex
+	resolvedPlay map[string]time.Time
+	resolvedGCAt time.Time
 }
+
+var ErrCloudPlaybackNotResolved = errors.New("cloud playback direct link was not resolved successfully")
+
+const (
+	resolvedCloudPlaybackTTL      = 6 * time.Hour
+	resolvedCloudPlaybackGCPeriod = 30 * time.Minute
+)
 
 // NewPlaybackService is the constructor.
 func NewPlaybackService(log *zap.Logger, repo *repository.Container) *PlaybackService {
-	return &PlaybackService{log: log, repo: repo}
+	return &PlaybackService{log: log, repo: repo, resolvedPlay: make(map[string]time.Time)}
 }
 
 // ─── History ────────────────────────────────────────────────────────────────
@@ -37,6 +49,9 @@ func (p *PlaybackService) RecordProgress(ctx context.Context, userID, mediaID st
 	if userID == "" || mediaID == "" {
 		return errors.New("missing user or media")
 	}
+	if err := p.ValidateProgressWrite(ctx, userID, mediaID); err != nil {
+		return err
+	}
 	completed := duration > 0 && position >= duration-30_000
 	h := &model.PlaybackHistory{
 		UserID:     userID,
@@ -47,6 +62,93 @@ func (p *PlaybackService) RecordProgress(ctx context.Context, userID, mediaID st
 		Completed:  completed,
 	}
 	return p.repo.History.Upsert(ctx, h)
+}
+
+func (p *PlaybackService) AuthorizeResolvedCloudPlayback(userID, mediaID string) {
+	if p == nil {
+		return
+	}
+	key := resolvedCloudPlaybackKey(userID, mediaID)
+	if key == "" {
+		return
+	}
+	now := time.Now()
+	p.resolvedMu.Lock()
+	if p.resolvedPlay == nil {
+		p.resolvedPlay = make(map[string]time.Time)
+	}
+	if !p.resolvedGCAt.After(now) {
+		for existing, expiresAt := range p.resolvedPlay {
+			if !expiresAt.After(now) {
+				delete(p.resolvedPlay, existing)
+			}
+		}
+		p.resolvedGCAt = now.Add(resolvedCloudPlaybackGCPeriod)
+	}
+	p.resolvedPlay[key] = now.Add(resolvedCloudPlaybackTTL)
+	p.resolvedMu.Unlock()
+}
+
+func (p *PlaybackService) ValidateProgressWrite(ctx context.Context, userID, mediaID string) error {
+	if p == nil || p.repo == nil || p.repo.Media == nil {
+		return errors.New("playback service unavailable")
+	}
+	if resolvedCloudPlaybackKey(userID, mediaID) == "" {
+		return errors.New("missing user or media")
+	}
+	if p.hasResolvedCloudPlayback(userID, mediaID) {
+		return nil
+	}
+	m, err := p.repo.Media.FindByID(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return errors.New("media not found")
+	}
+	if !cloudBackedPlaybackMedia(m) {
+		return nil
+	}
+	return ErrCloudPlaybackNotResolved
+}
+
+func (p *PlaybackService) hasResolvedCloudPlayback(userID, mediaID string) bool {
+	key := resolvedCloudPlaybackKey(userID, mediaID)
+	if key == "" {
+		return false
+	}
+	now := time.Now()
+	p.resolvedMu.Lock()
+	defer p.resolvedMu.Unlock()
+	expiresAt, ok := p.resolvedPlay[key]
+	if !ok {
+		return false
+	}
+	if !expiresAt.After(now) {
+		delete(p.resolvedPlay, key)
+		return false
+	}
+	return true
+}
+
+func resolvedCloudPlaybackKey(userID, mediaID string) string {
+	userID = strings.TrimSpace(userID)
+	mediaID = strings.TrimSpace(mediaID)
+	if userID == "" || mediaID == "" {
+		return ""
+	}
+	return userID + "\x00" + mediaID
+}
+
+func cloudBackedPlaybackMedia(m *model.Media) bool {
+	if m == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
+		return true
+	}
+	_, _, ok := parseCloudMediaPlaybackURL(m.STRMURL)
+	return ok
 }
 
 // HistoryItem joins the playback row with its media so the API consumer

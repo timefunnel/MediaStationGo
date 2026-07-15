@@ -16,7 +16,7 @@ func TestOpenListWebDAVListAndResolve(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/api/fs/get" {
+		if r.URL.Path == "/api/fs/list" || r.URL.Path == "/api/fs/get" {
 			http.NotFound(w, r)
 			return
 		}

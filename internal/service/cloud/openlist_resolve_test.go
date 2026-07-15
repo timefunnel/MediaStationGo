@@ -17,11 +17,18 @@ func TestOpenListResolveUsesAPIRawURLFor302Playback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
-		if r.Method != http.MethodPost || r.URL.Path != "/api/fs/get" {
+		if r.Method != http.MethodPost {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+		switch r.URL.Path {
+		case "/api/fs/list":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
+		case "/api/fs/get":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer srv.Close()
 
@@ -51,6 +58,9 @@ func TestOpenListResolveCollapsesHostedRawURLRedirectToCDN(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/fs/list":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
 		case "/api/fs/get":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/d/Cloud/Movie.mkv?sign=1"}}`))
@@ -98,6 +108,11 @@ func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
 				t.Fatalf("login body = %#v", body)
 			}
 			_, _ = w.Write([]byte(`{"code":200,"data":{"token":"api-token"}}`))
+		case "/api/fs/list":
+			if r.Header.Get("Authorization") != "api-token" {
+				t.Fatalf("list Authorization = %q, want api-token", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
 		case "/api/fs/get":
 			gotAuth = r.Header.Get("Authorization")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
@@ -128,11 +143,15 @@ func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
 
 func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/fs/get" {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/fs/list":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
+		case "/api/fs/get":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/dav/Cloud/Movie.mkv","header":{"Cookie":"sid=abc"}}}`))
+		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/dav/Cloud/Movie.mkv","header":{"Cookie":"sid=abc"}}}`))
 	}))
 	defer srv.Close()
 
@@ -150,6 +169,9 @@ func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/fs/list":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
 		case "/api/fs/get":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/d/Cloud/Movie.mkv?sign=1"}}`))
@@ -181,6 +203,9 @@ func TestOpenListResolveDoesNotFallbackToWebDAVWhenAPIRawURLFails(t *testing.T) 
 	var davSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/fs/list":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
 		case "/api/fs/get":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":500,"message":"driver cannot provide raw_url"}`))
@@ -212,6 +237,9 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fs/get":
+			if listCalls == 0 {
+				t.Fatal("api get started before target parent prewarm")
+			}
 			getCalls++
 			if getCalls == 1 {
 				_, _ = w.Write([]byte(`{"code":500,"message":"failed to get obj: code: 430004, message: file not found"}`))
@@ -247,7 +275,37 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 	}
 }
 
-func TestOpenListResolveDoesNotListParentForOtherAPIErrors(t *testing.T) {
+func TestOpenListResolveContinuesWhenParentPrewarmFailsButGetSucceeds(t *testing.T) {
+	var getCalls, listCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/fs/list":
+			listCalls++
+			_, _ = w.Write([]byte(`{"code":500,"message":"temporary list failure"}`))
+		case "/api/fs/get":
+			getCalls++
+			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p, err := New(TypeOpenList, map[string]any{"server": srv.URL, "token": "alist-token"}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := p.Resolve(context.Background(), "/115/Movies/Movie/Movie.mkv")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if link.URL != "https://cdn.example.test/movie.mkv?sign=1" || listCalls != 1 || getCalls != 1 {
+		t.Fatalf("link=%#v listCalls=%d getCalls=%d", link, listCalls, getCalls)
+	}
+}
+
+func TestOpenListResolvePrewarmsParentBeforeOtherAPIErrors(t *testing.T) {
 	var listCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -263,8 +321,8 @@ func TestOpenListResolveDoesNotListParentForOtherAPIErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = p.Resolve(context.Background(), "/115/电影/Movie/Movie.mkv")
-	if err == nil || listCalls != 0 {
-		t.Fatalf("err=%v listCalls=%d, want original failure without list", err, listCalls)
+	if err == nil || listCalls != 1 {
+		t.Fatalf("err=%v listCalls=%d, want one targeted parent prewarm", err, listCalls)
 	}
 }
 
@@ -292,7 +350,6 @@ func TestOpenListResolveDoesNotListRootForObjectCacheMiss(t *testing.T) {
 func TestOpenListResolveCollapsesConcurrentParentWarmup(t *testing.T) {
 	var getCalls, listCalls atomic.Int32
 	listStarted := make(chan struct{})
-	cacheMisses := make(chan struct{})
 	releaseList := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -300,9 +357,6 @@ func TestOpenListResolveCollapsesConcurrentParentWarmup(t *testing.T) {
 		case "/api/fs/get":
 			call := getCalls.Add(1)
 			if call <= 2 {
-				if call == 2 {
-					close(cacheMisses)
-				}
 				_, _ = w.Write([]byte(`{"code":500,"message":"failed to get obj: code: 430004, message: file not found"}`))
 				return
 			}
@@ -342,11 +396,6 @@ func TestOpenListResolveCollapsesConcurrentParentWarmup(t *testing.T) {
 	case <-listStarted:
 	case <-time.After(time.Second):
 		t.Fatal("parent list did not start")
-	}
-	select {
-	case <-cacheMisses:
-	case <-time.After(time.Second):
-		t.Fatal("concurrent cache misses did not arrive")
 	}
 	close(releaseList)
 	wg.Wait()

@@ -24,9 +24,10 @@ type cloudResolveCacheEntry struct {
 }
 
 type cloudResolveCall struct {
-	done chan struct{}
-	link *cloud.DirectLink
-	err  error
+	done       chan struct{}
+	generation uint64
+	link       *cloud.DirectLink
+	err        error
 }
 
 const (
@@ -55,31 +56,18 @@ func (s *StorageConfigService) CloudResolve(ctx context.Context, typ, fileRef, c
 		}
 		return link, nil
 	}
-	if call, owner := s.beginResolve(cacheKey); !owner {
-		select {
-		case <-call.done:
-			if call.err != nil {
-				return nil, call.err
-			}
-			return cloneDirectLink(call.link), nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
+	call, owner := s.beginResolve(cacheKey, typ)
+	if owner {
+		s.runResolve(cacheKey, typ, fileRef, clientUA, call)
+	}
+	select {
+	case <-call.done:
+		if call.err != nil {
+			return nil, call.err
 		}
-	} else {
-		defer s.finishResolve(cacheKey, call)
-		p, err := s.cloudProviderWithUA(ctx, typ, clientUA)
-		if err != nil {
-			call.err = err
-			return nil, err
-		}
-		link, err := s.resolveCloudDirectLinkWithRetry(ctx, p, fileRef)
-		if err != nil {
-			call.err = err
-			return nil, err
-		}
-		call.link = cloneDirectLink(link)
-		s.storeResolvedLink(cacheKey, typ, link)
-		return cloneDirectLink(link), nil
+		return cloneDirectLink(call.link), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
@@ -125,72 +113,83 @@ func (s *StorageConfigService) cachedResolve(key, typ string) (*cloud.DirectLink
 	return cloneDirectLink(entry.link), true, shouldRefresh
 }
 
-func (s *StorageConfigService) beginResolve(key string) (*cloudResolveCall, bool) {
+func (s *StorageConfigService) beginResolve(key, typ string) (*cloudResolveCall, bool) {
 	s.resolveMu.Lock()
 	defer s.resolveMu.Unlock()
 	if s.resolveFlight == nil {
 		s.resolveFlight = make(map[string]*cloudResolveCall)
 	}
+	if s.resolveGen == nil {
+		s.resolveGen = make(map[string]uint64)
+	}
 	if call := s.resolveFlight[key]; call != nil {
 		return call, false
 	}
-	call := &cloudResolveCall{done: make(chan struct{})}
+	call := &cloudResolveCall{
+		done:       make(chan struct{}),
+		generation: s.resolveGen[strings.TrimSpace(typ)],
+	}
 	s.resolveFlight[key] = call
 	return call, true
 }
 
-func (s *StorageConfigService) finishResolve(key string, call *cloudResolveCall) {
+func (s *StorageConfigService) runResolve(key, typ, fileRef, clientUA string, call *cloudResolveCall) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cloudResolveBackgroundRefreshMax)
+		defer cancel()
+		p, err := s.cloudProviderWithUA(ctx, typ, clientUA)
+		if err != nil {
+			s.completeResolve(key, typ, call, nil, err)
+			return
+		}
+		link, err := s.resolveCloudDirectLinkWithRetry(ctx, p, fileRef)
+		s.completeResolve(key, typ, call, link, err)
+	}()
+}
+
+func (s *StorageConfigService) completeResolve(key, typ string, call *cloudResolveCall, link *cloud.DirectLink, resolveErr error) {
+	typ = strings.TrimSpace(typ)
+	ttl, staleTTL := cloudResolveCacheDurations(typ, link)
+	if resolveErr != nil && s.log != nil {
+		s.log.Debug("resolve cloud direct link failed", zap.String("provider", typ), zap.Error(resolveErr))
+	}
+
 	s.resolveMu.Lock()
+	if s.resolveGen == nil {
+		s.resolveGen = make(map[string]uint64)
+	}
+	if s.resolveGen[typ] != call.generation {
+		call.err = fmt.Errorf("%s storage config changed", typ)
+	} else if resolveErr != nil {
+		call.err = resolveErr
+	} else if link == nil || strings.TrimSpace(link.URL) == "" {
+		call.err = errors.New("cloud resolve returned empty link")
+	} else {
+		call.link = cloneDirectLink(link)
+		s.storeResolvedLinkLocked(key, link, ttl, staleTTL)
+	}
 	if current := s.resolveFlight[key]; current == call {
 		delete(s.resolveFlight, key)
 	}
-	s.resolveMu.Unlock()
 	close(call.done)
+	s.resolveMu.Unlock()
 }
 
 func (s *StorageConfigService) refreshResolveInBackground(key, typ, fileRef, clientUA string) {
 	if s == nil {
 		return
 	}
-	go func() {
-		call, owner := s.beginResolve(key)
-		if !owner {
-			return
-		}
-		defer s.finishResolve(key, call)
-		ctx, cancel := context.WithTimeout(context.Background(), cloudResolveBackgroundRefreshMax)
-		defer cancel()
-		p, err := s.cloudProviderWithUA(ctx, typ, clientUA)
-		if err != nil {
-			call.err = err
-			if s.log != nil {
-				s.log.Debug("refresh cloud direct link failed", zap.String("provider", typ), zap.Error(err))
-			}
-			return
-		}
-		link, err := s.resolveCloudDirectLinkWithRetry(ctx, p, fileRef)
-		if err != nil {
-			call.err = err
-			if s.log != nil {
-				s.log.Debug("refresh cloud direct link failed", zap.String("provider", typ), zap.Error(err))
-			}
-			return
-		}
-		call.link = cloneDirectLink(link)
-		s.storeResolvedLink(key, typ, link)
-	}()
+	call, owner := s.beginResolve(key, typ)
+	if !owner {
+		return
+	}
+	s.runResolve(key, typ, fileRef, clientUA, call)
 }
 
-func (s *StorageConfigService) storeResolvedLink(key, typ string, link *cloud.DirectLink) {
-	if link == nil || strings.TrimSpace(link.URL) == "" {
+func (s *StorageConfigService) storeResolvedLinkLocked(key string, link *cloud.DirectLink, ttl, staleTTL time.Duration) {
+	if link == nil || strings.TrimSpace(link.URL) == "" || ttl <= 0 {
 		return
 	}
-	ttl, staleTTL := cloudResolveCacheDurations(typ, link)
-	if ttl <= 0 {
-		return
-	}
-	s.resolveMu.Lock()
-	defer s.resolveMu.Unlock()
 	if s.resolveCache == nil {
 		s.resolveCache = make(map[string]cloudResolveCacheEntry)
 	}
@@ -353,14 +352,18 @@ func (s *StorageConfigService) clearResolveCacheForType(typ string) {
 	prefix := typ + "\x00"
 	s.resolveMu.Lock()
 	defer s.resolveMu.Unlock()
+	if s.resolveGen == nil {
+		s.resolveGen = make(map[string]uint64)
+	}
+	s.resolveGen[typ]++
 	for key := range s.resolveCache {
 		if strings.HasPrefix(key, prefix) {
 			delete(s.resolveCache, key)
 		}
 	}
-	for key, call := range s.resolveFlight {
-		if strings.HasPrefix(key, prefix) && call != nil {
-			call.err = fmt.Errorf("%s storage config changed", typ)
+	for key := range s.resolveFlight {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.resolveFlight, key)
 		}
 	}
 }

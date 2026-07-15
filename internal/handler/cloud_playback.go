@@ -80,6 +80,7 @@ func serveCloudResolvedLink(svc *service.Container, c *gin.Context, typ, ref str
 	}
 	if !link.Proxy {
 		// Pure offload: send the client straight to the cloud CDN.
+		authorizeResolvedCloudPlayback(svc, c, ref)
 		setRedirectNoStoreHeaders(c)
 		logCloudPlayback(svc, "cloud playback redirect",
 			append(cloudPlaybackLogFields(typ, ref, link, resolveDur),
@@ -184,6 +185,7 @@ func handleCloudProxyError(playback cloudPlaybackRequest, req *http.Request, res
 
 func streamCloudProxyResponse(playback cloudPlaybackRequest, req *http.Request, resp *http.Response, clientMethod, upstreamMethod string, upstreamHeaderDur time.Duration) {
 	c := playback.c
+	authorizeResolvedCloudPlayback(playback.svc, c, playback.ref)
 	c.Status(resp.StatusCode)
 	var copied int64
 	var copyErr error
@@ -210,6 +212,19 @@ func streamCloudProxyResponse(playback cloudPlaybackRequest, req *http.Request, 
 		return
 	}
 	logCloudPlayback(playback.svc, "cloud playback proxy finished", fields...)
+}
+
+func authorizeResolvedCloudPlayback(svc *service.Container, c *gin.Context, ref string) {
+	if svc == nil || svc.Playback == nil || c == nil || cloudPlaybackSidecarRef(ref) {
+		return
+	}
+	userID := currentUserID(c)
+	mediaIDValue, _ := c.Get(cloudPlaybackMediaIDContextKey)
+	mediaID := strings.TrimSpace(toString(mediaIDValue))
+	if userID == "" || mediaID == "" {
+		return
+	}
+	svc.Playback.AuthorizeResolvedCloudPlayback(userID, mediaID)
 }
 
 func isCloudImageRef(ref string) bool {
