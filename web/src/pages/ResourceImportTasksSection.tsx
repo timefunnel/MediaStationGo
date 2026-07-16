@@ -14,7 +14,7 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyTaskID, setBusyTaskID] = useState('')
-  const [busyAction, setBusyAction] = useState<'cancel' | 'retry' | null>(null)
+  const [busyAction, setBusyAction] = useState<'cancel' | 'retry' | 'delete' | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -92,6 +92,27 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  const deleteTask = async (task: ResourceImportTask) => {
+    const confirmed = await confirmAction({
+      title: '删除失败任务记录',
+      message: `确定删除“${task.candidate_title || task.id}”的失败记录吗？此操作不会删除 115 上可能已经转存的文件。`,
+      confirmText: '删除记录',
+    })
+    if (!confirmed) return
+    setBusyTaskID(task.id)
+    setBusyAction('delete')
+    setError('')
+    try {
+      await resourceImportsAPI.removeFailed(task.id)
+      setTasks((current) => current.filter((item) => item.id !== task.id))
+    } catch (requestError) {
+      setError(resourceImportError(requestError, '删除失败任务记录失败'))
+    } finally {
+      setBusyTaskID('')
+      setBusyAction(null)
+    }
+  }
+
   return (
     <section className="glass-panel">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -138,6 +159,7 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
                 showCreator={isAdmin}
                 busyAction={busyTaskID === task.id ? busyAction : null}
                 onRetry={(current) => void retryTask(current)}
+                onDelete={(current) => void deleteTask(current)}
               />
             ))}
           </div>

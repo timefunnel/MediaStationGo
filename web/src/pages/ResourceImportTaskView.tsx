@@ -7,6 +7,7 @@ import {
   Film,
   LoaderCircle,
   RefreshCw,
+  Trash2,
   UserRound,
 } from 'lucide-react'
 
@@ -25,10 +26,11 @@ type ResourceImportTaskViewProps = {
   task: ResourceImportTask
   showCreator?: boolean
   compact?: boolean
-  busyAction?: 'cancel' | 'retry' | null
+  busyAction?: 'cancel' | 'retry' | 'delete' | null
   onOpen?: (task: ResourceImportTask) => void
   onCancel?: (task: ResourceImportTask) => void
   onRetry?: (task: ResourceImportTask) => void
+  onDelete?: (task: ResourceImportTask) => void
 }
 
 export function ResourceImportTaskView({
@@ -39,6 +41,7 @@ export function ResourceImportTaskView({
   onOpen,
   onCancel,
   onRetry,
+  onDelete,
 }: ResourceImportTaskViewProps) {
   const progress = resourceImportProgress(task.progress)
   const active = isResourceImportActive(task.status)
@@ -142,6 +145,17 @@ export function ResourceImportTaskView({
                 >
                   <RefreshCw size={15} />
                   {busyAction === 'retry' ? '重试中…' : completedWithWarning ? '重试告警阶段' : '重试'}
+                </button>
+              )}
+              {failed && onDelete && (
+                <button
+                  type="button"
+                  className="btn-outline px-3 py-2 text-red-500"
+                  disabled={busyAction !== null}
+                  onClick={() => onDelete(task)}
+                >
+                  <Trash2 size={15} />
+                  {busyAction === 'delete' ? '删除中…' : '删除记录'}
                 </button>
               )}
             </div>

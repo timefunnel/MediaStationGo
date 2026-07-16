@@ -161,6 +161,9 @@ export const resourceImportsAPI = {
     api
       .post<ResourceImportTaskResponse>(`/resource-imports/${taskID}/retry`)
       .then((response) => unwrapTask(response.data)),
+
+  removeFailed: (taskID: string) =>
+    api.delete(`/resource-imports/${taskID}`).then(() => undefined),
 }
 
 function unwrapTaskList(payload: ResourceImportListResponse): ResourceImportTask[] {

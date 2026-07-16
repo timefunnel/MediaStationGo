@@ -39,6 +39,8 @@ var resourceImportFinalStatuses = []string{
 	ResourceImportStatusCanceled,
 }
 
+var ErrResourceImportDeleteNotAllowed = errors.New("only failed resource import tasks can be deleted")
+
 type ResourceImportService struct {
 	cfg    config.ResourceImportConfig
 	log    *zap.Logger
@@ -598,6 +600,26 @@ func (s *ResourceImportService) Retry(ctx context.Context, requesterID string, i
 	}
 	s.schedule(job.ID)
 	return s.taskDTO(ctx, job, isAdmin)
+}
+
+func (s *ResourceImportService) DeleteFailed(ctx context.Context, requesterID string, isAdmin bool, id string) error {
+	job, err := s.loadOwnedJob(ctx, requesterID, isAdmin, id)
+	if err != nil {
+		return err
+	}
+	if job.Status != ResourceImportStatusFailed {
+		return ErrResourceImportDeleteNotAllowed
+	}
+	result := s.repos.DB.WithContext(ctx).Unscoped().
+		Where("id = ? AND status = ?", job.ID, ResourceImportStatusFailed).
+		Delete(&model.ResourceImportJob{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrResourceImportDeleteNotAllowed
+	}
+	return nil
 }
 
 func (s *ResourceImportService) schedule(id string) {

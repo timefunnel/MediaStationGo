@@ -243,6 +243,57 @@ func TestResourceImportListAndActionsAreOwnerScoped(t *testing.T) {
 	}
 }
 
+func TestDeleteFailedResourceImportIsOwnerScopedAndStatusRestricted(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, admin, user := newResourceImportTestService(t, pipeline)
+	other := model.User{Username: "delete-other", PasswordHash: "x", Role: "user", IsActive: true}
+	if err := repos.DB.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	failed := model.ResourceImportJob{
+		UserID: user.ID, LibraryID: library.ID, LibraryRootID: root.ID,
+		SearchSessionID: "delete-failed", CandidateJSON: "{}", CandidateTitle: "Failed",
+		IdempotencyKey: "delete-failed", Status: ResourceImportStatusFailed, Stage: "failed", PipelineJobID: "pipeline-failed", Attempt: 1,
+	}
+	running := model.ResourceImportJob{
+		UserID: user.ID, LibraryID: library.ID, LibraryRootID: root.ID,
+		SearchSessionID: "delete-running", CandidateJSON: "{}", CandidateTitle: "Running",
+		IdempotencyKey: "delete-running", Status: ResourceImportStatusRunning, Stage: "running", PipelineJobID: "pipeline-running", Attempt: 1,
+	}
+	adminTarget := model.ResourceImportJob{
+		UserID: other.ID, LibraryID: library.ID, LibraryRootID: root.ID,
+		SearchSessionID: "delete-admin", CandidateJSON: "{}", CandidateTitle: "Admin target",
+		IdempotencyKey: "delete-admin", Status: ResourceImportStatusFailed, Stage: "failed", PipelineJobID: "pipeline-admin", Attempt: 1,
+	}
+	jobs := []model.ResourceImportJob{failed, running, adminTarget}
+	if err := repos.DB.Create(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	failed, running, adminTarget = jobs[0], jobs[1], jobs[2]
+
+	if err := svc.DeleteFailed(t.Context(), other.ID, false, failed.ID); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("other user delete error = %v", err)
+	}
+	if err := svc.DeleteFailed(t.Context(), user.ID, false, running.ID); !errors.Is(err, ErrResourceImportDeleteNotAllowed) {
+		t.Fatalf("running task delete error = %v", err)
+	}
+	if err := svc.DeleteFailed(t.Context(), user.ID, false, failed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteFailed(t.Context(), admin.ID, true, adminTarget.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{failed.ID, adminTarget.ID} {
+		var count int64
+		if err := repos.DB.Unscoped().Model(&model.ResourceImportJob{}).Where("id = ?", id).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("deleted task %s still exists", id)
+		}
+	}
+}
+
 func TestResourceImportRecoveryHonorsGlobalAndPerUserLimits(t *testing.T) {
 	pipeline := &fakeResourcePipeline{getDelay: 80 * time.Millisecond}
 	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)

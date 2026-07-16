@@ -18,6 +18,7 @@ func registerAuthedResourceImportRoutes(authed *gin.RouterGroup, svc *service.Co
 	authed.GET("/libraries/:id/resource-imports", listLibraryResourceImportsHandler(svc))
 	authed.GET("/resource-imports", listResourceImportsHandler(svc))
 	authed.GET("/resource-imports/:id", getResourceImportHandler(svc))
+	authed.DELETE("/resource-imports/:id", deleteFailedResourceImportHandler(svc))
 	authed.POST("/resource-imports/:id/cancel", cancelResourceImportHandler(svc))
 	authed.POST("/resource-imports/:id/retry", retryResourceImportHandler(svc))
 }
@@ -171,6 +172,20 @@ func retryResourceImportHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func deleteFailedResourceImportHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		resourceImport, ok := requireResourceImportService(c, svc)
+		if !ok {
+			return
+		}
+		if err := resourceImport.DeleteFailed(c.Request.Context(), middleware.GetUserID(c), middleware.IsAdmin(c), c.Param("id")); err != nil {
+			writeResourceImportError(c, err)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
 func requireResourceImportService(c *gin.Context, svc *service.Container) (*service.ResourceImportService, bool) {
 	if svc == nil || svc.ResourceImport == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "资源搜索入库功能未启用"})
@@ -224,6 +239,10 @@ func selectResourceImportRoot(library model.Library, rootID string) (model.Libra
 func writeResourceImportError(c *gin.Context, err error) {
 	if errors.Is(err, service.ErrMediaVersionForbidden) {
 		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": err.Error()}})
+		return
+	}
+	if errors.Is(err, service.ErrResourceImportDeleteNotAllowed) {
+		c.JSON(http.StatusConflict, gin.H{"error": gin.H{"message": err.Error()}})
 		return
 	}
 	var search *service.ResourceSearchError
