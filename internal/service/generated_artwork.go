@@ -470,7 +470,7 @@ func generatedArtworkFingerprint(media *model.Media) string {
 
 func generatedArtworkSeek(durationSec int) float64 {
 	if durationSec <= 0 {
-		return 60
+		return 10
 	}
 	seek := float64(durationSec) * 0.10
 	if durationSec >= 120 && seek < 60 {

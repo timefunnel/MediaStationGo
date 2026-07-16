@@ -149,6 +149,15 @@ func TestEmbyArtworkPrefersRealImagesThenGeneratedImages(t *testing.T) {
 	}
 }
 
+func TestGeneratedArtworkSeekUsesShortSafeOffsetWithoutDuration(t *testing.T) {
+	if got := generatedArtworkSeek(0); got != 10 {
+		t.Fatalf("seek without duration = %v, want 10", got)
+	}
+	if got := generatedArtworkSeek(900); got != 90 {
+		t.Fatalf("seek with duration = %v, want 90", got)
+	}
+}
+
 func waitForGeneratedArtworkStatus(t *testing.T, repos *repository.Container, mediaID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
