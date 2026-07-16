@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Eye, KeyRound, Pencil, Save, Trash2, X } from 'lucide-react'
+import { Eye, KeyRound, LoaderCircle, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-react'
 
 import { apiConfigsAPI, type APIConfig } from '../api/api_configs'
 import { confirmAction } from './confirmAction'
@@ -70,6 +70,9 @@ export function APIConfigsPanel() {
                       <p className="font-medium text-ink-600">{item.provider}</p>
                       {item.description && (
                         <p className="text-xs text-sand-500">{item.description}</p>
+                      )}
+                      {item.provider === 'openai' && item.model && (
+                        <p className="mt-1 text-xs text-brand-500">模型：{item.model}</p>
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
@@ -152,16 +155,25 @@ function EditingRow({
   const [apiKey, setAPIKey] = useState('')
   const [baseURL, setBaseURL] = useState(item.base_url ?? '')
   const [extra, setExtra] = useState(item.extra ?? '')
+  const [model, setModel] = useState(item.model ?? '')
+  const [models, setModels] = useState<Array<{ id: string; owned_by?: string }>>([])
   const [enabled, setEnabled] = useState(item.enabled)
   const [saving, setSaving] = useState(false)
+  const [detecting, setDetecting] = useState(false)
   const isAdult = item.provider === 'adult'
+  const isOpenAI = item.provider === 'openai'
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (isOpenAI && !model.trim()) {
+      toast.error('请先探测或填写模型')
+      return
+    }
     setSaving(true)
     try {
       const patch: Record<string, unknown> = { base_url: baseURL, enabled }
       if (isAdult) patch.extra = extra
+      if (isOpenAI) patch.model = model.trim()
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       await apiConfigsAPI.update(item.provider, patch)
       toast.success(`${item.provider} 已保存`)
@@ -173,6 +185,26 @@ function EditingRow({
       toast.error(msg)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const discoverModels = async () => {
+    setDetecting(true)
+    try {
+      const items = await apiConfigsAPI.discoverModels(item.provider, {
+        base_url: baseURL.trim(),
+        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+      })
+      setModels(items)
+      setModel((current) => preferredDetectedModel(current, baseURL, items))
+      toast.success(`探测到 ${items.length} 个模型`)
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '模型探测失败'
+      toast.error(msg)
+    } finally {
+      setDetecting(false)
     }
   }
 
@@ -213,6 +245,38 @@ function EditingRow({
               />
             </label>
           )}
+          {isOpenAI && (
+            <label className="min-w-64 flex-1 text-xs text-ink-50">
+              模型
+              <div className="mt-1 flex gap-2">
+                {models.length > 0 ? (
+                  <select className="input-base min-w-0 flex-1" value={model} onChange={(e) => setModel(e.target.value)}>
+                    {models.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.id}{candidate.owned_by ? ` · ${candidate.owned_by}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="input-base min-w-0 flex-1"
+                    placeholder="先探测，或手动填写模型 ID"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => void discoverModels()}
+                  disabled={detecting || !baseURL.trim()}
+                  className="btn-outline shrink-0 px-3"
+                >
+                  {detecting ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  探测模型
+                </button>
+              </div>
+            </label>
+          )}
           <label className="flex items-center gap-2 text-xs text-ink-50">
             <input
               type="checkbox"
@@ -235,6 +299,20 @@ function EditingRow({
       </td>
     </tr>
   )
+}
+
+function preferredDetectedModel(
+  current: string,
+  baseURL: string,
+  items: Array<{ id: string }>,
+): string {
+  if (items.some((item) => item.id === current)) return current
+  const ids = items.map((item) => item.id)
+  if (baseURL.toLowerCase().includes('deepseek')) {
+    const deepseekChat = ids.find((id) => id.toLowerCase() === 'deepseek-chat')
+    if (deepseekChat) return deepseekChat
+  }
+  return ids.find((id) => id.toLowerCase().includes('flash')) ?? ids[0] ?? current
 }
 
 function apiConfigConfigured(item: APIConfig): boolean {

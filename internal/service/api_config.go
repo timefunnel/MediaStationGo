@@ -10,7 +10,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -69,6 +74,7 @@ type PublicView struct {
 	Provider    string    `json:"provider"`
 	BaseURL     string    `json:"base_url,omitempty"`
 	Extra       string    `json:"extra,omitempty"`
+	Model       string    `json:"model,omitempty"`
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description,omitempty"`
 	HasKey      bool      `json:"has_key"`
@@ -107,6 +113,7 @@ type Resolved struct {
 	APIKey  string
 	BaseURL string
 	Extra   string
+	Model   string
 	Enabled bool
 }
 
@@ -126,6 +133,7 @@ func (s *APIConfigService) Resolve(ctx context.Context, provider string) (Resolv
 		APIKey:  s.crypto.Decrypt(row.APIKey),
 		BaseURL: row.BaseURL,
 		Extra:   row.Extra,
+		Model:   apiConfigModel(row.Provider, row.Extra),
 		Enabled: row.Enabled,
 	}
 	s.log.Debug("api_config.resolve: success",
@@ -141,6 +149,7 @@ type APIConfigPatch struct {
 	APIKey      *string `json:"api_key,omitempty"`
 	BaseURL     *string `json:"base_url,omitempty"`
 	Extra       *string `json:"extra,omitempty"`
+	Model       *string `json:"model,omitempty"`
 	Enabled     *bool   `json:"enabled,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
@@ -177,6 +186,12 @@ func (s *APIConfigService) Update(ctx context.Context, provider string, patch AP
 	}
 	if patch.Extra != nil {
 		updates["extra"] = *patch.Extra
+	}
+	if patch.Model != nil {
+		if provider != "openai" {
+			return nil, errors.New("model is only supported for openai-compatible config")
+		}
+		updates["extra"] = strings.TrimSpace(*patch.Model)
 	}
 	if patch.Enabled != nil {
 		updates["enabled"] = *patch.Enabled
@@ -229,6 +244,7 @@ func (s *APIConfigService) toPublic(r *model.APIConfig) PublicView {
 		Provider:    r.Provider,
 		BaseURL:     r.BaseURL,
 		Extra:       r.Extra,
+		Model:       apiConfigModel(r.Provider, r.Extra),
 		Enabled:     r.Enabled,
 		Description: r.Description,
 		HasKey:      plain != "",
@@ -239,4 +255,96 @@ func (s *APIConfigService) toPublic(r *model.APIConfig) PublicView {
 		pv.MaskedKey = MaskAPIKey(plain)
 	}
 	return pv
+}
+
+type AIModelInfo struct {
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by,omitempty"`
+}
+
+type AIModelDiscoveryInput struct {
+	APIKey  string `json:"api_key,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
+}
+
+func (s *APIConfigService) DiscoverModels(ctx context.Context, provider string, input AIModelDiscoveryInput) ([]AIModelInfo, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "openai" {
+		return nil, errors.New("model discovery is only supported for openai-compatible config")
+	}
+	resolved, err := s.Resolve(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	apiKey := strings.TrimSpace(input.APIKey)
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(resolved.APIKey)
+	}
+	baseURL := strings.TrimSpace(input.BaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(resolved.BaseURL)
+	}
+	if apiKey == "" {
+		return nil, errors.New("API Key 未配置")
+	}
+	if baseURL == "" {
+		return nil, errors.New("Base URL 未配置")
+	}
+
+	endpoint := aiModelsEndpoint(baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := NewExternalHTTPClient(20 * time.Second).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("模型探测失败 (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Data []AIModelInfo `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("模型列表响应不是有效 JSON: %w", err)
+	}
+	seen := map[string]struct{}{}
+	items := make([]AIModelInfo, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		item.ID = strings.TrimSpace(item.ID)
+		if item.ID == "" {
+			continue
+		}
+		key := strings.ToLower(item.ID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("服务未返回可用模型")
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].ID) < strings.ToLower(items[j].ID)
+	})
+	return items, nil
+}
+
+func aiModelsEndpoint(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	baseURL = strings.TrimSuffix(baseURL, "/chat/completions")
+	return strings.TrimRight(baseURL, "/") + "/models"
+}
+
+func apiConfigModel(provider, extra string) string {
+	if strings.EqualFold(strings.TrimSpace(provider), "openai") {
+		return strings.TrimSpace(extra)
+	}
+	return ""
 }

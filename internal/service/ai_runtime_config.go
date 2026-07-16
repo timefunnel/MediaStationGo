@@ -44,6 +44,9 @@ func (a *AIService) resolveRuntimeConfig(ctx context.Context) aiRuntimeConfig {
 		if resolved.BaseURL != "" {
 			out.APIBase = strings.TrimSpace(resolved.BaseURL)
 		}
+		if resolved.Model != "" {
+			out.Model = strings.TrimSpace(resolved.Model)
+		}
 		if resolved.APIKey != "" {
 			out.APIKey = strings.TrimSpace(resolved.APIKey)
 		}

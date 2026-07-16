@@ -147,6 +147,7 @@ func (a *AIService) complete(ctx context.Context, runtime aiRuntimeConfig, syste
 	payload := map[string]any{
 		"model":       runtime.Model,
 		"temperature": 0.2,
+		"stream":      false,
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
@@ -215,6 +216,7 @@ func (a *AIService) Chat(ctx context.Context, history []ChatTurn) (string, error
 	payload := map[string]any{
 		"model":       runtime.Model,
 		"temperature": 0.4,
+		"stream":      false,
 		"messages":    msgs,
 	}
 	body, _ := json.Marshal(payload)
