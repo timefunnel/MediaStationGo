@@ -8,6 +8,7 @@ import type { HistoryItem } from '../api/playback'
 import type { Media } from '../types'
 import type { SeriesCard } from '../utils/groupSeries'
 import { seriesCardLink } from '../utils/groupSeries'
+import { mediaPosterURL } from '../utils/mediaArtwork'
 
 export function HomeLoadingState() {
   return (
@@ -196,12 +197,14 @@ export function RecentMediaSection({ recentCards }: { recentCards: SeriesCard[] 
 }
 
 function ContinueCard({ media, progress }: { media: Media; progress: number }) {
+  const poster = mediaPosterURL(media)
+
   return (
     <Link to={`/media/${media.id}`} className="group flex items-center gap-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-300 hover:border-brand-500/30 hover:bg-[var(--app-panel-soft)] hover:shadow-md">
       <div className="relative h-18 w-12 shrink-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)]">
-        {media.poster_url ? (
+        {poster ? (
           <img
-            src={imageURL(media.poster_url, media.updated_at)}
+            src={imageURL(poster, media.updated_at)}
             alt=""
             loading="lazy"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"

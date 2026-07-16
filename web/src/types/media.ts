@@ -34,6 +34,8 @@ export interface Media {
   media_probe_version?: number
   poster_url?: string
   backdrop_url?: string
+  generated_poster_url?: string
+  generated_backdrop_url?: string
   overview?: string
   rating: number
   year: number

@@ -7,6 +7,7 @@ import { historyAPI } from '../api/history'
 import { imageURL } from '../api/client'
 import { confirmAction } from '../components/confirmAction'
 import type { HistoryItem } from '../types'
+import { mediaPosterURL } from '../utils/mediaArtwork'
 
 function fmtDuration(ms: number): string {
   if (!ms || ms <= 0) return '—'
@@ -92,6 +93,7 @@ export function WatchHistoryPage() {
         {items.map((h) => {
           const m = h.media
           if (!m) return null
+          const poster = mediaPosterURL(m)
           const progress =
             h.duration_ms > 0 ? h.position_ms / h.duration_ms : 0
           return (
@@ -100,9 +102,9 @@ export function WatchHistoryPage() {
               className="glass-panel flex items-center gap-4 !p-3"
             >
               <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-900">
-                {m.poster_url ? (
+                {poster ? (
                   <img
-                    src={imageURL(m.poster_url, m.updated_at)}
+                    src={imageURL(poster, m.updated_at)}
                     alt={m.title}
                     className="h-full w-full object-cover"
                     referrerPolicy="no-referrer"

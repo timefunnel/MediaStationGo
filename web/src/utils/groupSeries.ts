@@ -1,4 +1,5 @@
 import type { Media } from '../types'
+import { mediaBackdropURL, mediaPosterURL } from './mediaArtwork'
 
 /**
  * 把若干 Episode/Movie 行折叠成"剧集卡片"。
@@ -310,8 +311,8 @@ function targetLibraryID(media: Media): string {
 }
 
 export function artworkScore(media: Media): number {
-  const poster = (media.poster_url ?? '').toLowerCase()
-  const backdrop = (media.backdrop_url ?? '').toLowerCase()
+  const poster = mediaPosterURL(media).toLowerCase()
+  const backdrop = mediaBackdropURL(media).toLowerCase()
   if (poster) {
     if (/(poster|folder|cover|movie|show|pl)(?:[._-]|\.[a-z0-9]+$|$)/.test(poster)) return 40
     if (/(actor|actress|cast|avatar|sample|screenshot|screen|still|scene|fanart|backdrop|background|landscape|banner|logo|disc)/.test(poster)) return 10

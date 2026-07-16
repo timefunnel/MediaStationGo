@@ -5,6 +5,7 @@ import { imageURL } from '../api/client'
 import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
 import type { Media } from '../types'
 import { seriesTitle, type SeriesCard } from '../utils/groupSeries'
+import { mediaPosterURL } from '../utils/mediaArtwork'
 
 type LibrarySeriesDetailHeaderProps = {
   series: SeriesCard
@@ -40,6 +41,7 @@ export function LibrarySeriesDetailHeader({
   onSoftDelete,
 }: LibrarySeriesDetailHeaderProps) {
   const firstEpisode = firstPlayableEpisode(visibleEpisodes.length > 0 ? visibleEpisodes : allEpisodes)
+  const poster = mediaPosterURL(series.rep)
 
   return (
     <>
@@ -56,9 +58,9 @@ export function LibrarySeriesDetailHeader({
 
       <div className="flex flex-col gap-6 sm:flex-row">
         <div className="w-40 shrink-0 overflow-hidden rounded-xl bg-sand-200 shadow-card">
-          {series.rep.poster_url ? (
+          {poster ? (
             <img
-              src={imageURL(series.rep.poster_url, series.rep.updated_at)}
+              src={imageURL(poster, series.rep.updated_at)}
               alt={series.rep.title}
               className="aspect-[2/3] w-full object-cover"
               referrerPolicy="no-referrer"

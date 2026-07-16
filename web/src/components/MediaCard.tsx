@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Film, Play, Layers, Star } from 'lucide-react'
 import { imageURL } from '../api/client'
 import type { Media } from '../types'
+import { mediaPosterURL } from '../utils/mediaArtwork'
 
 export const MediaCard = ({
   media, progress, count, rating, linkTo, onClick, actions,
@@ -19,14 +20,15 @@ export const MediaCard = ({
   const ref = useRef<HTMLDivElement>(null)
   const href = linkTo ?? `/media/${media.id}`
   const [posterFit, setPosterFit] = useState<'cover' | 'contain'>('cover')
-  const posterSrc = imageURL(media.poster_url, media.updated_at, { maxWidth: 360, quality: 80 })
+  const poster = mediaPosterURL(media)
+  const posterSrc = imageURL(poster, media.updated_at, { maxWidth: 360, quality: 80 })
   const displayTitle = media.display_title?.trim() || media.title
   const displayRating = rating ?? media.rating
   const versionCount = media.versions?.length ?? 0
 
   useEffect(() => {
     setPosterFit('cover')
-  }, [media.poster_url, media.updated_at])
+  }, [poster, media.updated_at])
 
   const card = (
       <motion.div
@@ -37,7 +39,7 @@ export const MediaCard = ({
       >
         {/* Poster Wrapper */}
         <div className="relative aspect-[2/3] w-full overflow-hidden bg-[var(--app-panel-soft)]">
-          {media.poster_url ? (
+          {poster ? (
             <>
               {posterFit === 'contain' && (
                 <img

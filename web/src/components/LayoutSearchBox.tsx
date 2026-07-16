@@ -6,6 +6,7 @@ import clsx from 'clsx'
 
 import { imageURL } from '../api/client'
 import { seriesCardLink, type SeriesCard } from '../utils/groupSeries'
+import { mediaPosterURL } from '../utils/mediaArtwork'
 
 type LayoutSearchBoxProps = {
   query: string
@@ -109,6 +110,8 @@ export function LayoutSearchBox({
 }
 
 function SearchResultItem({ card, onClick }: { card: SeriesCard; onClick: () => void }) {
+  const poster = mediaPosterURL(card.rep)
+
   return (
     <Link
       to={seriesCardLink(card)}
@@ -116,9 +119,9 @@ function SearchResultItem({ card, onClick }: { card: SeriesCard; onClick: () => 
       className="flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-[var(--app-hover)]"
     >
       <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg bg-[var(--app-panel-soft)]">
-        {card.rep.poster_url ? (
+        {poster ? (
           <img
-            src={imageURL(card.rep.poster_url, card.rep.updated_at)}
+            src={imageURL(poster, card.rep.updated_at)}
             alt={card.rep.title}
             className="h-full w-full object-cover"
           />

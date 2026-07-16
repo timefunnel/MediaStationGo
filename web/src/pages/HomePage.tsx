@@ -4,6 +4,7 @@ import { libraryAPI, mediaAPI } from '../api/library'
 import { playbackAPI, type HistoryItem } from '../api/playback'
 import type { Library, Media } from '../types'
 import { groupSeries, type SeriesCard } from '../utils/groupSeries'
+import { hasMediaArtwork, mediaBackdropArtworkURL, mediaPrimaryArtworkURL } from '../utils/mediaArtwork'
 import {
   ContinueWatchingSection,
   HomeEmptyState,
@@ -12,7 +13,6 @@ import {
   RecentMediaSection,
 } from './HomePageSections'
 
-const hasArtwork = (media?: Media | null) => !!(media?.poster_url || media?.backdrop_url)
 const asArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? value as T[] : [])
 
 export function HomePage() {
@@ -51,10 +51,10 @@ export function HomePage() {
       ...(history.map((h) => h.media).filter(Boolean) as Media[]),
       ...recentCards.map((card) => card.rep),
     ]
-    return candidates.find(hasArtwork) ?? candidates[0] ?? null
+    return candidates.find(hasMediaArtwork) ?? candidates[0] ?? null
   }, [history, recentCards])
-  const featuredVisual = featuredItem?.backdrop_url || featuredItem?.poster_url || ''
-  const featuredPoster = featuredItem?.poster_url || featuredItem?.backdrop_url || ''
+  const featuredVisual = mediaBackdropArtworkURL(featuredItem)
+  const featuredPoster = mediaPrimaryArtworkURL(featuredItem)
   const featuredMark = (featuredItem?.title || 'MS').trim().slice(0, 4).toUpperCase()
   const empty = !loading && libraries.length === 0 && recentCards.length === 0 && history.length === 0
 

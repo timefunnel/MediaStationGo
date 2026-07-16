@@ -7,6 +7,7 @@ import { imageURL } from '../api/client'
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
 import { MediaCard } from '../components/MediaCard'
 import { artworkScore, seriesCardLink, type SeriesCard } from '../utils/groupSeries'
+import { mediaPrimaryArtworkURL } from '../utils/mediaArtwork'
 import { libraryDisplayPath } from './libraryDisplayModel'
 import { mediaTime, type LibraryPreview } from './librariesPageModel'
 
@@ -226,7 +227,7 @@ function libraryArtworkItems(cards: SeriesCard[]): Array<{ src: string; version?
   return [...cards]
     .sort((a, b) => artworkScore(b.rep) - artworkScore(a.rep) || mediaTime(b.rep) - mediaTime(a.rep))
     .map((card) => ({
-      src: card.rep.poster_url || card.rep.backdrop_url || '',
+      src: mediaPrimaryArtworkURL(card.rep),
       version: card.rep.updated_at,
     }))
     .filter((item) => Boolean(item.src))
