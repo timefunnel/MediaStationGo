@@ -134,8 +134,9 @@ func (s *GeneratedArtworkService) QueueMissingForLibrary(ctx context.Context, li
 		return 0, nil
 	}
 	if err := s.queueableMissingQuery(ctx, lib.ID).Updates(map[string]any{
-		"generated_artwork_status": GeneratedArtworkStatusPending,
-		"generated_artwork_error":  "",
+		"generated_artwork_status":   GeneratedArtworkStatusPending,
+		"generated_artwork_error":    "",
+		"generated_artwork_attempts": gorm.Expr("COALESCE(generated_artwork_attempts, 0)"),
 	}).Error; err != nil {
 		return 0, err
 	}
@@ -146,7 +147,7 @@ func (s *GeneratedArtworkService) QueueMissingForLibrary(ctx context.Context, li
 
 func (s *GeneratedArtworkService) queueableMissingQuery(ctx context.Context, libraryID string) *gorm.DB {
 	return s.missingQuery(ctx, libraryID).
-		Where("media.generated_artwork_status = '' OR media.generated_artwork_status IS NULL OR media.generated_artwork_status = ? OR (media.generated_artwork_status = ? AND media.generated_artwork_attempts < ?)",
+		Where("media.generated_artwork_status = '' OR media.generated_artwork_status IS NULL OR media.generated_artwork_status = ? OR (media.generated_artwork_status = ? AND COALESCE(media.generated_artwork_attempts, 0) < ?)",
 			GeneratedArtworkStatusCanceled, GeneratedArtworkStatusFailed, generatedArtworkMaxAttempts)
 }
 
@@ -547,7 +548,7 @@ func (s *GeneratedArtworkService) pendingQuery(ctx context.Context) *gorm.DB {
 		Where("media.season_num = 0 AND media.episode_num = 0").
 		Where("COALESCE(TRIM(media.poster_url), '') = '' AND COALESCE(TRIM(media.backdrop_url), '') = ''").
 		Where("COALESCE(TRIM(media.generated_poster_url), '') = '' OR COALESCE(TRIM(media.generated_backdrop_url), '') = ''").
-		Where("media.generated_artwork_status = ? AND media.generated_artwork_attempts < ?", GeneratedArtworkStatusPending, generatedArtworkMaxAttempts)
+		Where("media.generated_artwork_status = ? AND COALESCE(media.generated_artwork_attempts, 0) < ?", GeneratedArtworkStatusPending, generatedArtworkMaxAttempts)
 }
 
 func (s *GeneratedArtworkService) pendingOrRunningQuery(ctx context.Context) *gorm.DB {

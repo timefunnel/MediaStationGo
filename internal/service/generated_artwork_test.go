@@ -40,6 +40,9 @@ func TestGeneratedArtworkProcessesOnlyEnabledNonEpisodicMissingMedia(t *testing.
 	if err := repos.DB.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := repos.DB.Exec("UPDATE media SET generated_artwork_attempts = NULL WHERE id = ?", rows[0].ID).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := &config.Config{App: config.AppConfig{DataDir: t.TempDir(), FFmpegPath: "ffmpeg"}}
 	svc := NewGeneratedArtworkService(cfg, zap.NewNop(), repos, nil, NewRuntimeCacheService(cfg, zap.NewNop()), nil)
