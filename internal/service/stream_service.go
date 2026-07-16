@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
@@ -29,10 +32,18 @@ type CloudPlaybackOptions struct {
 // StreamService serves media files with proper Range support so browsers can
 // seek into the stream.
 type StreamService struct {
-	cfg        *config.Config
-	log        *zap.Logger
-	repo       *repository.Container
-	transcoder *TranscoderService
+	cfg              *config.Config
+	log              *zap.Logger
+	repo             *repository.Container
+	transcoder       *TranscoderService
+	storage          cloudPlaybackResolver
+	cache            *RuntimeCacheService
+	generatedArtwork *GeneratedArtworkService
+}
+
+type mediaTrackProber interface {
+	Probe(ctx context.Context, path string) (*ProbeResult, error)
+	ProbeHTTP(ctx context.Context, rawURL string, headers map[string]string) (*ProbeResult, error)
 }
 
 // NewStreamService is the constructor.
@@ -42,6 +53,24 @@ func NewStreamService(cfg *config.Config, log *zap.Logger, repo *repository.Cont
 		log:        log,
 		repo:       repo,
 		transcoder: transcoder,
+	}
+}
+
+func (s *StreamService) SetCloudProbe(storage cloudPlaybackResolver) {
+	if s != nil {
+		s.storage = storage
+	}
+}
+
+func (s *StreamService) SetRuntimeCache(cache *RuntimeCacheService) {
+	if s != nil {
+		s.cache = cache
+	}
+}
+
+func (s *StreamService) SetGeneratedArtworkService(generated *GeneratedArtworkService) {
+	if s != nil {
+		s.generatedArtwork = generated
 	}
 }
 
@@ -71,15 +100,54 @@ func (s *StreamService) directPlayOnly(ctx context.Context) bool {
 
 // Probe re-runs ffprobe against an existing media row and refreshes the
 // extracted metadata. Used by the admin UI's "rescan" button.
-func (s *StreamService) Probe(ctx context.Context, mediaID string, probe *FFprobeService) error {
+func (s *StreamService) Probe(ctx context.Context, mediaID string, probe mediaTrackProber) error {
 	m, err := s.repo.Media.FindByID(ctx, mediaID)
 	if err != nil || m == nil {
 		return ErrMediaNotFound
 	}
-	res, err := probe.Probe(ctx, m.Path)
+	if probe == nil {
+		return errors.New("ffprobe service unavailable")
+	}
+	res, err := s.probeMediaSource(ctx, m, probe)
 	if err != nil {
 		return err
 	}
-	updates := probeResultUpdates(res)
-	return s.repo.DB.Model(m).Updates(updates).Error
+	return persistMediaProbeResult(ctx, s.repo, s.cache, s.generatedArtwork, s.log, m, res)
+}
+
+func (s *StreamService) probeMediaSource(ctx context.Context, media *model.Media, probe mediaTrackProber) (*ProbeResult, error) {
+	if media == nil {
+		return nil, ErrMediaNotFound
+	}
+	if typ, ref, ok := parseCloudMediaPlaybackURL(media.STRMURL); ok {
+		if s.storage == nil {
+			return nil, errors.New("cloud media probe unavailable: storage service not configured")
+		}
+		return probeCloudFileMetadataWith(ctx, s.storage, probe, typ, ref)
+	}
+	if rawURL := probeHTTPMediaURL(media); rawURL != "" {
+		return probe.ProbeHTTP(ctx, rawURL, cloudMediaInternalHeaders(nil))
+	}
+	path := strings.TrimSpace(media.Path)
+	if path == "" {
+		return nil, errors.New("media probe unavailable: empty media path")
+	}
+	if strings.HasPrefix(strings.ToLower(path), "cloud://") {
+		return nil, errors.New("cloud media probe unavailable: missing resolvable playback reference; re-scan the library")
+	}
+	return probe.Probe(ctx, path)
+}
+
+func probeHTTPMediaURL(media *model.Media) string {
+	if media == nil {
+		return ""
+	}
+	for _, candidate := range []string{media.STRMURL, media.Path} {
+		candidate = strings.TrimSpace(candidate)
+		parsed, err := url.Parse(candidate)
+		if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) {
+			return candidate
+		}
+	}
+	return ""
 }

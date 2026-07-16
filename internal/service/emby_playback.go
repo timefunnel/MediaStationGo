@@ -71,25 +71,17 @@ func (e *EmbyService) probeCloudTrackMetadata(mediaID, typ, ref string) {
 		}
 		return
 	}
-	updates := probeResultUpdates(probe)
-	if len(updates) == 0 {
+	var previous model.Media
+	if err := e.repo.DB.WithContext(probeCtx).Where("id = ?", mediaID).First(&previous).Error; err != nil {
+		if e.log != nil {
+			e.log.Debug("load media before playback cloud probe update failed", zap.String("media_id", mediaID), zap.Error(err))
+		}
 		return
 	}
-	var previous model.Media
-	findErr := e.repo.DB.WithContext(probeCtx).Where("id = ?", mediaID).First(&previous).Error
-	if err := e.repo.DB.WithContext(probeCtx).Model(&model.Media{}).Where("id = ?", mediaID).Updates(updates).Error; err != nil {
+	if err := persistMediaProbeResult(context.WithoutCancel(probeCtx), e.repo, e.cache, e.generatedArtwork, e.log, &previous, probe); err != nil {
 		if e.log != nil {
 			e.log.Debug("persist playback cloud probe failed", zap.String("media_id", mediaID), zap.Error(err))
 		}
-		return
-	}
-	if findErr == nil && e.generatedArtwork != nil && previous.DurationSec != probe.DurationSec {
-		if _, err := e.generatedArtwork.QueueRefreshForMedia(context.WithoutCancel(probeCtx), mediaID); err != nil && e.log != nil {
-			e.log.Warn("queue generated artwork refresh after playback probe failed", zap.String("media_id", mediaID), zap.Error(err))
-		}
-	}
-	if e.cache != nil {
-		e.cache.DeletePrefix(context.WithoutCancel(probeCtx), "media:")
 	}
 }
 
@@ -120,61 +112,6 @@ func parseCloudMediaPlaybackURL(raw string) (string, string, bool) {
 	typ := strings.TrimSpace(path[idx+len(prefix):])
 	ref := strings.TrimSpace(u.Query().Get("ref"))
 	return typ, ref, typ != "" && ref != ""
-}
-
-func applyProbeResultToMediaValue(m *model.Media, probe *ProbeResult) {
-	if m == nil || probe == nil {
-		return
-	}
-	if probe.DurationSec > 0 {
-		m.DurationSec = probe.DurationSec
-	}
-	if probe.Width > 0 {
-		m.Width = probe.Width
-	}
-	if probe.Height > 0 {
-		m.Height = probe.Height
-	}
-	if strings.TrimSpace(probe.VideoCodec) != "" {
-		m.VideoCodec = probe.VideoCodec
-	}
-	if strings.TrimSpace(probe.AudioCodec) != "" {
-		m.AudioCodec = probe.AudioCodec
-	}
-	if strings.TrimSpace(probe.Container) != "" {
-		m.Container = probe.Container
-	}
-	if probe.BitRate > 0 {
-		m.BitRate = probe.BitRate
-	}
-	if probe.VideoBitRate > 0 {
-		m.VideoBitRate = probe.VideoBitRate
-	}
-	if probe.FrameRate > 0 {
-		m.FrameRate = probe.FrameRate
-	}
-	if strings.TrimSpace(probe.VideoProfile) != "" {
-		m.VideoProfile = probe.VideoProfile
-	}
-	if strings.TrimSpace(probe.VideoRange) != "" {
-		m.VideoRange = probe.VideoRange
-	}
-	if probe.VideoBitDepth > 0 {
-		m.VideoBitDepth = probe.VideoBitDepth
-	}
-	if probe.AudioBitRate > 0 {
-		m.AudioBitRate = probe.AudioBitRate
-	}
-	if probe.AudioChannels > 0 {
-		m.AudioChannels = probe.AudioChannels
-	}
-	if strings.TrimSpace(probe.AudioChannelLayout) != "" {
-		m.AudioChannelLayout = probe.AudioChannelLayout
-	}
-	if probe.AudioSampleRate > 0 {
-		m.AudioSampleRate = probe.AudioSampleRate
-	}
-	m.MediaProbeVersion = mediaProbeMetadataVersion
 }
 
 // directPlayOnly reports whether the admin enabled「客户端直连解码」mode.

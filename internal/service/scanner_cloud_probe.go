@@ -32,26 +32,19 @@ func (s *ScannerService) probeCloudMediaAsync(task cloudMediaProbeTask) {
 		s.cloudMediaProbeMu.Unlock()
 		return
 	}
-	updates := probeResultUpdates(probe)
-	if len(updates) == 0 {
+	var previous model.Media
+	if err := s.repo.DB.WithContext(ctx).Where("path = ?", task.path).First(&previous).Error; err != nil {
+		if s.log != nil {
+			s.log.Debug("load cloud media before track metadata update failed", zap.String("path", task.path), zap.Error(err))
+		}
 		return
 	}
-	var previous model.Media
-	findErr := s.repo.DB.WithContext(ctx).Where("path = ?", task.path).First(&previous).Error
-	if err := s.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("path = ?", task.path).Updates(updates).Error; err != nil {
+	if err := persistMediaProbeResult(context.WithoutCancel(ctx), s.repo, s.cache, s.generatedArtwork, s.log, &previous, probe); err != nil {
 		if s.log != nil {
 			s.log.Debug("update cloud media track metadata failed", zap.String("path", task.path), zap.Error(err))
 		}
 		return
 	}
-	if findErr == nil && s.generatedArtwork != nil && previous.DurationSec != probe.DurationSec {
-		if _, err := s.generatedArtwork.QueueRefreshForMedia(context.WithoutCancel(ctx), previous.ID); err != nil {
-			if s.log != nil {
-				s.log.Warn("queue generated artwork refresh after duration probe failed", zap.String("media_id", previous.ID), zap.Error(err))
-			}
-		}
-	}
-	s.invalidateMediaCache(context.WithoutCancel(ctx))
 	s.cloudMediaProbeMu.Lock()
 	delete(s.cloudMediaProbeBackoff, task.path)
 	s.cloudMediaProbeMu.Unlock()
