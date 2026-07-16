@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { MoreVertical, Power, PowerOff, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Image, ImageOff, MoreVertical, Play, Power, PowerOff, RefreshCw, Save, Square, Trash2 } from 'lucide-react'
 
 import type { Library, LibraryRoot } from '../types'
 import type { RootDraft } from './adminLibraryPanelModel'
@@ -16,6 +16,9 @@ type LibraryTableProps = {
   onToggleLibrary: (library: Library) => void
   onScanLibrary: (library: Library) => void
   onTitleModeChange: (library: Library, titleMode: 'smart' | 'filename') => void
+  onGenerateArtworkChange: (library: Library, enabled: boolean) => void
+  onRunGeneratedArtwork: (library: Library) => void
+  onCancelGeneratedArtwork: (library: Library) => void
   onRemoveLibrary: (library: Library) => void
 }
 
@@ -187,7 +190,15 @@ function RootActionButtons({ library, root, draft, ...actions }: RootEditorProps
   )
 }
 
-function LibraryActionsCell({ library, onToggleLibrary, onScanLibrary, onRemoveLibrary }: LibraryTableRowProps) {
+function LibraryActionsCell({
+  library,
+  onToggleLibrary,
+  onScanLibrary,
+  onGenerateArtworkChange,
+  onRunGeneratedArtwork,
+  onCancelGeneratedArtwork,
+  onRemoveLibrary,
+}: LibraryTableRowProps) {
   return (
     <ActionMenu label="媒体库操作">
       <MenuButton
@@ -200,6 +211,23 @@ function LibraryActionsCell({ library, onToggleLibrary, onScanLibrary, onRemoveL
       <MenuButton icon={<RefreshCw size={14} />} label="扫描" onClick={() => onScanLibrary(library)}>
         扫描
       </MenuButton>
+      <MenuButton
+        icon={library.generate_artwork ? <ImageOff size={14} /> : <Image size={14} />}
+        label={library.generate_artwork ? '关闭缺图预览' : '开启缺图预览'}
+        onClick={() => onGenerateArtworkChange(library, !library.generate_artwork)}
+      >
+        {library.generate_artwork ? '关闭缺图预览' : '开启缺图预览'}
+      </MenuButton>
+      {library.generate_artwork && (
+        <MenuButton icon={<Play size={14} />} label="生成缺失预览" onClick={() => onRunGeneratedArtwork(library)}>
+          生成缺失预览
+        </MenuButton>
+      )}
+      {library.generate_artwork && (
+        <MenuButton icon={<Square size={14} />} label="停止生成" onClick={() => onCancelGeneratedArtwork(library)}>
+          停止生成
+        </MenuButton>
+      )}
       <MenuButton danger icon={<Trash2 size={14} />} label="删除" onClick={() => onRemoveLibrary(library)}>
         删除
       </MenuButton>

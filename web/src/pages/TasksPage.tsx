@@ -38,6 +38,7 @@ const metricLabels: Record<string, string> = {
   matched: '匹配',
   processed: '处理',
   queued: '排队',
+  generated: '已生成',
 }
 
 function formatMetrics(metrics?: Record<string, number>): string {
@@ -61,6 +62,9 @@ function statusBadge(task: BackgroundTask) {
   }
   if (task.status === 'completed') {
     return <span className="rounded-lg border border-emerald-400/40 px-1.5 py-0.5 text-xs text-emerald-500">done</span>
+  }
+  if (task.status === 'canceled') {
+    return <span className="rounded-lg border border-gray-300 px-1.5 py-0.5 text-xs text-sand-500">canceled</span>
   }
   return <span className="rounded-lg border border-yellow-400/40 px-1.5 py-0.5 text-xs text-yellow-500">running</span>
 }

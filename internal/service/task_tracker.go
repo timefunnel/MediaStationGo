@@ -12,11 +12,13 @@ const (
 	TaskStatusRunning   = "running"
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
+	TaskStatusCanceled  = "canceled"
 
 	TaskKindOrganize = "organize"
 	TaskKindScan     = "scan"
 	TaskKindScrape   = "scrape"
 	TaskKindUpdate   = "update"
+	TaskKindArtwork  = "artwork"
 )
 
 // BackgroundTask is the compact, operator-facing shape shown on the live tasks
@@ -119,6 +121,13 @@ func (h *TaskHandle) Finish(err error, update TaskUpdate) {
 	h.tracker.finish(h.id, err, update)
 }
 
+func (h *TaskHandle) Cancel(update TaskUpdate) {
+	if h == nil || h.tracker == nil {
+		return
+	}
+	h.tracker.cancel(h.id, update)
+}
+
 func (t *TaskTrackerService) Snapshot() TaskSnapshot {
 	if t == nil {
 		return TaskSnapshot{}
@@ -168,6 +177,31 @@ func (t *TaskTrackerService) finish(id string, err error, update TaskUpdate) {
 	} else {
 		task.Status = TaskStatusCompleted
 	}
+	delete(t.active, id)
+	snapshot := cloneBackgroundTask(*task)
+	t.recent = append([]BackgroundTask{snapshot}, t.recent...)
+	if t.maxRecent <= 0 {
+		t.maxRecent = 30
+	}
+	if len(t.recent) > t.maxRecent {
+		t.recent = t.recent[:t.maxRecent]
+	}
+	t.mu.Unlock()
+	t.publish(snapshot)
+}
+
+func (t *TaskTrackerService) cancel(id string, update TaskUpdate) {
+	now := t.currentTime()
+	t.mu.Lock()
+	task, ok := t.active[id]
+	if !ok {
+		t.mu.Unlock()
+		return
+	}
+	applyTaskUpdate(task, update)
+	task.Status = TaskStatusCanceled
+	task.UpdatedAt = now
+	task.FinishedAt = &now
 	delete(t.active, id)
 	snapshot := cloneBackgroundTask(*task)
 	t.recent = append([]BackgroundTask{snapshot}, t.recent...)

@@ -246,6 +246,11 @@ func (s *ScannerService) finishLocalLibraryScan(ctx context.Context, lib *model.
 	s.notifyScanFinished(lib, res, nil, false)
 	s.invalidateMediaCache(ctx)
 	s.maybeGenerateSTRMAfterScan(lib.ID)
+	if s.generatedArtwork != nil && lib.GenerateArtwork {
+		if _, err := s.generatedArtwork.QueueMissingForLibrary(context.WithoutCancel(ctx), lib.ID); err != nil {
+			s.log.Warn("queue generated artwork after local scan failed", zap.String("library_id", lib.ID), zap.Error(err))
+		}
+	}
 
 	if scanHasImportChanges(res) && autoScrape && !libraryPreservesSourceTitle(lib) && s.scraper != nil && s.scraper.AnyEnabled() && s.autoScrapeEnabled(ctx) {
 		s.startAutoScrape(ctx, lib.ID)

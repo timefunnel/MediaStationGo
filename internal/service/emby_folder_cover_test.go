@@ -97,6 +97,37 @@ func TestEmbyFolderCoverArtworkPrefersBackdropForBackdropRequests(t *testing.T) 
 	}
 }
 
+func TestEmbyFolderCoverArtworkUsesGeneratedImagesWhenRealArtworkIsMissing(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Base: model.Base{ID: "lib-generated"}, Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true, GenerateArtwork: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	media := model.Media{
+		Base:                   model.Base{ID: "media-generated", UpdatedAt: time.Now()},
+		LibraryID:              lib.ID,
+		Title:                  "Generated",
+		Path:                   "/media/other/generated.mkv",
+		GeneratedPosterURL:     "/data/generated-artwork/media-generated/primary.jpg",
+		GeneratedBackdropURL:   "/data/generated-artwork/media-generated/backdrop.jpg",
+		GeneratedArtworkStatus: GeneratedArtworkStatusCompleted,
+	}
+	if err := svc.repo.DB.Create(&media).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	artworks, err := svc.FolderCoverArtwork(t.Context(), lib.ID, "Primary", 4)
+	if err != nil {
+		t.Fatalf("folder artworks: %v", err)
+	}
+	if len(artworks) != 1 || artworks[0].URL != media.GeneratedPosterURL || artworks[0].Tag == media.ID {
+		t.Fatalf("generated folder artwork = %#v", artworks)
+	}
+	if raw, err := svc.ImageURL(t.Context(), media.ID, "Backdrop"); err != nil || raw != media.GeneratedBackdropURL {
+		t.Fatalf("generated backdrop = %q, err = %v", raw, err)
+	}
+}
+
 func TestEmbyFolderCoverArtworkUsesSeriesForAnimeLibraries(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Base: model.Base{ID: "lib-anime"}, Name: "Anime", Path: "/media/anime", Type: "anime", Enabled: true}

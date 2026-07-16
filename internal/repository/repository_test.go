@@ -295,6 +295,43 @@ func TestMediaUpsertScanDoesNotClearMatchedMetadata(t *testing.T) {
 	}
 }
 
+func TestMediaUpsertClearsGeneratedArtworkWhenSourceSizeChanges(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := New(db)
+	path := "cloud://openlist/115/其他/video.mkv"
+	existing := model.Media{
+		LibraryID:                "lib-other",
+		Title:                    "video",
+		Path:                     path,
+		SizeBytes:                1024,
+		GeneratedPosterURL:       "/data/generated-artwork/media/primary.jpg",
+		GeneratedBackdropURL:     "/data/generated-artwork/media/backdrop.jpg",
+		GeneratedArtworkHash:     "old-hash",
+		GeneratedArtworkStatus:   "completed",
+		GeneratedArtworkError:    "old error",
+		GeneratedArtworkAttempts: 2,
+	}
+	if err := repos.Media.Upsert(t.Context(), &existing); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Media.Upsert(t.Context(), &model.Media{LibraryID: existing.LibraryID, Title: existing.Title, Path: path, SizeBytes: 2048}); err != nil {
+		t.Fatal(err)
+	}
+	var got model.Media
+	if err := repos.DB.Where("path = ?", path).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.GeneratedPosterURL != "" || got.GeneratedBackdropURL != "" || got.GeneratedArtworkHash != "" || got.GeneratedArtworkStatus != "" || got.GeneratedArtworkError != "" || got.GeneratedArtworkAttempts != 0 {
+		t.Fatalf("generated artwork was not invalidated: %#v", got)
+	}
+}
+
 // TestMediaUpsertMigratesCloudLibraryIDOnRescan 复现"一键挂载子目录后媒体消失"的
 // 回归：同一 cloud:// 文件先被父目录库扫描入库，之后用户按二级分类重新挂载到更
 // 精确的分类库并扫描，library_id 必须迁移到新分类库，否则媒体被钉死在旧库、新库

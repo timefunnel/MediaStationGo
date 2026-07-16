@@ -79,6 +79,7 @@ type Container struct {
 	PipelineIngest      *PipelineIngestService
 	PipelineScrape      *PipelineScrapeService
 	ResourceImport      *ResourceImportService
+	GeneratedArtwork    *GeneratedArtworkService
 
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
@@ -112,6 +113,9 @@ func (c *Container) Boot() {
 		c.Log.Warn("api config seed failed", zap.Error(err))
 	}
 	go c.warmMediaSearchIndex(c.stopCtx)
+	if c.GeneratedArtwork != nil {
+		c.GeneratedArtwork.Start(c.stopCtx)
+	}
 
 	// 加载所有已配置的下载客户端
 	if err := c.DownloadMgr.LoadAll(c.stopCtx); err != nil {

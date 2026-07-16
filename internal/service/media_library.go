@@ -17,8 +17,9 @@ func (s *MediaService) UpdateLibraryEnabled(ctx context.Context, id string, enab
 }
 
 type LibraryUpdateInput struct {
-	Enabled   *bool
-	TitleMode *string
+	Enabled         *bool
+	TitleMode       *string
+	GenerateArtwork *bool
 }
 
 func (s *MediaService) UpdateLibrary(ctx context.Context, id string, input LibraryUpdateInput) (*model.Library, error) {
@@ -39,6 +40,9 @@ func (s *MediaService) UpdateLibrary(ctx context.Context, id string, input Libra
 		if currentMode != mode {
 			updates["title_mode"] = mode
 		}
+	}
+	if input.GenerateArtwork != nil && lib.GenerateArtwork != *input.GenerateArtwork {
+		updates["generate_artwork"] = *input.GenerateArtwork
 	}
 	if len(updates) == 0 {
 		return lib, nil

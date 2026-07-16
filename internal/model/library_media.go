@@ -3,12 +3,13 @@ package model
 // Library 表示一个逻辑媒体库。Path 保留为兼容字段，指向第一条 LibraryRoot。
 type Library struct {
 	Base
-	Name      string        `gorm:"size:128;not null" json:"name"`
-	Path      string        `gorm:"size:1024;not null" json:"path"`
-	Type      string        `gorm:"size:16;not null;default:movie" json:"type"` // movie / tv / anime / music
-	TitleMode string        `gorm:"size:16;not null;default:smart" json:"title_mode"`
-	Enabled   bool          `gorm:"default:true" json:"enabled"`
-	Roots     []LibraryRoot `gorm:"foreignKey:LibraryID" json:"roots,omitempty"`
+	Name            string        `gorm:"size:128;not null" json:"name"`
+	Path            string        `gorm:"size:1024;not null" json:"path"`
+	Type            string        `gorm:"size:16;not null;default:movie" json:"type"` // movie / tv / anime / music
+	TitleMode       string        `gorm:"size:16;not null;default:smart" json:"title_mode"`
+	GenerateArtwork bool          `gorm:"not null;default:false" json:"generate_artwork"`
+	Enabled         bool          `gorm:"default:true" json:"enabled"`
+	Roots           []LibraryRoot `gorm:"foreignKey:LibraryID" json:"roots,omitempty"`
 }
 
 // LibraryRoot 是逻辑媒体库下的一条真实物理/挂载路径。
@@ -24,39 +25,45 @@ type LibraryRoot struct {
 // Media 是单个可播放项。剧集链接到 SeriesID；电影 SeriesID == ""。
 type Media struct {
 	Base
-	LibraryID     string  `gorm:"index;size:36" json:"library_id"`
-	LibraryRootID string  `gorm:"index;size:36" json:"library_root_id,omitempty"`
-	SeriesID      string  `gorm:"index;size:128" json:"series_id,omitempty"`
-	Title         string  `gorm:"size:255;not null" json:"title"`
-	OriginalName  string  `gorm:"size:255" json:"original_name,omitempty"`
-	EpisodeTitle  string  `gorm:"size:255" json:"episode_title,omitempty"`
-	Path          string  `gorm:"uniqueIndex;size:1024;not null" json:"path"`
-	RelativePath  string  `gorm:"size:1024" json:"relative_path,omitempty"`
-	SizeBytes     int64   `json:"size_bytes"`
-	DurationSec   int     `json:"duration_sec"`
-	Width         int     `json:"width"`
-	Height        int     `json:"height"`
-	VideoCodec    string  `gorm:"size:32" json:"video_codec,omitempty"`
-	AudioCodec    string  `gorm:"size:32" json:"audio_codec,omitempty"`
-	Container     string  `gorm:"size:128" json:"container,omitempty"`
-	PosterURL     string  `gorm:"size:1024" json:"poster_url,omitempty"`
-	BackdropURL   string  `gorm:"size:1024" json:"backdrop_url,omitempty"`
-	Overview      string  `gorm:"type:text" json:"overview,omitempty"`
-	Rating        float32 `json:"rating"`
-	Year          int     `json:"year"`
-	ReleaseDate   string  `gorm:"size:10;index" json:"release_date,omitempty"`
-	SeasonNum     int     `json:"season_num"`
-	EpisodeNum    int     `json:"episode_num"`
-	ScrapeStatus  string  `gorm:"size:16;default:pending" json:"scrape_status"`
-	TMDbID        int     `json:"tmdb_id"`
-	BangumiID     int     `json:"bangumi_id"`
-	DoubanID      string  `gorm:"column:douban_id;size:32" json:"douban_id,omitempty"`
-	TheTVDBID     string  `gorm:"column:thetvdb_id;size:64" json:"thetvdb_id,omitempty"`
-	Languages     string  `gorm:"size:64"  json:"languages,omitempty"` // 逗号分隔的 ISO 639-1 代码，如 "zh,en"
-	Countries     string  `gorm:"size:128" json:"countries,omitempty"` // 逗号分隔的 ISO 3166-1，如 "CN,US"
-	Genres        string  `gorm:"type:text" json:"genres,omitempty"`   // 逗号分隔的类型名，如 "Action,Animation"
-	Actors        string  `gorm:"type:text" json:"actors,omitempty"`
-	NSFW          bool    `gorm:"default:false" json:"nsfw"`
+	LibraryID                string  `gorm:"index;size:36" json:"library_id"`
+	LibraryRootID            string  `gorm:"index;size:36" json:"library_root_id,omitempty"`
+	SeriesID                 string  `gorm:"index;size:128" json:"series_id,omitempty"`
+	Title                    string  `gorm:"size:255;not null" json:"title"`
+	OriginalName             string  `gorm:"size:255" json:"original_name,omitempty"`
+	EpisodeTitle             string  `gorm:"size:255" json:"episode_title,omitempty"`
+	Path                     string  `gorm:"uniqueIndex;size:1024;not null" json:"path"`
+	RelativePath             string  `gorm:"size:1024" json:"relative_path,omitempty"`
+	SizeBytes                int64   `json:"size_bytes"`
+	DurationSec              int     `json:"duration_sec"`
+	Width                    int     `json:"width"`
+	Height                   int     `json:"height"`
+	VideoCodec               string  `gorm:"size:32" json:"video_codec,omitempty"`
+	AudioCodec               string  `gorm:"size:32" json:"audio_codec,omitempty"`
+	Container                string  `gorm:"size:128" json:"container,omitempty"`
+	PosterURL                string  `gorm:"size:1024" json:"poster_url,omitempty"`
+	BackdropURL              string  `gorm:"size:1024" json:"backdrop_url,omitempty"`
+	GeneratedPosterURL       string  `gorm:"size:1024" json:"generated_poster_url,omitempty"`
+	GeneratedBackdropURL     string  `gorm:"size:1024" json:"generated_backdrop_url,omitempty"`
+	GeneratedArtworkHash     string  `gorm:"size:64" json:"generated_artwork_hash,omitempty"`
+	GeneratedArtworkStatus   string  `gorm:"index;size:16" json:"generated_artwork_status,omitempty"`
+	GeneratedArtworkError    string  `gorm:"type:text" json:"-"`
+	GeneratedArtworkAttempts int     `json:"generated_artwork_attempts,omitempty"`
+	Overview                 string  `gorm:"type:text" json:"overview,omitempty"`
+	Rating                   float32 `json:"rating"`
+	Year                     int     `json:"year"`
+	ReleaseDate              string  `gorm:"size:10;index" json:"release_date,omitempty"`
+	SeasonNum                int     `json:"season_num"`
+	EpisodeNum               int     `json:"episode_num"`
+	ScrapeStatus             string  `gorm:"size:16;default:pending" json:"scrape_status"`
+	TMDbID                   int     `json:"tmdb_id"`
+	BangumiID                int     `json:"bangumi_id"`
+	DoubanID                 string  `gorm:"column:douban_id;size:32" json:"douban_id,omitempty"`
+	TheTVDBID                string  `gorm:"column:thetvdb_id;size:64" json:"thetvdb_id,omitempty"`
+	Languages                string  `gorm:"size:64"  json:"languages,omitempty"` // 逗号分隔的 ISO 639-1 代码，如 "zh,en"
+	Countries                string  `gorm:"size:128" json:"countries,omitempty"` // 逗号分隔的 ISO 3166-1，如 "CN,US"
+	Genres                   string  `gorm:"type:text" json:"genres,omitempty"`   // 逗号分隔的类型名，如 "Action,Animation"
+	Actors                   string  `gorm:"type:text" json:"actors,omitempty"`
+	NSFW                     bool    `gorm:"default:false" json:"nsfw"`
 
 	// STRMURL is the indirection target for .strm files: when present the
 	// stream handler redirects to it instead of opening the local file.

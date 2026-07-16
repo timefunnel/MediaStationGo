@@ -27,3 +27,17 @@ func TestOrganizeTaskMetricsIncludesScrapeProcessed(t *testing.T) {
 		t.Fatalf("scrape_skipped = %d, want 1", metrics["scrape_skipped"])
 	}
 }
+
+func TestTaskTrackerCancelMovesTaskToRecent(t *testing.T) {
+	tracker := NewTaskTrackerService(nil, nil)
+	handle := tracker.Start(TaskKindArtwork, "artwork", TaskUpdate{Stage: "running"})
+	handle.Cancel(TaskUpdate{Stage: "canceled", Message: "已取消"})
+
+	snapshot := tracker.Snapshot()
+	if len(snapshot.Active) != 0 || len(snapshot.Recent) != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.Recent[0].Status != TaskStatusCanceled || snapshot.Recent[0].Stage != "canceled" {
+		t.Fatalf("canceled task = %#v", snapshot.Recent[0])
+	}
+}

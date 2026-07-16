@@ -174,11 +174,13 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.PlayProfiles = NewPlayProfileService(b.log, b.repos)
 	b.c.Permissions = NewPermissionService(b.log, b.repos)
 	b.c.StorageCfg = NewStorageConfigService(b.log, b.repos, b.c.Crypto)
+	b.c.GeneratedArtwork = NewGeneratedArtworkService(b.cfg, b.log, b.repos, b.c.StorageCfg, b.c.Cache, b.c.Tasks)
 	b.c.Media.SetCloudMediaDeleter(b.c.StorageCfg)
 	b.c.STRM = NewSTRMService(b.log, b.repos, b.cfg)
 	b.c.Scan.SetStorageConfig(b.c.StorageCfg)
 	b.c.Subtitle.SetStorageConfig(b.c.StorageCfg)
 	b.c.Scan.SetSubtitleService(b.c.Subtitle)
+	b.c.Scan.SetGeneratedArtworkService(b.c.GeneratedArtwork)
 	b.c.StorageCfg.SetChangeHandler(func(provider string) {
 		b.c.Subtitle.InvalidateCloudDiscovery("", provider)
 	})

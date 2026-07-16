@@ -23,6 +23,16 @@ export interface SeriesPage {
   page_size: number
 }
 
+export interface GeneratedArtworkStatus {
+  library_id: string
+  enabled: boolean
+  pending: number
+  running: number
+  completed: number
+  failed: number
+  canceled: number
+}
+
 export interface LibraryRootInput {
   name?: string
   path: string
@@ -111,7 +121,7 @@ export const libraryAPI = {
   createWithRoots: (name: string, type: string, titleMode: string, roots: LibraryRootInput[]) =>
     api.post<Library>('/libraries', { name, type, title_mode: titleMode, roots }).then((r) => r.data),
 
-  update: (id: string, patch: { enabled?: boolean; title_mode?: 'smart' | 'filename' }) =>
+  update: (id: string, patch: { enabled?: boolean; title_mode?: 'smart' | 'filename'; generate_artwork?: boolean }) =>
     api.patch<Library>(`/libraries/${id}`, patch).then((r) => r.data),
 
   remove: (id: string) => api.delete(`/libraries/${id}`).then((r) => r.data),
@@ -131,6 +141,15 @@ export const libraryAPI = {
 
   scanRoot: (id: string, rootID: string) =>
     api.post<ScanResult>(`/libraries/${id}/roots/${rootID}/scan`, null, { timeout: BATCH_REQUEST_TIMEOUT }).then((r) => r.data),
+
+  generatedArtworkStatus: (id: string) =>
+    api.get<GeneratedArtworkStatus>(`/libraries/${id}/generated-artwork`).then((r) => r.data),
+
+  runGeneratedArtwork: (id: string) =>
+    api.post<{ queued: number }>(`/libraries/${id}/generated-artwork`).then((r) => r.data),
+
+  cancelGeneratedArtwork: (id: string) =>
+    api.delete<{ canceled: number }>(`/libraries/${id}/generated-artwork`).then((r) => r.data),
 
   scrape: (id: string, options?: ScrapeOptions) =>
     api.post(`/libraries/${id}/scrape`, options ?? null, { timeout: BATCH_REQUEST_TIMEOUT }).then((r) => r.data),

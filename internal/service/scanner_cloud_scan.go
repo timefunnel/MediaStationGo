@@ -253,6 +253,14 @@ func (s *ScannerService) completeCloudLibraryScan(ctx context.Context, req cloud
 	targetIDs := appendUniqueLibraryIDs(req.touchedLibraryIDs, req.libraryID)
 	for _, targetID := range targetIDs {
 		s.maybeGenerateSTRMAfterScan(targetID)
+		if s.generatedArtwork != nil {
+			lib, findErr := s.repo.Library.FindByID(context.WithoutCancel(ctx), targetID)
+			if findErr == nil && lib != nil && lib.GenerateArtwork {
+				if _, err := s.generatedArtwork.QueueMissingForLibrary(context.WithoutCancel(ctx), targetID); err != nil {
+					s.log.Warn("queue generated artwork after cloud scan failed", zap.String("library_id", targetID), zap.Error(err))
+				}
+			}
+		}
 	}
 	if scanHasImportChanges(req.result) && req.autoScrape && s.scraper != nil && s.scraper.AnyEnabled() && s.autoScrapeEnabled(ctx) {
 		for _, targetID := range targetIDs {

@@ -89,6 +89,7 @@ func mediaUpsertUpdates(existing, incoming model.Media) map[string]any {
 
 func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Media) {
 	// 已存在：仅刷新文件层面的字段。
+	sourceChanged := incoming.SizeBytes > 0 && existing.SizeBytes > 0 && existing.SizeBytes != incoming.SizeBytes
 	setIfChanged(updates, "size_bytes", existing.SizeBytes, incoming.SizeBytes)
 	setIfChanged(updates, "duration_sec", existing.DurationSec, incoming.DurationSec)
 	setIfChanged(updates, "width", existing.Width, incoming.Width)
@@ -102,6 +103,14 @@ func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Me
 	// 回填硬链接身份标识，便于后续扫描去重（避免重复识别/多倍占用）。
 	if incoming.FileID != "" && incoming.FileID != existing.FileID {
 		updates["file_id"] = incoming.FileID
+	}
+	if sourceChanged {
+		updates["generated_poster_url"] = ""
+		updates["generated_backdrop_url"] = ""
+		updates["generated_artwork_hash"] = ""
+		updates["generated_artwork_status"] = ""
+		updates["generated_artwork_error"] = ""
+		updates["generated_artwork_attempts"] = 0
 	}
 }
 

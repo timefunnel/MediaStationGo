@@ -31,6 +31,9 @@ export function AdminLibraryPanel() {
         onToggleLibrary={libraryActions.toggleLibrary}
         onScanLibrary={libraryActions.scanLibrary}
         onTitleModeChange={libraryActions.updateLibraryTitleMode}
+        onGenerateArtworkChange={libraryActions.updateLibraryGenerateArtwork}
+        onRunGeneratedArtwork={libraryActions.runGeneratedArtwork}
+        onCancelGeneratedArtwork={libraryActions.cancelGeneratedArtwork}
         onRemoveLibrary={libraryActions.removeLibrary}
       />
     </div>

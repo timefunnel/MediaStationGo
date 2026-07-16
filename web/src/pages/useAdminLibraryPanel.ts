@@ -172,6 +172,22 @@ function useLibraryActions(refresh: () => Promise<void>) {
     await refresh()
   }
 
+  const updateLibraryGenerateArtwork = async (library: Library, enabled: boolean) => {
+    await libraryAPI.update(library.id, { generate_artwork: enabled })
+    toast.success(enabled ? '已开启缺图预览生成' : '已关闭缺图预览生成')
+    await refresh()
+  }
+
+  const runGeneratedArtwork = async (library: Library) => {
+    const result = await libraryAPI.runGeneratedArtwork(library.id)
+    toast.success(result.queued > 0 ? `已排队 ${result.queued} 个缺图媒体` : '当前没有待生成的缺图媒体')
+  }
+
+  const cancelGeneratedArtwork = async (library: Library) => {
+    const result = await libraryAPI.cancelGeneratedArtwork(library.id)
+    toast.success(result.canceled > 0 ? `已取消 ${result.canceled} 个排队任务` : '当前没有排队中的生成任务')
+  }
+
   const removeLibrary = async (library: Library) => {
     if (!(await confirmAction({ title: '删除媒体库', message: `确定删除「${library.name}」?`, confirmText: '删除' }))) return
     await libraryAPI.remove(library.id)
@@ -179,5 +195,13 @@ function useLibraryActions(refresh: () => Promise<void>) {
     await refresh()
   }
 
-  return { toggleLibrary, scanLibrary, updateLibraryTitleMode, removeLibrary }
+  return {
+    toggleLibrary,
+    scanLibrary,
+    updateLibraryTitleMode,
+    updateLibraryGenerateArtwork,
+    runGeneratedArtwork,
+    cancelGeneratedArtwork,
+    removeLibrary,
+  }
 }

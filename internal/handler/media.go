@@ -25,8 +25,9 @@ type createLibraryReq struct {
 }
 
 type updateLibraryReq struct {
-	Enabled   *bool   `json:"enabled"`
-	TitleMode *string `json:"title_mode"`
+	Enabled         *bool   `json:"enabled"`
+	TitleMode       *string `json:"title_mode"`
+	GenerateArtwork *bool   `json:"generate_artwork"`
 }
 
 func listLibrariesHandler(svc *service.Container) gin.HandlerFunc {
@@ -124,13 +125,14 @@ func createLibraryHandler(svc *service.Container) gin.HandlerFunc {
 func updateLibraryHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req updateLibraryReq
-		if err := c.ShouldBindJSON(&req); err != nil || (req.Enabled == nil && req.TitleMode == nil) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "enabled or title_mode is required"})
+		if err := c.ShouldBindJSON(&req); err != nil || (req.Enabled == nil && req.TitleMode == nil && req.GenerateArtwork == nil) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enabled, title_mode or generate_artwork is required"})
 			return
 		}
 		lib, err := svc.Media.UpdateLibrary(c.Request.Context(), c.Param("id"), service.LibraryUpdateInput{
-			Enabled:   req.Enabled,
-			TitleMode: req.TitleMode,
+			Enabled:         req.Enabled,
+			TitleMode:       req.TitleMode,
+			GenerateArtwork: req.GenerateArtwork,
 		})
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -146,8 +148,20 @@ func updateLibraryHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		uid, _ := c.Get("ctx_user_id")
 		if svc.Audit != nil {
-			detail := "enabled=" + strconv.FormatBool(lib.Enabled) + ",title_mode=" + lib.TitleMode
+			detail := "enabled=" + strconv.FormatBool(lib.Enabled) + ",title_mode=" + lib.TitleMode + ",generate_artwork=" + strconv.FormatBool(lib.GenerateArtwork)
 			svc.Audit.Record(c.Request.Context(), toString(uid), "library.update", lib.ID, c.ClientIP(), detail)
+		}
+		if req.GenerateArtwork != nil && *req.GenerateArtwork && svc.GeneratedArtwork != nil {
+			if _, queueErr := svc.GeneratedArtwork.QueueMissingForLibrary(c.Request.Context(), lib.ID); queueErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": queueErr.Error()})
+				return
+			}
+		}
+		if req.GenerateArtwork != nil && !*req.GenerateArtwork && svc.GeneratedArtwork != nil {
+			if _, cancelErr := svc.GeneratedArtwork.CancelLibrary(c.Request.Context(), lib.ID); cancelErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": cancelErr.Error()})
+				return
+			}
 		}
 		if svc.Watcher != nil {
 			go func() { _ = svc.Watcher.Refresh(context.Background()) }()

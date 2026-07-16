@@ -40,7 +40,7 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 	var rows []model.Media
 	if err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("library_id IN ? AND deleted_at IS NULL", libraryIDs).
-		Where("(poster_url <> '' OR backdrop_url <> '')").
+		Where("(poster_url <> '' OR backdrop_url <> '' OR generated_poster_url <> '' OR generated_backdrop_url <> '')").
 		Order("updated_at DESC, created_at DESC, id DESC").
 		Limit(limit * 4).
 		Find(&rows).Error; err != nil {
@@ -137,17 +137,35 @@ func folderCoverArtworkForMedia(m *model.Media, imageType string) (EmbyFolderCov
 	}
 	poster := strings.TrimSpace(m.PosterURL)
 	backdrop := strings.TrimSpace(m.BackdropURL)
+	generatedPoster := false
+	generatedBackdrop := false
+	if poster == "" {
+		poster = strings.TrimSpace(m.GeneratedPosterURL)
+		generatedPoster = poster != ""
+	}
+	if backdrop == "" {
+		backdrop = strings.TrimSpace(m.GeneratedBackdropURL)
+		generatedBackdrop = backdrop != ""
+	}
 	switch folderCoverImageTypeValue(imageType) {
 	case "Backdrop":
 		if backdrop != "" {
-			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Backdrop", Tag: m.ID + "-bd", URL: backdrop}, true
+			tag := m.ID + "-bd"
+			if generatedBackdrop {
+				tag = embyImageTag(m.ID, "backdrop", backdrop, m.UpdatedAt)
+			}
+			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Backdrop", Tag: tag, URL: backdrop}, true
 		}
 		return folderCoverArtworkForMedia(m, "Primary")
 	case "Thumb":
 		return folderCoverArtworkForMedia(m, "Primary")
 	default:
 		if poster != "" {
-			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Primary", Tag: m.ID, URL: poster}, true
+			tag := m.ID
+			if generatedPoster {
+				tag = embyImageTag(m.ID, "primary", poster, m.UpdatedAt)
+			}
+			return EmbyFolderCoverArtwork{MediaID: m.ID, ImageType: "Primary", Tag: tag, URL: poster}, true
 		}
 		return EmbyFolderCoverArtwork{}, false
 	}
