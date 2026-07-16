@@ -39,3 +39,16 @@ func TestMediaUpsertUpdatesPreservedFilenameAndClearsEpisodeIdentity(t *testing.
 		t.Fatalf("preserving a filename must not restart scraping: %#v", updates)
 	}
 }
+
+func TestMediaUpsertKeepsLLMCleanedTitleInFilenameMode(t *testing.T) {
+	existing := model.Media{Title: "清洗后的标题", ScrapeStatus: "title_cleaned"}
+	incoming := model.Media{
+		Title:               "raw.filename",
+		ScrapeStatus:        "pending",
+		PreserveSourceTitle: true,
+	}
+	updates := mediaUpsertUpdates(existing, incoming)
+	if _, ok := updates["title"]; ok {
+		t.Fatalf("LLM cleaned title was overwritten: %#v", updates)
+	}
+}

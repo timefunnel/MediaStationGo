@@ -33,6 +33,8 @@ func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container
 	authed.POST("/libraries/:id/roots/:root_id/scan", middleware.AdminRequired(), scanLibraryRootHandler(svc))
 	authed.POST("/libraries/:id/scan", middleware.AdminRequired(), scanLibraryHandler(svc))
 	authed.POST("/libraries/:id/scrape", middleware.AdminRequired(), scrapeLibraryHandler(svc))
+	authed.POST("/libraries/:id/title-cleanup/preview", middleware.AdminRequired(), previewMediaTitleCleanupHandler(svc))
+	authed.POST("/libraries/:id/title-cleanup/apply", middleware.AdminRequired(), applyMediaTitleCleanupHandler(svc))
 	authed.GET("/libraries/:id/generated-artwork", middleware.AdminRequired(), generatedArtworkStatusHandler(svc))
 	authed.POST("/libraries/:id/generated-artwork", middleware.AdminRequired(), runGeneratedArtworkHandler(svc))
 	authed.DELETE("/libraries/:id/generated-artwork", middleware.AdminRequired(), cancelGeneratedArtworkHandler(svc))

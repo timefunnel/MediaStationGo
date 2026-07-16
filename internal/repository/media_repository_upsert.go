@@ -128,6 +128,9 @@ func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Me
 func addMediaTitleUpdates(updates map[string]any, existing, incoming model.Media) {
 	if incoming.Title != "" {
 		if incoming.PreserveSourceTitle {
+			if strings.EqualFold(strings.TrimSpace(existing.ScrapeStatus), "title_cleaned") {
+				return
+			}
 			setIfChanged(updates, "title", existing.Title, incoming.Title)
 			return
 		}

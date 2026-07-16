@@ -1,4 +1,4 @@
-import { Globe } from 'lucide-react'
+import { Globe, WandSparkles } from 'lucide-react'
 
 import type { Library } from '../types'
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
@@ -14,10 +14,12 @@ type LibraryPageHeaderProps = {
   scanning: boolean
   scraping: boolean
   repairing: boolean
+  canCleanTitles: boolean
   onScrapeEpisodeArtworkChange: (checked: boolean) => void
   onScan: () => void
   onScrape: () => void
   onRepairRescrape: () => void
+  onCleanTitles: () => void
   onResourceSearch: () => void
 }
 
@@ -31,10 +33,12 @@ export function LibraryPageHeader({
   scanning,
   scraping,
   repairing,
+  canCleanTitles,
   onScrapeEpisodeArtworkChange,
   onScan,
   onScrape,
   onRepairRescrape,
+  onCleanTitles,
   onResourceSearch,
 }: LibraryPageHeaderProps) {
   const displayPath = library ? libraryDisplayPath(library.path) : ''
@@ -83,6 +87,12 @@ export function LibraryPageHeader({
           >
             {repairing ? '修复中…' : '修复+重刮本库'}
           </button>
+          {canCleanTitles && (
+            <button type="button" onClick={onCleanTitles} className="btn-outline">
+              <WandSparkles size={16} />
+              AI 清洗标题
+            </button>
+          )}
           </>
         )}
       </div>

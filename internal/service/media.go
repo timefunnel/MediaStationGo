@@ -18,6 +18,7 @@ type MediaService struct {
 	log          *zap.Logger
 	repo         *repository.Container
 	cache        *RuntimeCacheService
+	ai           *AIService
 	cloudDeleter CloudMediaDeleter
 	purgeMu      sync.Mutex
 }

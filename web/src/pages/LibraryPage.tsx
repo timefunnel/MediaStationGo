@@ -18,6 +18,7 @@ import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { LibraryActorFilter } from './LibraryActorFilter'
 import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
+import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
 
 export function LibraryPage() {
   const { id = '' } = useParams()
@@ -32,6 +33,7 @@ export function LibraryPage() {
   const [resourceDrawerOpen, setResourceDrawerOpen] = useState(false)
   const [resourceInitialQuery, setResourceInitialQuery] = useState('')
   const [resourceTaskID, setResourceTaskID] = useState('')
+  const [titleCleanupOpen, setTitleCleanupOpen] = useState(false)
 
   // 剧集模式：选中某个剧集后展开详情
   const [selectedSeries, setSelectedSeries] = useState<SeriesCard | null>(null)
@@ -165,10 +167,12 @@ export function LibraryPage() {
         scanning={scanning}
         scraping={scraping}
         repairing={repairing}
+        canCleanTitles={role === 'admin' && library?.title_mode === 'filename'}
         onScrapeEpisodeArtworkChange={setScrapeEpisodeArtwork}
         onScan={handleScan}
         onScrape={handleScrape}
         onRepairRescrape={handleRepairRescrape}
+        onCleanTitles={() => setTitleCleanupOpen(true)}
         onResourceSearch={() => {
           setResourceInitialQuery('')
           setResourceTaskID('')
@@ -253,6 +257,14 @@ export function LibraryPage() {
           setResourceDrawerOpen(false)
           setResourceInitialQuery('')
         }}
+      />
+
+      <AITitleCleanupDialog
+        open={titleCleanupOpen}
+        libraryID={id}
+        libraryName={library?.name ?? '媒体库'}
+        onClose={() => setTitleCleanupOpen(false)}
+        onApplied={reloadCurrentLibrary}
       />
     </div>
   )
