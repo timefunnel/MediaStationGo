@@ -144,9 +144,13 @@ func (a *AIService) Recommend(ctx context.Context, history []string, max int) ([
 
 // complete is the shared helper — POST /v1/chat/completions.
 func (a *AIService) complete(ctx context.Context, runtime aiRuntimeConfig, system, user string) (string, error) {
+	return a.completeWithTemperature(ctx, runtime, system, user, 0.2)
+}
+
+func (a *AIService) completeWithTemperature(ctx context.Context, runtime aiRuntimeConfig, system, user string, temperature float64) (string, error) {
 	payload := map[string]any{
 		"model":       runtime.Model,
-		"temperature": 0.2,
+		"temperature": temperature,
 		"stream":      false,
 		"messages": []map[string]string{
 			{"role": "system", "content": system},

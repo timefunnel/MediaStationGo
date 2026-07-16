@@ -20,6 +20,9 @@ func TestCleanMediaTitlesValidatesStructuredResponse(t *testing.T) {
 		if stream, ok := request["stream"].(bool); !ok || stream {
 			t.Fatalf("stream = %#v, want false", request["stream"])
 		}
+		if temperature, ok := request["temperature"].(float64); !ok || temperature != 0 {
+			t.Fatalf("temperature = %#v, want 0", request["temperature"])
+		}
 		w.Header().Set("Content-Type", "application/json")
 		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
 			"content": "```json\n{\"items\":[{\"media_id\":\"a\",\"title\":\"作品 A\",\"relation\":\"version\",\"group_key\":\"work-a\",\"year\":2025,\"confidence\":0.96},{\"media_id\":\"b\",\"title\":\"作品 A\",\"relation\":\"version\",\"group_key\":\"work-a\",\"year\":2025,\"confidence\":0.91}]}\n```",

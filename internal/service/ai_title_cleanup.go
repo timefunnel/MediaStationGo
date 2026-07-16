@@ -65,9 +65,11 @@ func (a *AIService) CleanMediaTitles(ctx context.Context, groups []MediaTitleCle
 - standalone：独立作品，不应与其他文件聚合；
 - version：同一完整作品的不同清晰度、编码或发行版本，group_key 相同且 title、year 必须相同；
 - part：同一作品的分段、章节、花絮或连续短片，title 必须保留可区分的分段信息，不能当作多版本聚合。
-目录名和文件名都可作为标题来源。优先去掉站点域名、广告前后缀、画质编码和无意义序号，但保留能区分作品或分段的文字。无法确定时保守使用 standalone，并降低 confidence。
+目录名和文件名都可作为标题来源。优先去掉站点域名、广告前后缀、画质编码和无意义序号，但保留能区分作品或分段的文字。
+当文件名仅为 mp4_ (2)、IMG_4595、纯数字、随机编号等无语义名称，而 source_directory 或 directory_chain 含有明确作品描述时，必须使用描述性目录名作为基础标题；括号或末尾数字可转为“第 N 段”，relation 使用 part。示例：目录“作品 A”、文件“mp4_ (2).mp4”应输出标题“作品 A 第 2 段”，不能原样保留 mp4_ (2)。
+同一目录存在一个描述性主文件和多个无语义编号文件时，应结合目录上下文判断这些文件是否属于同一组分段；如果按分段处理，每条 title 必须带不同的分段标识。无法确定时保守使用 standalone，并降低 confidence。
 只输出 JSON，不要代码块或解释。格式：{"items":[{"media_id":"...","title":"...","relation":"standalone|version|part","group_key":"仅 version 必填","year":0,"confidence":0.0,"reason":"简短依据"}]}`
-	out, err := a.complete(ctx, runtime, system, string(payload))
+	out, err := a.completeWithTemperature(ctx, runtime, system, string(payload), 0)
 	if err != nil {
 		return nil, err
 	}
