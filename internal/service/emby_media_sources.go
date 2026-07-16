@@ -303,27 +303,38 @@ func embyDirectStreamURL(mediaID, container string) string {
 func (e *EmbyService) mediaStreams(m *model.Media) []map[string]any {
 	streams := []map[string]any{}
 	if m.VideoCodec != "" || m.Width > 0 {
+		displayTitle := strings.TrimSpace(fmt.Sprintf("%dx%d %s %s", m.Width, m.Height, m.VideoCodec, m.VideoRange))
 		streams = append(streams, map[string]any{
-			"Codec":        m.VideoCodec,
-			"Type":         "Video",
-			"Index":        0,
-			"Width":        m.Width,
-			"Height":       m.Height,
-			"AspectRatio":  "",
-			"IsDefault":    true,
-			"IsForced":     false,
-			"IsExternal":   false,
-			"DisplayTitle": fmt.Sprintf("%dx%d %s", m.Width, m.Height, m.VideoCodec),
+			"Codec":            m.VideoCodec,
+			"Type":             "Video",
+			"Index":            0,
+			"Width":            m.Width,
+			"Height":           m.Height,
+			"BitRate":          m.VideoBitRate,
+			"RealFrameRate":    m.FrameRate,
+			"AverageFrameRate": m.FrameRate,
+			"Profile":          m.VideoProfile,
+			"VideoRange":       m.VideoRange,
+			"BitDepth":         m.VideoBitDepth,
+			"AspectRatio":      "",
+			"IsDefault":        true,
+			"IsForced":         false,
+			"IsExternal":       false,
+			"DisplayTitle":     displayTitle,
 		})
 	}
 	if m.AudioCodec != "" {
 		streams = append(streams, map[string]any{
-			"Codec":      m.AudioCodec,
-			"Type":       "Audio",
-			"Index":      1,
-			"IsDefault":  true,
-			"IsForced":   false,
-			"IsExternal": false,
+			"Codec":         m.AudioCodec,
+			"Type":          "Audio",
+			"Index":         1,
+			"BitRate":       m.AudioBitRate,
+			"Channels":      m.AudioChannels,
+			"ChannelLayout": m.AudioChannelLayout,
+			"SampleRate":    m.AudioSampleRate,
+			"IsDefault":     true,
+			"IsForced":      false,
+			"IsExternal":    false,
 		})
 	}
 	if len(streams) == 0 {

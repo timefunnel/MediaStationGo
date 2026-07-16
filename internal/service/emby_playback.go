@@ -64,14 +64,7 @@ func (e *EmbyService) probeCloudTrackMetadata(mediaID, typ, ref string) {
 	}()
 	probeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	link, err := e.storage.CloudResolve(probeCtx, typ, ref, "")
-	if err != nil {
-		if e.log != nil {
-			e.log.Debug("resolve cloud media for playback probe failed", zap.String("media_id", mediaID), zap.Error(err))
-		}
-		return
-	}
-	probe, err := e.probe.ProbeHTTP(probeCtx, link.URL, link.Headers)
+	probe, err := probeCloudFileMetadataWith(probeCtx, e.storage, e.probe, typ, ref)
 	if err != nil {
 		if e.log != nil {
 			e.log.Debug("playback cloud ffprobe failed", zap.String("media_id", mediaID), zap.Error(err))
@@ -82,13 +75,27 @@ func (e *EmbyService) probeCloudTrackMetadata(mediaID, typ, ref string) {
 	if len(updates) == 0 {
 		return
 	}
-	if err := e.repo.DB.WithContext(probeCtx).Model(&model.Media{}).Where("id = ?", mediaID).Updates(updates).Error; err != nil && e.log != nil {
-		e.log.Debug("persist playback cloud probe failed", zap.String("media_id", mediaID), zap.Error(err))
+	var previous model.Media
+	findErr := e.repo.DB.WithContext(probeCtx).Where("id = ?", mediaID).First(&previous).Error
+	if err := e.repo.DB.WithContext(probeCtx).Model(&model.Media{}).Where("id = ?", mediaID).Updates(updates).Error; err != nil {
+		if e.log != nil {
+			e.log.Debug("persist playback cloud probe failed", zap.String("media_id", mediaID), zap.Error(err))
+		}
+		return
+	}
+	if findErr == nil && e.generatedArtwork != nil && previous.DurationSec != probe.DurationSec {
+		if _, err := e.generatedArtwork.QueueRefreshForMedia(context.WithoutCancel(probeCtx), mediaID); err != nil && e.log != nil {
+			e.log.Warn("queue generated artwork refresh after playback probe failed", zap.String("media_id", mediaID), zap.Error(err))
+		}
+	}
+	if e.cache != nil {
+		e.cache.DeletePrefix(context.WithoutCancel(probeCtx), "media:")
 	}
 }
 
 func mediaTrackMetadataMissing(m *model.Media) bool {
-	return m.DurationSec <= 0 ||
+	return m.MediaProbeVersion < mediaProbeMetadataVersion ||
+		m.DurationSec <= 0 ||
 		m.Width <= 0 ||
 		m.Height <= 0 ||
 		strings.TrimSpace(m.VideoCodec) == "" ||
@@ -137,6 +144,37 @@ func applyProbeResultToMediaValue(m *model.Media, probe *ProbeResult) {
 	if strings.TrimSpace(probe.Container) != "" {
 		m.Container = probe.Container
 	}
+	if probe.BitRate > 0 {
+		m.BitRate = probe.BitRate
+	}
+	if probe.VideoBitRate > 0 {
+		m.VideoBitRate = probe.VideoBitRate
+	}
+	if probe.FrameRate > 0 {
+		m.FrameRate = probe.FrameRate
+	}
+	if strings.TrimSpace(probe.VideoProfile) != "" {
+		m.VideoProfile = probe.VideoProfile
+	}
+	if strings.TrimSpace(probe.VideoRange) != "" {
+		m.VideoRange = probe.VideoRange
+	}
+	if probe.VideoBitDepth > 0 {
+		m.VideoBitDepth = probe.VideoBitDepth
+	}
+	if probe.AudioBitRate > 0 {
+		m.AudioBitRate = probe.AudioBitRate
+	}
+	if probe.AudioChannels > 0 {
+		m.AudioChannels = probe.AudioChannels
+	}
+	if strings.TrimSpace(probe.AudioChannelLayout) != "" {
+		m.AudioChannelLayout = probe.AudioChannelLayout
+	}
+	if probe.AudioSampleRate > 0 {
+		m.AudioSampleRate = probe.AudioSampleRate
+	}
+	m.MediaProbeVersion = mediaProbeMetadataVersion
 }
 
 // directPlayOnly reports whether the admin enabled「客户端直连解码」mode.
@@ -219,6 +257,7 @@ func (e *EmbyService) baseMediaSource(m *model.Media, container string, isCloud 
 		"Path":                  m.Path,
 		"Container":             container,
 		"Size":                  m.SizeBytes,
+		"Bitrate":               m.BitRate,
 		"Protocol":              "Http",
 		"Type":                  "Default",
 		"IsRemote":              isCloud,

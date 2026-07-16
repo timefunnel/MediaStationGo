@@ -36,12 +36,22 @@ func (s *ScannerService) probeCloudMediaAsync(task cloudMediaProbeTask) {
 	if len(updates) == 0 {
 		return
 	}
+	var previous model.Media
+	findErr := s.repo.DB.WithContext(ctx).Where("path = ?", task.path).First(&previous).Error
 	if err := s.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("path = ?", task.path).Updates(updates).Error; err != nil {
 		if s.log != nil {
 			s.log.Debug("update cloud media track metadata failed", zap.String("path", task.path), zap.Error(err))
 		}
 		return
 	}
+	if findErr == nil && s.generatedArtwork != nil && previous.DurationSec != probe.DurationSec {
+		if _, err := s.generatedArtwork.QueueRefreshForMedia(context.WithoutCancel(ctx), previous.ID); err != nil {
+			if s.log != nil {
+				s.log.Warn("queue generated artwork refresh after duration probe failed", zap.String("media_id", previous.ID), zap.Error(err))
+			}
+		}
+	}
+	s.invalidateMediaCache(context.WithoutCancel(ctx))
 	s.cloudMediaProbeMu.Lock()
 	delete(s.cloudMediaProbeBackoff, task.path)
 	s.cloudMediaProbeMu.Unlock()
@@ -88,11 +98,18 @@ func (s *ScannerService) probeCloudFileMetadata(ctx context.Context, typ, ref st
 	if s == nil || s.probe == nil || s.storage == nil {
 		return nil, errors.New("cloud probe unavailable")
 	}
-	link, err := s.storage.CloudResolve(ctx, typ, ref, "")
+	return probeCloudFileMetadataWith(ctx, s.storage, s.probe, typ, ref)
+}
+
+func probeCloudFileMetadataWith(ctx context.Context, resolver cloudPlaybackResolver, prober cloudPlaybackProber, typ, ref string) (*ProbeResult, error) {
+	link, err := resolver.CloudResolve(ctx, typ, ref, cloudMediaInternalUserAgent)
 	if err != nil {
 		return nil, err
 	}
-	return s.probe.ProbeHTTP(ctx, link.URL, link.Headers)
+	if link == nil || strings.TrimSpace(link.URL) == "" {
+		return nil, errors.New("cloud media resolved to an empty URL")
+	}
+	return prober.ProbeHTTP(ctx, link.URL, cloudMediaInternalHeaders(link.Headers))
 }
 
 func probeResultUpdates(probe *ProbeResult) map[string]any {
@@ -117,6 +134,39 @@ func probeResultUpdates(probe *ProbeResult) map[string]any {
 	}
 	if probe.Container != "" {
 		updates["container"] = probe.Container
+	}
+	if probe.BitRate > 0 {
+		updates["bit_rate"] = probe.BitRate
+	}
+	if probe.VideoBitRate > 0 {
+		updates["video_bit_rate"] = probe.VideoBitRate
+	}
+	if probe.FrameRate > 0 {
+		updates["frame_rate"] = probe.FrameRate
+	}
+	if strings.TrimSpace(probe.VideoProfile) != "" {
+		updates["video_profile"] = probe.VideoProfile
+	}
+	if strings.TrimSpace(probe.VideoRange) != "" {
+		updates["video_range"] = probe.VideoRange
+	}
+	if probe.VideoBitDepth > 0 {
+		updates["video_bit_depth"] = probe.VideoBitDepth
+	}
+	if probe.AudioBitRate > 0 {
+		updates["audio_bit_rate"] = probe.AudioBitRate
+	}
+	if probe.AudioChannels > 0 {
+		updates["audio_channels"] = probe.AudioChannels
+	}
+	if strings.TrimSpace(probe.AudioChannelLayout) != "" {
+		updates["audio_channel_layout"] = probe.AudioChannelLayout
+	}
+	if probe.AudioSampleRate > 0 {
+		updates["audio_sample_rate"] = probe.AudioSampleRate
+	}
+	if len(updates) > 0 {
+		updates["media_probe_version"] = mediaProbeMetadataVersion
 	}
 	return updates
 }

@@ -21,6 +21,8 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 )
 
+const mediaProbeMetadataVersion = 1
+
 // FFprobeService wraps the external ffprobe binary.
 type FFprobeService struct {
 	cfg     *config.Config
@@ -56,12 +58,22 @@ func (f *FFprobeService) SetMaxConcurrent(n int) {
 
 // ProbeResult is the subset of ffprobe output consumed by the scanner.
 type ProbeResult struct {
-	DurationSec int
-	Width       int
-	Height      int
-	VideoCodec  string
-	AudioCodec  string
-	Container   string
+	DurationSec        int
+	Width              int
+	Height             int
+	VideoCodec         string
+	AudioCodec         string
+	Container          string
+	BitRate            int64
+	VideoBitRate       int64
+	FrameRate          float64
+	VideoProfile       string
+	VideoRange         string
+	VideoBitDepth      int
+	AudioBitRate       int64
+	AudioChannels      int
+	AudioChannelLayout string
+	AudioSampleRate    int
 }
 
 // Probe runs ffprobe against path and returns a typed result. A 30s timeout

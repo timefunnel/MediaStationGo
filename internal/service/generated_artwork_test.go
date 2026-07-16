@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -161,14 +162,89 @@ func TestGeneratedArtworkSeekUsesShortSafeOffsetWithoutDuration(t *testing.T) {
 	}
 }
 
-func TestGeneratedArtworkHeadersUseSigningUserAgent(t *testing.T) {
+func TestCloudMediaInternalHeadersUseSigningUserAgent(t *testing.T) {
 	original := map[string]string{"Referer": "https://example.test/"}
-	headers := generatedArtworkHeaders(original)
-	if headers["User-Agent"] != generatedArtworkUserAgent || headers["Referer"] == "" {
+	headers := cloudMediaInternalHeaders(original)
+	if headers["User-Agent"] != cloudMediaInternalUserAgent || headers["Referer"] == "" {
 		t.Fatalf("headers = %#v", headers)
 	}
 	if original["User-Agent"] != "" {
 		t.Fatalf("input headers were mutated: %#v", original)
+	}
+}
+
+func TestGeneratedArtworkQueuesDurationRefreshWithoutDroppingCurrentPreview(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: t.TempDir(), Type: "movie", Enabled: true, GenerateArtwork: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{
+		LibraryID:                lib.ID,
+		Title:                    "target",
+		Path:                     "cloud://openlist/other/target.mkv",
+		DurationSec:              0,
+		GeneratedPosterURL:       "/data/generated-artwork/old-primary.jpg",
+		GeneratedBackdropURL:     "/data/generated-artwork/old-backdrop.jpg",
+		GeneratedArtworkStatus:   GeneratedArtworkStatusCompleted,
+		GeneratedArtworkAttempts: 1,
+	}
+	media.GeneratedArtworkHash = generatedArtworkFingerprint(&media)
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.DB.Model(&model.Media{}).Where("id = ?", media.ID).Update("duration_sec", 900).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewGeneratedArtworkService(&config.Config{}, zap.NewNop(), repos, nil, nil, nil)
+	queued, err := svc.QueueRefreshForMedia(t.Context(), media.ID)
+	if err != nil || !queued {
+		t.Fatalf("queued = %v, err = %v", queued, err)
+	}
+	var got model.Media
+	if err := repos.DB.First(&got, "id = ?", media.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.GeneratedArtworkStatus != GeneratedArtworkStatusPending || got.GeneratedArtworkAttempts != 0 {
+		t.Fatalf("refresh state = status %q attempts %d", got.GeneratedArtworkStatus, got.GeneratedArtworkAttempts)
+	}
+	if got.GeneratedPosterURL != media.GeneratedPosterURL || got.GeneratedBackdropURL != media.GeneratedBackdropURL {
+		t.Fatalf("current preview was dropped before replacement: %+v", got)
+	}
+}
+
+func TestGeneratedArtworkRejectsPreviewWhenDurationChangesDuringExtraction(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: t.TempDir(), Type: "movie", Enabled: true, GenerateArtwork: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(source, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{LibraryID: lib.ID, Title: "target", Path: source}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{App: config.AppConfig{DataDir: t.TempDir(), FFmpegPath: "ffmpeg"}}
+	svc := NewGeneratedArtworkService(cfg, zap.NewNop(), repos, nil, nil, nil)
+	svc.run = func(_ context.Context, _ string, _ map[string]string, _ float64, poster, backdrop string) error {
+		if err := repos.DB.Model(&model.Media{}).Where("id = ?", media.ID).Update("duration_sec", 900).Error; err != nil {
+			return err
+		}
+		data := make([]byte, 2048)
+		if err := os.WriteFile(poster, data, 0o600); err != nil {
+			return err
+		}
+		return os.WriteFile(backdrop, data, 0o600)
+	}
+	_, _, _, err := svc.generateOne(t.Context(), &media)
+	if !errors.Is(err, errGeneratedArtworkMetadataChanged) {
+		t.Fatalf("generate error = %v, want metadata changed", err)
 	}
 }
 

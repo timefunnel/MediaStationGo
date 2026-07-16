@@ -85,6 +85,9 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		existing, exists := existingMedia[path]
 		isNewMedia = !exists
 		needsTrackProbe = !exists || cloudTrackMetadataMissing(existing)
+		if exists && existing.SizeBytes == size {
+			preserveCloudTrackMetadata(m, existing)
+		}
 		if exists && existing.LibraryID == lib.ID && existing.SizeBytes == size && existing.STRMURL == expectedSTRMURL && !cloudMetadataNeedsRefresh(existing, localMeta) && !cloudDerivedMetadataNeedsRefresh(existing, m) {
 			if needsTrackProbe && ext != ".strm" {
 				s.queueCloudMediaProbeWithBudget(typ, ref, path, probeBudget)
@@ -135,4 +138,27 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 			"cloud":      true,
 		})
 	}
+}
+
+func preserveCloudTrackMetadata(media *model.Media, existing existingCloudMedia) {
+	if media == nil {
+		return
+	}
+	media.DurationSec = existing.DurationSec
+	media.Width = existing.Width
+	media.Height = existing.Height
+	media.VideoCodec = existing.VideoCodec
+	media.AudioCodec = existing.AudioCodec
+	media.Container = existing.Container
+	media.BitRate = existing.BitRate
+	media.VideoBitRate = existing.VideoBitRate
+	media.FrameRate = existing.FrameRate
+	media.VideoProfile = existing.VideoProfile
+	media.VideoRange = existing.VideoRange
+	media.VideoBitDepth = existing.VideoBitDepth
+	media.AudioBitRate = existing.AudioBitRate
+	media.AudioChannels = existing.AudioChannels
+	media.AudioChannelLayout = existing.AudioChannelLayout
+	media.AudioSampleRate = existing.AudioSampleRate
+	media.MediaProbeVersion = existing.MediaProbeVersion
 }

@@ -89,10 +89,10 @@ func TestApplyRuntimeSettingFFprobeMaxConcurrent(t *testing.T) {
 
 func TestParseProbeJSONExtractsPrimaryStreams(t *testing.T) {
 	got, err := parseProbeJSON([]byte(`{
-		"format": {"duration": "125.900000", "format_name": "matroska,webm"},
+		"format": {"duration": "125.900000", "format_name": "matroska,webm", "bit_rate": "24000000"},
 		"streams": [
-			{"codec_type": "video", "codec_name": "hevc", "width": 3840, "height": 2160},
-			{"codec_type": "audio", "codec_name": "eac3"},
+			{"codec_type": "video", "codec_name": "hevc", "profile": "Main 10", "width": 3840, "height": 2160, "bit_rate": "22000000", "avg_frame_rate": "24000/1001", "pix_fmt": "yuv420p10le", "color_transfer": "smpte2084"},
+			{"codec_type": "audio", "codec_name": "eac3", "bit_rate": "768000", "channels": 6, "channel_layout": "5.1(side)", "sample_rate": "48000"},
 			{"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080}
 		]
 	}`))
@@ -101,6 +101,12 @@ func TestParseProbeJSONExtractsPrimaryStreams(t *testing.T) {
 	}
 	if got.DurationSec != 125 || got.Container != "matroska,webm" || got.VideoCodec != "hevc" || got.AudioCodec != "eac3" || got.Width != 3840 || got.Height != 2160 {
 		t.Fatalf("parsed probe = %+v", got)
+	}
+	if got.BitRate != 24000000 || got.VideoBitRate != 22000000 || got.FrameRate < 23.97 || got.FrameRate > 23.99 || got.VideoProfile != "Main 10" || got.VideoRange != "HDR10" || got.VideoBitDepth != 10 {
+		t.Fatalf("parsed video details = %+v", got)
+	}
+	if got.AudioBitRate != 768000 || got.AudioChannels != 6 || got.AudioChannelLayout != "5.1(side)" || got.AudioSampleRate != 48000 {
+		t.Fatalf("parsed audio details = %+v", got)
 	}
 }
 

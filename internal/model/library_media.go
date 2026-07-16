@@ -40,6 +40,17 @@ type Media struct {
 	VideoCodec               string  `gorm:"size:32" json:"video_codec,omitempty"`
 	AudioCodec               string  `gorm:"size:32" json:"audio_codec,omitempty"`
 	Container                string  `gorm:"size:128" json:"container,omitempty"`
+	BitRate                  int64   `json:"bit_rate,omitempty"`
+	VideoBitRate             int64   `json:"video_bit_rate,omitempty"`
+	FrameRate                float64 `json:"frame_rate,omitempty"`
+	VideoProfile             string  `gorm:"size:64" json:"video_profile,omitempty"`
+	VideoRange               string  `gorm:"size:32" json:"video_range,omitempty"`
+	VideoBitDepth            int     `json:"video_bit_depth,omitempty"`
+	AudioBitRate             int64   `json:"audio_bit_rate,omitempty"`
+	AudioChannels            int     `json:"audio_channels,omitempty"`
+	AudioChannelLayout       string  `gorm:"size:64" json:"audio_channel_layout,omitempty"`
+	AudioSampleRate          int     `json:"audio_sample_rate,omitempty"`
+	MediaProbeVersion        int     `json:"media_probe_version,omitempty"`
 	PosterURL                string  `gorm:"size:1024" json:"poster_url,omitempty"`
 	BackdropURL              string  `gorm:"size:1024" json:"backdrop_url,omitempty"`
 	GeneratedPosterURL       string  `gorm:"size:1024" json:"generated_poster_url,omitempty"`

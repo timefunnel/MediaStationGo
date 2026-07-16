@@ -80,15 +80,6 @@ func (s *StreamService) Probe(ctx context.Context, mediaID string, probe *FFprob
 	if err != nil {
 		return err
 	}
-	updates := map[string]any{
-		"duration_sec": res.DurationSec,
-		"width":        res.Width,
-		"height":       res.Height,
-		"video_codec":  res.VideoCodec,
-		"audio_codec":  res.AudioCodec,
-	}
-	if res.Container != "" {
-		updates["container"] = res.Container
-	}
+	updates := probeResultUpdates(res)
 	return s.repo.DB.Model(m).Updates(updates).Error
 }

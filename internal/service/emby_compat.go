@@ -45,14 +45,15 @@ const PlaybackDirectOnlySettingKey = "playback.direct_only"
 
 // EmbyService produces Emby-shaped JSON.
 type EmbyService struct {
-	cfg      *config.Config
-	log      *zap.Logger
-	repo     *repository.Container
-	storage  cloudPlaybackResolver
-	probe    cloudPlaybackProber
-	subtitle *SubtitleService
-	cache    *RuntimeCacheService
-	playback *PlaybackService
+	cfg              *config.Config
+	log              *zap.Logger
+	repo             *repository.Container
+	storage          cloudPlaybackResolver
+	probe            cloudPlaybackProber
+	subtitle         *SubtitleService
+	cache            *RuntimeCacheService
+	playback         *PlaybackService
+	generatedArtwork *GeneratedArtworkService
 
 	virtualMu      sync.RWMutex
 	virtualSeries  map[string]embySeriesCacheEntry
@@ -112,6 +113,12 @@ func (e *EmbyService) SetCloudProbe(storage cloudPlaybackResolver, probe cloudPl
 	}
 	e.storage = storage
 	e.probe = probe
+}
+
+func (e *EmbyService) SetGeneratedArtworkService(generated *GeneratedArtworkService) {
+	if e != nil {
+		e.generatedArtwork = generated
+	}
 }
 
 // ─── Items ───────────────────────────────────────────────────────────────────

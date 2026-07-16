@@ -97,6 +97,17 @@ func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Me
 	setIfChanged(updates, "video_codec", existing.VideoCodec, incoming.VideoCodec)
 	setIfChanged(updates, "audio_codec", existing.AudioCodec, incoming.AudioCodec)
 	setIfChanged(updates, "container", existing.Container, incoming.Container)
+	setIfChanged(updates, "bit_rate", existing.BitRate, incoming.BitRate)
+	setIfChanged(updates, "video_bit_rate", existing.VideoBitRate, incoming.VideoBitRate)
+	setIfChanged(updates, "frame_rate", existing.FrameRate, incoming.FrameRate)
+	setIfChanged(updates, "video_profile", existing.VideoProfile, incoming.VideoProfile)
+	setIfChanged(updates, "video_range", existing.VideoRange, incoming.VideoRange)
+	setIfChanged(updates, "video_bit_depth", existing.VideoBitDepth, incoming.VideoBitDepth)
+	setIfChanged(updates, "audio_bit_rate", existing.AudioBitRate, incoming.AudioBitRate)
+	setIfChanged(updates, "audio_channels", existing.AudioChannels, incoming.AudioChannels)
+	setIfChanged(updates, "audio_channel_layout", existing.AudioChannelLayout, incoming.AudioChannelLayout)
+	setIfChanged(updates, "audio_sample_rate", existing.AudioSampleRate, incoming.AudioSampleRate)
+	setIfChanged(updates, "media_probe_version", existing.MediaProbeVersion, incoming.MediaProbeVersion)
 	if existing.DeletedAt.Valid {
 		updates["deleted_at"] = nil
 	}

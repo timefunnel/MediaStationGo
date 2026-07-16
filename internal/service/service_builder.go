@@ -187,6 +187,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.Emby.SetSubtitleService(b.c.Subtitle)
 	b.c.Emby.SetRuntimeCache(b.c.Cache)
 	b.c.Emby.SetCloudProbe(b.c.StorageCfg, b.c.FFprobe)
+	b.c.Emby.SetGeneratedArtworkService(b.c.GeneratedArtwork)
 	b.c.DownloadClients = NewDownloadClientService(b.log, b.repos)
 	b.c.Assistant = NewAssistantService(b.log, b.repos, b.c.AI)
 	b.c.Scheduler = NewSchedulerService(

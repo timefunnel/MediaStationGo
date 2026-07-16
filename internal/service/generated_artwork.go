@@ -31,8 +31,9 @@ const (
 
 	generatedArtworkTimeout     = 25 * time.Second
 	generatedArtworkMaxAttempts = 2
-	generatedArtworkUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
+
+var errGeneratedArtworkMetadataChanged = errors.New("media metadata changed during preview extraction")
 
 type GeneratedArtworkStatus struct {
 	LibraryID string `json:"library_id"`
@@ -143,6 +144,47 @@ func (s *GeneratedArtworkService) QueueMissingForLibrary(ctx context.Context, li
 	s.startBatchTask(count, "生成缺图预览图")
 	s.signal()
 	return count, nil
+}
+
+// QueueRefreshForMedia keeps the currently served preview in place while a
+// newly discovered duration makes its extraction point stale.
+func (s *GeneratedArtworkService) QueueRefreshForMedia(ctx context.Context, mediaID string) (bool, error) {
+	if s == nil || s.repo == nil || s.repo.DB == nil {
+		return false, errors.New("generated artwork service unavailable")
+	}
+	media, err := s.repo.Media.FindByID(ctx, strings.TrimSpace(mediaID))
+	if err != nil {
+		return false, err
+	}
+	if media == nil {
+		return false, gorm.ErrRecordNotFound
+	}
+	lib, err := s.repo.Library.FindByID(ctx, media.LibraryID)
+	if err != nil {
+		return false, err
+	}
+	if lib == nil || !lib.Enabled || !lib.GenerateArtwork || !generatedArtworkNeedsGeneration(media) {
+		return false, nil
+	}
+	wasActive := media.GeneratedArtworkStatus == GeneratedArtworkStatusPending || media.GeneratedArtworkStatus == GeneratedArtworkStatusRunning
+	res := s.repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("id = ? AND deleted_at IS NULL", media.ID).
+		Updates(map[string]any{
+			"generated_artwork_status":   GeneratedArtworkStatusPending,
+			"generated_artwork_error":    "",
+			"generated_artwork_attempts": 0,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return false, nil
+	}
+	if !wasActive {
+		s.startBatchTask(1, "媒体时长已补齐，重新生成预览图")
+	}
+	s.signal()
+	return true, nil
 }
 
 func (s *GeneratedArtworkService) queueableMissingQuery(ctx context.Context, libraryID string) *gorm.DB {
@@ -334,7 +376,7 @@ func (s *GeneratedArtworkService) generateOne(ctx context.Context, media *model.
 	if !lib.Enabled || !lib.GenerateArtwork {
 		return "", "", "", context.Canceled
 	}
-	if !generatedArtworkMediaMissing(current) {
+	if !generatedArtworkNeedsGeneration(current) {
 		return "", "", "", context.Canceled
 	}
 	input, headers, err := s.mediaInput(ctx, current)
@@ -360,6 +402,16 @@ func (s *GeneratedArtworkService) generateOne(ctx context.Context, media *model.
 	if err := s.run(ctx, input, headers, generatedArtworkSeek(current.DurationSec), tmpPoster, tmpBackdrop); err != nil {
 		return "", "", "", err
 	}
+	latest, err := s.repo.Media.FindByID(ctx, current.ID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if latest == nil {
+		return "", "", "", ErrMediaNotFound
+	}
+	if generatedArtworkFingerprint(latest) != hash {
+		return "", "", "", errGeneratedArtworkMetadataChanged
+	}
 	if !generatedArtworkFilesUsable(tmpPoster, tmpBackdrop) {
 		return "", "", "", errors.New("ffmpeg did not produce usable preview images")
 	}
@@ -378,14 +430,14 @@ func (s *GeneratedArtworkService) mediaInput(ctx context.Context, media *model.M
 		if s.storage == nil {
 			return "", nil, errors.New("cloud storage service unavailable")
 		}
-		link, err := s.storage.CloudResolve(ctx, typ, ref, generatedArtworkUserAgent)
+		link, err := s.storage.CloudResolve(ctx, typ, ref, cloudMediaInternalUserAgent)
 		if err != nil {
 			return "", nil, fmt.Errorf("resolve cloud media: %w", err)
 		}
 		if link == nil || strings.TrimSpace(link.URL) == "" {
 			return "", nil, errors.New("cloud media resolved to an empty URL")
 		}
-		return link.URL, generatedArtworkHeaders(link.Headers), nil
+		return link.URL, cloudMediaInternalHeaders(link.Headers), nil
 	}
 	path := filepath.Clean(strings.TrimSpace(media.Path))
 	if path == "" || strings.HasPrefix(strings.ToLower(path), "cloud:") {
@@ -398,15 +450,6 @@ func (s *GeneratedArtworkService) mediaInput(ctx context.Context, media *model.M
 		return "", nil, err
 	}
 	return path, nil, nil
-}
-
-func generatedArtworkHeaders(headers map[string]string) map[string]string {
-	out := make(map[string]string, len(headers)+1)
-	for key, value := range headers {
-		out[key] = value
-	}
-	out["User-Agent"] = generatedArtworkUserAgent
-	return out
 }
 
 func (s *GeneratedArtworkService) runFFmpeg(ctx context.Context, input string, headers map[string]string, seek float64, poster, backdrop string) error {
@@ -461,10 +504,15 @@ func (s *GeneratedArtworkService) missingQuery(ctx context.Context, libraryID st
 		Where("COALESCE(TRIM(media.generated_poster_url), '') = '' OR COALESCE(TRIM(media.generated_backdrop_url), '') = ''")
 }
 
-func generatedArtworkMediaMissing(media *model.Media) bool {
-	return media != nil && media.SeasonNum == 0 && media.EpisodeNum == 0 &&
-		strings.TrimSpace(media.PosterURL) == "" && strings.TrimSpace(media.BackdropURL) == "" &&
-		(strings.TrimSpace(media.GeneratedPosterURL) == "" || strings.TrimSpace(media.GeneratedBackdropURL) == "")
+func generatedArtworkNeedsGeneration(media *model.Media) bool {
+	if media == nil || media.SeasonNum != 0 || media.EpisodeNum != 0 ||
+		strings.TrimSpace(media.PosterURL) != "" || strings.TrimSpace(media.BackdropURL) != "" {
+		return false
+	}
+	if strings.TrimSpace(media.GeneratedPosterURL) == "" || strings.TrimSpace(media.GeneratedBackdropURL) == "" {
+		return true
+	}
+	return strings.TrimSpace(media.GeneratedArtworkHash) != generatedArtworkFingerprint(media)
 }
 
 func generatedArtworkFingerprint(media *model.Media) string {
@@ -547,7 +595,6 @@ func (s *GeneratedArtworkService) pendingQuery(ctx context.Context) *gorm.DB {
 		Where("media.deleted_at IS NULL AND libraries.enabled = ? AND libraries.generate_artwork = ?", true, true).
 		Where("media.season_num = 0 AND media.episode_num = 0").
 		Where("COALESCE(TRIM(media.poster_url), '') = '' AND COALESCE(TRIM(media.backdrop_url), '') = ''").
-		Where("COALESCE(TRIM(media.generated_poster_url), '') = '' OR COALESCE(TRIM(media.generated_backdrop_url), '') = ''").
 		Where("media.generated_artwork_status = ? AND COALESCE(media.generated_artwork_attempts, 0) < ?", GeneratedArtworkStatusPending, generatedArtworkMaxAttempts)
 }
 

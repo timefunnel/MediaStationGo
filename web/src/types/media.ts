@@ -21,6 +21,17 @@ export interface Media {
   video_codec?: string
   audio_codec?: string
   container?: string
+  bit_rate?: number
+  video_bit_rate?: number
+  frame_rate?: number
+  video_profile?: string
+  video_range?: string
+  video_bit_depth?: number
+  audio_bit_rate?: number
+  audio_channels?: number
+  audio_channel_layout?: string
+  audio_sample_rate?: number
+  media_probe_version?: number
   poster_url?: string
   backdrop_url?: string
   overview?: string
