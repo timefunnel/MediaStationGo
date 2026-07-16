@@ -180,7 +180,7 @@ function DiscoverRowSkeleton({ title }: { title: string }) {
     <section className="space-y-4">
       <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
       <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-        {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+        {Array.from({ length: 24 }, (_, index) => index).map((item) => (
           <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
         ))}
       </div>

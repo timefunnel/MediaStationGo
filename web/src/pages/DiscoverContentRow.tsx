@@ -5,8 +5,8 @@ import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
 import { discoverItemSource } from './discoverPageModel'
 
-const discoverRowPreloadMargin = '160px 0px'
-const discoverCardPreloadMargin = '160px 0px'
+const discoverRowPreloadMargin = '0px'
+const discoverCardPreloadMargin = '0px'
 const discoverPriorityPosterCount = 3
 
 const discoverCardVisibilityCallbacks = new Map<Element, () => void>()
@@ -154,7 +154,7 @@ export function DiscoverSkeleton() {
         <section key={section} className="space-y-4">
           <div className="h-8 w-48 animate-pulse rounded-xl bg-gray-100" />
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+            {Array.from({ length: 24 }, (_, index) => index).map((item) => (
               <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
             ))}
           </div>
