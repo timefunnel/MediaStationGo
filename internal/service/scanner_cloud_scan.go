@@ -41,6 +41,8 @@ type cloudScanRootTarget struct {
 	scanDir       string
 	displayDir    string
 	exactFileName string
+	resolved      bool
+	refreshRoot   bool
 }
 
 func (s *ScannerService) scanCloudLibrary(ctx context.Context, lib *model.Library, mount CloudMountInfo, autoScrape bool) (*ScanResult, error) {
@@ -75,15 +77,17 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 
 	candidates := make([]cloudCandidate, 0, len(targets))
 	for _, target := range targets {
-		if err := s.warmCloudScanTargetAncestors(ctx, typ, mount.ScanDir, target.scanDir); err != nil {
-			return res, err
+		if !target.resolved {
+			if err := s.warmCloudScanTargetAncestors(ctx, typ, mount.ScanDir, target.scanDir); err != nil {
+				return res, err
+			}
 		}
 		targetCandidates, err := s.collectCloudScanCandidates(ctx, lib, cloudScanCandidateRequest{
 			provider:         typ,
 			rootDir:          target.scanDir,
 			rootDisplayDir:   target.displayDir,
 			exactFileName:    target.exactFileName,
-			refreshRoot:      true,
+			refreshRoot:      !target.resolved || target.refreshRoot,
 			autoCategoryRoot: autoCategoryRoot,
 			progress:         progress,
 			result:           res,
@@ -275,40 +279,108 @@ func scanHasImportChanges(res *ScanResult) bool {
 	return res != nil && (res.Added > 0 || res.Updated > 0 || res.Removed > 0)
 }
 
-func cloudScanTargetsForOpenListPaths(mount CloudMountInfo, values []string) []cloudScanRootTarget {
+func (s *ScannerService) resolveCloudScanTargetsForOpenListPaths(ctx context.Context, mount CloudMountInfo, values []string) ([]cloudScanRootTarget, error) {
+	if s.storage == nil {
+		return nil, fmt.Errorf("cloud storage service unavailable")
+	}
 	rootDisplay := normalizeCloudMountDir(mount.Provider, mount.DisplayDir)
 	rootScan := normalizeCloudMountDir(mount.Provider, mount.ScanDir)
 	out := make([]cloudScanRootTarget, 0, len(values))
 	seen := map[string]struct{}{}
+	parentEntries := map[string]map[string]bool{}
+	missing := make([]string, 0)
 	for _, value := range values {
-		displayDir := normalizeCloudMountDir(mount.Provider, value)
-		if displayDir == "" {
+		targetDisplay := normalizeCloudMountDir(mount.Provider, value)
+		if targetDisplay == "" || targetDisplay == rootDisplay || !cloudScanDirSameOrChild(rootDisplay, targetDisplay) {
 			continue
 		}
-		exactFileName := ""
-		if _, ok := videoExtensions[strings.ToLower(path.Ext(displayDir))]; ok {
-			exactFileName = path.Base(displayDir)
-			displayDir = normalizeCloudMountDir(mount.Provider, path.Dir(displayDir))
-		}
-		if displayDir == "" || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+		parentDisplay := normalizeCloudMountDir(mount.Provider, path.Dir(targetDisplay))
+		parentScan, ok := cloudScanDirForDisplayDir(mount, parentDisplay)
+		if !ok {
 			continue
 		}
-		if displayDir == rootDisplay && exactFileName == "" {
+		entries, loaded := parentEntries[parentScan]
+		if !loaded {
+			if err := s.warmCloudScanTargetAncestors(ctx, mount.Provider, rootScan, parentScan); err != nil {
+				return nil, fmt.Errorf("warm OpenList target parent %q: %w", parentDisplay, err)
+			}
+			listed, err := s.storage.CloudListRefresh(ctx, mount.Provider, parentScan)
+			if err != nil {
+				return nil, fmt.Errorf("list OpenList target parent %q: %w", parentDisplay, err)
+			}
+			entries = make(map[string]bool, len(listed))
+			for _, entry := range listed {
+				name := strings.TrimSpace(entry.Name)
+				if name != "" {
+					entries[name] = entry.IsDir
+				}
+			}
+			parentEntries[parentScan] = entries
+		}
+		targetName := strings.TrimSpace(path.Base(targetDisplay))
+		isDir, found := entries[targetName]
+		if !found {
+			for name, candidateIsDir := range entries {
+				if strings.EqualFold(name, targetName) {
+					isDir = candidateIsDir
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			missing = append(missing, value)
 			continue
 		}
-		suffix := strings.Trim(strings.TrimPrefix(displayDir, rootDisplay), "/")
-		scanDir := rootScan
-		if suffix != "" {
-			scanDir = strings.Trim(strings.TrimRight(rootScan, "/")+"/"+suffix, "/")
+		target, ok := cloudScanTargetForResolvedOpenListPath(mount, targetDisplay, isDir)
+		if !ok {
+			continue
 		}
-		key := scanDir + "\x00" + displayDir + "\x00" + strings.ToLower(exactFileName)
+		target.resolved = true
+		target.refreshRoot = isDir
+		key := target.scanDir + "\x00" + target.displayDir + "\x00" + strings.ToLower(target.exactFileName)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir, exactFileName: exactFileName})
+		out = append(out, target)
 	}
-	return out
+	if len(out) == 0 && len(missing) > 0 {
+		return nil, fmt.Errorf("OpenList target not found in parent listing: %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+func cloudScanTargetForResolvedOpenListPath(mount CloudMountInfo, value string, isDir bool) (cloudScanRootTarget, bool) {
+	rootDisplay := normalizeCloudMountDir(mount.Provider, mount.DisplayDir)
+	displayDir := normalizeCloudMountDir(mount.Provider, value)
+	if displayDir == "" || displayDir == rootDisplay || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+		return cloudScanRootTarget{}, false
+	}
+	exactFileName := ""
+	if !isDir {
+		exactFileName = path.Base(displayDir)
+		displayDir = normalizeCloudMountDir(mount.Provider, path.Dir(displayDir))
+	}
+	scanDir, ok := cloudScanDirForDisplayDir(mount, displayDir)
+	if !ok || (displayDir == rootDisplay && exactFileName == "") {
+		return cloudScanRootTarget{}, false
+	}
+	return cloudScanRootTarget{scanDir: scanDir, displayDir: displayDir, exactFileName: exactFileName}, true
+}
+
+func cloudScanDirForDisplayDir(mount CloudMountInfo, displayDir string) (string, bool) {
+	rootDisplay := normalizeCloudMountDir(mount.Provider, mount.DisplayDir)
+	rootScan := normalizeCloudMountDir(mount.Provider, mount.ScanDir)
+	displayDir = normalizeCloudMountDir(mount.Provider, displayDir)
+	if displayDir == "" || !cloudScanDirSameOrChild(rootDisplay, displayDir) {
+		return "", false
+	}
+	suffix := strings.Trim(strings.TrimPrefix(displayDir, rootDisplay), "/")
+	if suffix == "" {
+		return rootScan, true
+	}
+	return strings.Trim(strings.TrimRight(rootScan, "/")+"/"+suffix, "/"), true
 }
 
 func (s *ScannerService) warmCloudScanTargetAncestors(ctx context.Context, provider, rootDir, targetDir string) error {

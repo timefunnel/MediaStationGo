@@ -57,7 +57,10 @@ func (s *ScannerService) ScanLibraryRootOpenListTargets(ctx context.Context, lib
 	if !ok || mount.Provider != "openlist" {
 		return nil, false, nil
 	}
-	targets := cloudScanTargetsForOpenListPaths(mount, openListPaths)
+	targets, err := s.resolveCloudScanTargetsForOpenListPaths(ctx, mount, openListPaths)
+	if err != nil {
+		return nil, true, err
+	}
 	if len(targets) == 0 {
 		return nil, false, nil
 	}
