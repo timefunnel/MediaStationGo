@@ -158,6 +158,17 @@ func TestGeneratedArtworkSeekUsesShortSafeOffsetWithoutDuration(t *testing.T) {
 	}
 }
 
+func TestGeneratedArtworkHeadersUseSigningUserAgent(t *testing.T) {
+	original := map[string]string{"Referer": "https://example.test/"}
+	headers := generatedArtworkHeaders(original)
+	if headers["User-Agent"] != generatedArtworkUserAgent || headers["Referer"] == "" {
+		t.Fatalf("headers = %#v", headers)
+	}
+	if original["User-Agent"] != "" {
+		t.Fatalf("input headers were mutated: %#v", original)
+	}
+}
+
 func waitForGeneratedArtworkStatus(t *testing.T, repos *repository.Container, mediaID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

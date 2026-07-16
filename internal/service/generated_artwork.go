@@ -31,6 +31,7 @@ const (
 
 	generatedArtworkTimeout     = 25 * time.Second
 	generatedArtworkMaxAttempts = 2
+	generatedArtworkUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
 
 type GeneratedArtworkStatus struct {
@@ -376,14 +377,14 @@ func (s *GeneratedArtworkService) mediaInput(ctx context.Context, media *model.M
 		if s.storage == nil {
 			return "", nil, errors.New("cloud storage service unavailable")
 		}
-		link, err := s.storage.CloudResolve(ctx, typ, ref, "")
+		link, err := s.storage.CloudResolve(ctx, typ, ref, generatedArtworkUserAgent)
 		if err != nil {
 			return "", nil, fmt.Errorf("resolve cloud media: %w", err)
 		}
 		if link == nil || strings.TrimSpace(link.URL) == "" {
 			return "", nil, errors.New("cloud media resolved to an empty URL")
 		}
-		return link.URL, link.Headers, nil
+		return link.URL, generatedArtworkHeaders(link.Headers), nil
 	}
 	path := filepath.Clean(strings.TrimSpace(media.Path))
 	if path == "" || strings.HasPrefix(strings.ToLower(path), "cloud:") {
@@ -396,6 +397,15 @@ func (s *GeneratedArtworkService) mediaInput(ctx context.Context, media *model.M
 		return "", nil, err
 	}
 	return path, nil, nil
+}
+
+func generatedArtworkHeaders(headers map[string]string) map[string]string {
+	out := make(map[string]string, len(headers)+1)
+	for key, value := range headers {
+		out[key] = value
+	}
+	out["User-Agent"] = generatedArtworkUserAgent
+	return out
 }
 
 func (s *GeneratedArtworkService) runFFmpeg(ctx context.Context, input string, headers map[string]string, seek float64, poster, backdrop string) error {
