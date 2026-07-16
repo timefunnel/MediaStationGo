@@ -34,6 +34,7 @@ type AIService struct {
 	cfg       *config.Config
 	log       *zap.Logger
 	client    *http.Client
+	batchClient *http.Client
 	apiConfig *APIConfigService
 }
 
@@ -43,11 +44,16 @@ func NewAIService(cfg *config.Config, log *zap.Logger, apiConfig *APIConfigServi
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	batchTimeout := 90 * time.Second
+	if timeout > batchTimeout {
+		batchTimeout = timeout
+	}
 	return &AIService{
 		cfg:       cfg,
 		log:       log,
 		apiConfig: apiConfig,
 		client:    NewExternalHTTPClient(timeout),
+		batchClient: NewExternalHTTPClient(batchTimeout),
 	}
 }
 
@@ -148,6 +154,14 @@ func (a *AIService) complete(ctx context.Context, runtime aiRuntimeConfig, syste
 }
 
 func (a *AIService) completeWithTemperature(ctx context.Context, runtime aiRuntimeConfig, system, user string, temperature float64) (string, error) {
+	return a.completeWithClient(ctx, a.client, runtime, system, user, temperature)
+}
+
+func (a *AIService) completeBatch(ctx context.Context, runtime aiRuntimeConfig, system, user string, temperature float64) (string, error) {
+	return a.completeWithClient(ctx, a.batchClient, runtime, system, user, temperature)
+}
+
+func (a *AIService) completeWithClient(ctx context.Context, client *http.Client, runtime aiRuntimeConfig, system, user string, temperature float64) (string, error) {
 	payload := map[string]any{
 		"model":       runtime.Model,
 		"temperature": temperature,
@@ -165,7 +179,7 @@ func (a *AIService) completeWithTemperature(ctx context.Context, runtime aiRunti
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+runtime.APIKey)
-	resp, err := a.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

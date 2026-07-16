@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, LONG_REQUEST_TIMEOUT } from './client'
 
 export type MediaTitleRelation = 'standalone' | 'version' | 'part'
 
@@ -24,11 +24,11 @@ export interface MediaTitleCleanupPreview {
 }
 
 export const titleCleanupAPI = {
-  preview: (libraryID: string, groupLimit = 12) =>
+  preview: (libraryID: string, groupLimit = 5) =>
     api
       .post<MediaTitleCleanupPreview>(`/libraries/${libraryID}/title-cleanup/preview`, {
         group_limit: groupLimit,
-      })
+      }, { timeout: LONG_REQUEST_TIMEOUT })
       .then((response) => response.data),
 
   apply: (libraryID: string, items: MediaTitleCleanupSuggestion[]) =>
