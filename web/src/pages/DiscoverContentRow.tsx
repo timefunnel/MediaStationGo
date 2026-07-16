@@ -5,8 +5,51 @@ import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
 import { discoverItemSource } from './discoverPageModel'
 
-const discoverRowPreloadMargin = '480px 0px'
-const discoverPriorityPosterCount = 8
+const discoverRowPreloadMargin = '160px 0px'
+const discoverCardPreloadMargin = '160px 0px'
+const discoverPriorityPosterCount = 3
+
+const discoverCardVisibilityCallbacks = new Map<Element, () => void>()
+let discoverCardVisibilityObserver: IntersectionObserver | null = null
+
+function observeDiscoverCard(element: Element, onVisible: () => void): () => void {
+  if (typeof window.IntersectionObserver === 'undefined') {
+    onVisible()
+    return () => undefined
+  }
+  if (!discoverCardVisibilityObserver) {
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const callback = discoverCardVisibilityCallbacks.get(entry.target)
+          if (!callback) continue
+          discoverCardVisibilityCallbacks.delete(entry.target)
+          observer.unobserve(entry.target)
+          callback()
+        }
+        if (discoverCardVisibilityCallbacks.size === 0) {
+          observer.disconnect()
+          if (discoverCardVisibilityObserver === observer) {
+            discoverCardVisibilityObserver = null
+          }
+        }
+      },
+      { rootMargin: discoverCardPreloadMargin },
+    )
+    discoverCardVisibilityObserver = observer
+  }
+  discoverCardVisibilityCallbacks.set(element, onVisible)
+  discoverCardVisibilityObserver.observe(element)
+  return () => {
+    discoverCardVisibilityCallbacks.delete(element)
+    discoverCardVisibilityObserver?.unobserve(element)
+    if (discoverCardVisibilityCallbacks.size === 0) {
+      discoverCardVisibilityObserver?.disconnect()
+      discoverCardVisibilityObserver = null
+    }
+  }
+}
 
 export function ContentRow({
   title,
@@ -134,6 +177,7 @@ function DiscoverCard({
   imagePriority: boolean
   onSelect: (item: DiscoverItem) => void
 }) {
+  const cardRef = useRef<HTMLButtonElement>(null)
   const source = discoverItemSource(item)
   const imageCandidates = useMemo(
     () =>
@@ -145,6 +189,8 @@ function DiscoverCard({
   const [imageIndex, setImageIndex] = useState(0)
   const [posterRetry, setPosterRetry] = useState(0)
   const [posterUnavailable, setPosterUnavailable] = useState(false)
+  const [imageEnabled, setImageEnabled] = useState(imagePriority)
+  const shouldLoadImage = imagePriority || imageEnabled
   const posterVersion = [imageVersion, posterRetry > 0 ? `r${posterRetry}` : ''].filter(Boolean).join('-')
   const activeImage = imageCandidates[imageIndex] ?? ''
   const shouldRefreshCache = Boolean(
@@ -162,10 +208,18 @@ function DiscoverCard({
   )
 
   useEffect(() => {
+    if (shouldLoadImage) return
+    const card = cardRef.current
+    if (!card) return
+    return observeDiscoverCard(card, () => setImageEnabled(true))
+  }, [shouldLoadImage])
+
+  useEffect(() => {
     setImageIndex(0)
     setPosterRetry(0)
     setPosterUnavailable(false)
-  }, [item.poster_url, item.backdrop_url, imageVersion])
+    setImageEnabled(imagePriority)
+  }, [item.poster_url, item.backdrop_url, imagePriority, imageVersion])
 
   useEffect(() => {
     if (!posterUnavailable) return
@@ -191,12 +245,13 @@ function DiscoverCard({
 
   return (
     <button
+      ref={cardRef}
       type="button"
       onClick={() => onSelect(item)}
       className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50 text-left transition-all duration-300 hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-400/40"
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-surface-900">
-        {posterSrc && (
+        {shouldLoadImage && posterSrc && (
           <img
             src={posterSrc}
             alt={item.title}
