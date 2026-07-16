@@ -102,7 +102,7 @@ export function DiscoverResults({
   rowCanNext: Record<string, boolean>
   loading: boolean
   hasContent: boolean
-  imageVersion: string
+  imageVersion?: string
   refreshImageVersion?: string
   sectionLabel: SectionLabel
   onPageChange: (key: string, delta: number) => void
@@ -112,7 +112,7 @@ export function DiscoverResults({
 
   return (
     <div className="space-y-10">
-      {selected.map((key) => {
+      {selected.map((key, rowIndex) => {
         const items = rows[key] ?? []
         if (items.length === 0) {
           if (rowLoading[key]) {
@@ -129,6 +129,7 @@ export function DiscoverResults({
             canNext={Boolean(rowCanNext[key])}
             imageVersion={imageVersion}
             refreshImageVersion={refreshImageVersion}
+            priority={rowIndex === 0}
             onPageChange={(delta) => onPageChange(key, delta)}
             onSelect={onSelect}
           />

@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
 import { discoverItemSource } from './discoverPageModel'
+
+const discoverRowPreloadMargin = '480px 0px'
+const discoverPriorityPosterCount = 8
 
 export function ContentRow({
   title,
@@ -12,6 +15,7 @@ export function ContentRow({
   canNext = false,
   imageVersion,
   refreshImageVersion,
+  priority = false,
   onPageChange,
   onSelect,
 }: {
@@ -21,11 +25,35 @@ export function ContentRow({
   canNext?: boolean
   imageVersion?: string
   refreshImageVersion?: string
+  priority?: boolean
   onPageChange?: (delta: number) => void
   onSelect: (item: DiscoverItem) => void
 }) {
+  const rowRef = useRef<HTMLElement>(null)
+  const [imagesEnabled, setImagesEnabled] = useState(priority)
+  const shouldRenderImages = priority || imagesEnabled
+
+  useEffect(() => {
+    if (shouldRenderImages) return
+    const row = rowRef.current
+    if (!row || typeof window.IntersectionObserver === 'undefined') {
+      setImagesEnabled(true)
+      return
+    }
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return
+        setImagesEnabled(true)
+        observer.disconnect()
+      },
+      { rootMargin: discoverRowPreloadMargin },
+    )
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [shouldRenderImages])
+
   return (
-    <section className="space-y-4">
+    <section ref={rowRef} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
         {onPageChange && (
@@ -53,15 +81,24 @@ export function ContentRow({
         )}
       </div>
       <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-        {items.map((item, index) => (
-          <DiscoverCard
-            key={discoverKey(item, index)}
-            item={item}
-            imageVersion={imageVersion}
-            refreshImageVersion={refreshImageVersion}
-            onSelect={onSelect}
-          />
-        ))}
+        {shouldRenderImages
+          ? items.map((item, index) => (
+              <DiscoverCard
+                key={discoverKey(item, index)}
+                item={item}
+                imageVersion={imageVersion}
+                refreshImageVersion={refreshImageVersion}
+                imagePriority={priority && index < discoverPriorityPosterCount}
+                onSelect={onSelect}
+              />
+            ))
+          : items.map((item, index) => (
+              <div
+                key={discoverKey(item, index)}
+                aria-hidden="true"
+                className="aspect-[2/3] rounded-xl bg-gray-100/70"
+              />
+            ))}
       </div>
     </section>
   )
@@ -88,11 +125,13 @@ function DiscoverCard({
   item,
   imageVersion,
   refreshImageVersion,
+  imagePriority,
   onSelect,
 }: {
   item: DiscoverItem
   imageVersion?: string
   refreshImageVersion?: string
+  imagePriority: boolean
   onSelect: (item: DiscoverItem) => void
 }) {
   const source = discoverItemSource(item)
@@ -116,6 +155,8 @@ function DiscoverCard({
       imageURL(activeImage, posterVersion, {
         refreshCache: shouldRefreshCache,
         retryFailed: true,
+        maxWidth: 360,
+        quality: 80,
       }),
     [activeImage, posterVersion, shouldRefreshCache],
   )
@@ -159,7 +200,10 @@ function DiscoverCard({
           <img
             src={posterSrc}
             alt={item.title}
-            loading="eager"
+            width={360}
+            height={540}
+            loading={imagePriority ? 'eager' : 'lazy'}
+            fetchPriority={imagePriority ? 'high' : 'low'}
             decoding="async"
             referrerPolicy="no-referrer"
             onError={markPosterUnavailable}

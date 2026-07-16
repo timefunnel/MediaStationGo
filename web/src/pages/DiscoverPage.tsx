@@ -25,7 +25,7 @@ export function DiscoverPage() {
   const [loading, setLoading] = useState(false)
   const [activeItem, setActiveItem] = useState<DiscoverItem | null>(null)
   const [reloadSeq, setReloadSeq] = useState(0)
-  const [imageVersion, setImageVersion] = useState(() => String(Date.now()))
+  const [imageVersion, setImageVersion] = useState<string>()
   const [refreshImageVersion, setRefreshImageVersion] = useState<string>()
 
   useEffect(() => {
