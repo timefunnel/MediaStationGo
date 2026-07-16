@@ -91,3 +91,37 @@ func TestAdminCanManageEveryMediaVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestListMediaVersionsDoesNotMergeDomainPrefixedTitles(t *testing.T) {
+	db := newServiceTestDB(t, &model.Media{}, &model.ResourceImportJob{})
+	repos := repository.New(db)
+	rows := []model.Media{
+		{
+			LibraryID: "other-library",
+			Title:     "mtcang.com v",
+			Path:      "cloud://openlist/115/其他/作品二十/mtcang.com v.mp4",
+		},
+		{
+			LibraryID: "other-library",
+			Title:     "mtcang.com 跳蛋",
+			Path:      "cloud://openlist/115/其他/作品十/mtcang.com 跳蛋.mp4",
+		},
+		{
+			LibraryID: "other-library",
+			Title:     "mtcang.com spa",
+			Path:      "cloud://openlist/115/其他/作品十一/mtcang.com spa.mp4",
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	versions, err := NewMediaService(&config.Config{}, zap.NewNop(), repos).
+		ListMediaVersions(t.Context(), rows[0].ID, "admin", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions.Items) != 1 || versions.Items[0].ID != rows[0].ID {
+		t.Fatalf("domain-prefixed titles were merged as versions: %#v", versions.Items)
+	}
+}

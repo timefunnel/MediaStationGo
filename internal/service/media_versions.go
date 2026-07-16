@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -162,7 +163,16 @@ func mediaVersionGroupKey(m model.Media) string {
 }
 
 func mediaVersionTitleKey(value string) (string, int) {
-	cleaned, year := CleanQuery(value)
+	value = strings.TrimSpace(value)
+	cleanInput := value
+	if _, isVideoFilename := videoExtensions[strings.ToLower(filepath.Ext(value))]; !isVideoFilename {
+		// CleanQuery accepts file paths and therefore strips everything after the
+		// final dot as an extension. Media titles such as "mtcang.com 跳蛋" are
+		// already parsed titles, so protect their domain-like suffix with a known
+		// synthetic video extension before applying the shared release cleanup.
+		cleanInput += ".mkv"
+	}
+	cleaned, year := CleanQuery(cleanInput)
 	if strings.TrimSpace(cleaned) == "" {
 		cleaned = value
 	}
