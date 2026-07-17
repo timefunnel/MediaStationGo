@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,7 @@ type GeneratedArtworkService struct {
 	cache   *RuntimeCacheService
 	tasks   *TaskTrackerService
 	run     generatedArtworkRunner
+	runMu   sync.Mutex
 
 	wake      chan struct{}
 	startOnce sync.Once
@@ -185,6 +187,98 @@ func (s *GeneratedArtworkService) QueueRefreshForMedia(ctx context.Context, medi
 	}
 	s.signal()
 	return true, nil
+}
+
+// GenerateAtForMedia synchronously replaces generated artwork using an exact
+// timestamp. It shares the same single-run lock as the background worker.
+func (s *GeneratedArtworkService) GenerateAtForMedia(ctx context.Context, mediaID string, seek float64) (*model.Media, error) {
+	if s == nil || s.repo == nil || s.repo.DB == nil {
+		return nil, errors.New("generated artwork service unavailable")
+	}
+	if math.IsNaN(seek) || math.IsInf(seek, 0) || seek < 1 {
+		return nil, errors.New("preview timestamp must be at least 1 second")
+	}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+
+	media, err := s.repo.Media.FindByID(ctx, strings.TrimSpace(mediaID))
+	if err != nil {
+		return nil, err
+	}
+	if media == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if media.SeasonNum != 0 || media.EpisodeNum != 0 {
+		return nil, errors.New("episode artwork is managed by metadata scraping")
+	}
+	if strings.TrimSpace(media.PosterURL) != "" || strings.TrimSpace(media.BackdropURL) != "" {
+		return nil, errors.New("scraped artwork takes precedence; remove it before generating a video preview")
+	}
+	if media.DurationSec <= 0 {
+		return nil, errors.New("media duration is unknown; run media probe first")
+	}
+	if seek >= float64(media.DurationSec-1) {
+		return nil, fmt.Errorf("preview timestamp must be earlier than %d seconds", media.DurationSec-1)
+	}
+	if err := s.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("id = ?", media.ID).Updates(map[string]any{
+		"generated_artwork_seek_sec": seek,
+		"generated_artwork_hash":     "",
+		"generated_artwork_status":   GeneratedArtworkStatusRunning,
+		"generated_artwork_error":    "",
+		"generated_artwork_attempts": 1,
+	}).Error; err != nil {
+		return nil, err
+	}
+	media.GeneratedArtworkSeekSec = seek
+	media.GeneratedArtworkHash = ""
+	media.GeneratedArtworkStatus = GeneratedArtworkStatusRunning
+	media.GeneratedArtworkAttempts = 1
+
+	var task *TaskHandle
+	if s.tasks != nil {
+		task = s.tasks.Start(TaskKindArtwork, "按时间生成作品预览图", TaskUpdate{
+			Stage: "extracting", SourcePath: media.Path,
+			Message: fmt.Sprintf("正在截取 %.3f 秒画面", seek),
+			Metrics: map[string]int64{"timestamp_ms": int64(math.Round(seek * 1000))},
+		})
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, generatedArtworkTimeout)
+	poster, backdrop, hash, generateErr := s.generateOne(jobCtx, media)
+	cancel()
+	updates := map[string]any{}
+	if generateErr != nil {
+		updates["generated_artwork_status"] = GeneratedArtworkStatusFailed
+		updates["generated_artwork_error"] = generateErr.Error()
+	} else {
+		updates["generated_poster_url"] = poster
+		updates["generated_backdrop_url"] = backdrop
+		updates["generated_artwork_hash"] = hash
+		updates["generated_artwork_status"] = GeneratedArtworkStatusCompleted
+		updates["generated_artwork_error"] = ""
+	}
+	if err := s.repo.DB.WithContext(context.WithoutCancel(ctx)).Model(&model.Media{}).Where("id = ?", media.ID).Updates(updates).Error; err != nil {
+		if task != nil {
+			task.Finish(err, TaskUpdate{Stage: "failed", Message: "保存预览图状态失败"})
+		}
+		return nil, err
+	}
+	if s.cache != nil {
+		s.cache.DeletePrefix(context.WithoutCancel(ctx), "media:")
+	}
+	if task != nil {
+		stage, message := "completed", "作品预览图已更新"
+		if generateErr != nil {
+			stage, message = "failed", "作品预览图生成失败"
+		}
+		task.Finish(generateErr, TaskUpdate{
+			Stage: stage, Message: message,
+			Metrics: map[string]int64{"timestamp_ms": int64(math.Round(seek * 1000))},
+		})
+	}
+	if generateErr != nil {
+		return nil, generateErr
+	}
+	return s.repo.Media.FindByID(context.WithoutCancel(ctx), media.ID)
 }
 
 func (s *GeneratedArtworkService) queueableMissingQuery(ctx context.Context, libraryID string) *gorm.DB {
@@ -317,7 +411,9 @@ func (s *GeneratedArtworkService) process(parent context.Context, media *model.M
 	s.activeLibrary = media.LibraryID
 	s.mu.Unlock()
 
+	s.runMu.Lock()
 	poster, backdrop, hash, err := s.generateOne(jobCtx, media)
+	s.runMu.Unlock()
 	canceled := errors.Is(err, context.Canceled) || errors.Is(jobCtx.Err(), context.Canceled)
 	cancel()
 	s.mu.Lock()
@@ -373,7 +469,7 @@ func (s *GeneratedArtworkService) generateOne(ctx context.Context, media *model.
 	if err != nil || lib == nil {
 		return "", "", "", err
 	}
-	if !lib.Enabled || !lib.GenerateArtwork {
+	if !lib.Enabled {
 		return "", "", "", context.Canceled
 	}
 	if !generatedArtworkNeedsGeneration(current) {
@@ -399,7 +495,7 @@ func (s *GeneratedArtworkService) generateOne(ctx context.Context, media *model.
 	s.removeGeneratedArtworkFile(tmpBackdrop)
 	defer s.removeGeneratedArtworkFile(tmpPoster)
 	defer s.removeGeneratedArtworkFile(tmpBackdrop)
-	if err := s.run(ctx, input, headers, generatedArtworkSeek(current.DurationSec), tmpPoster, tmpBackdrop); err != nil {
+	if err := s.run(ctx, input, headers, generatedArtworkSeekForMedia(current), tmpPoster, tmpBackdrop); err != nil {
 		return "", "", "", err
 	}
 	latest, err := s.repo.Media.FindByID(ctx, current.ID)
@@ -519,12 +615,26 @@ func generatedArtworkFingerprint(media *model.Media) string {
 	if media == nil {
 		return "unknown"
 	}
-	sum := sha256.Sum256([]byte(strings.Join([]string{
+	parts := []string{
 		strings.TrimSpace(media.Path),
 		strconv.FormatInt(media.SizeBytes, 10),
 		strconv.Itoa(media.DurationSec),
-	}, "\x00")))
+	}
+	if media.GeneratedArtworkSeekSec > 0 {
+		parts = append(parts, "seek="+strconv.FormatFloat(media.GeneratedArtworkSeekSec, 'f', 3, 64))
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])[:24]
+}
+
+func generatedArtworkSeekForMedia(media *model.Media) float64 {
+	if media != nil && media.GeneratedArtworkSeekSec > 0 {
+		return media.GeneratedArtworkSeekSec
+	}
+	if media == nil {
+		return generatedArtworkSeek(0)
+	}
+	return generatedArtworkSeek(media.DurationSec)
 }
 
 func generatedArtworkSeek(durationSec int) float64 {

@@ -217,6 +217,15 @@ export const mediaAPI = {
   updateMetadata: (id: string, payload: MediaMetadataUpdate) =>
     api.patch<Media>(`/media/${id}/metadata`, payload, { timeout: LONG_REQUEST_TIMEOUT }).then((r) => r.data),
 
+  generateArtworkAt: (id: string, timestampSeconds: number) =>
+    api
+      .post<Media>(
+        `/media/${id}/generated-artwork`,
+        { timestamp_seconds: timestampSeconds },
+        { timeout: LONG_REQUEST_TIMEOUT },
+      )
+      .then((r) => r.data),
+
   manualScrapeSearch: (id: string, params: { query: string; provider?: string; media_type?: string }) =>
     api
       .get<{ items: ManualScrapeCandidate[] }>(`/media/${id}/scrape/search`, { params })

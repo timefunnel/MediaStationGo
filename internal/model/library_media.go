@@ -61,6 +61,7 @@ type Media struct {
 	GeneratedPosterURL       string  `gorm:"size:1024" json:"generated_poster_url,omitempty"`
 	GeneratedBackdropURL     string  `gorm:"size:1024" json:"generated_backdrop_url,omitempty"`
 	GeneratedArtworkHash     string  `gorm:"size:64" json:"generated_artwork_hash,omitempty"`
+	GeneratedArtworkSeekSec  float64 `json:"generated_artwork_seek_sec,omitempty"`
 	GeneratedArtworkStatus   string  `gorm:"index;size:16" json:"generated_artwork_status,omitempty"`
 	GeneratedArtworkError    string  `gorm:"type:text" json:"-"`
 	GeneratedArtworkAttempts int     `json:"generated_artwork_attempts,omitempty"`

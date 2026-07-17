@@ -162,6 +162,47 @@ func TestGeneratedArtworkSeekUsesShortSafeOffsetWithoutDuration(t *testing.T) {
 	}
 }
 
+func TestGeneratedArtworkGenerateAtForMediaUsesExactTimestamp(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: t.TempDir(), Type: "movie", Enabled: true, GenerateArtwork: false}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(source, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{LibraryID: lib.ID, Title: "target", Path: source, DurationSec: 600}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{App: config.AppConfig{DataDir: t.TempDir(), FFmpegPath: "ffmpeg"}}
+	svc := NewGeneratedArtworkService(cfg, zap.NewNop(), repos, nil, nil, nil)
+	var gotSeek float64
+	svc.run = func(_ context.Context, _ string, _ map[string]string, seek float64, poster, backdrop string) error {
+		gotSeek = seek
+		data := make([]byte, 2048)
+		if err := os.WriteFile(poster, data, 0o600); err != nil {
+			return err
+		}
+		return os.WriteFile(backdrop, data, 0o600)
+	}
+	result, err := svc.GenerateAtForMedia(t.Context(), media.ID, 123.456)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotSeek != 123.456 || result.GeneratedArtworkSeekSec != 123.456 || result.GeneratedArtworkStatus != GeneratedArtworkStatusCompleted {
+		t.Fatalf("result = %+v seek=%v", result, gotSeek)
+	}
+	if result.GeneratedPosterURL == "" || result.GeneratedBackdropURL == "" || result.GeneratedArtworkHash == "" {
+		t.Fatalf("generated artwork is incomplete: %+v", result)
+	}
+	if _, err := svc.GenerateAtForMedia(t.Context(), media.ID, 600); err == nil {
+		t.Fatal("out-of-range timestamp was accepted")
+	}
+}
+
 func TestCloudMediaInternalHeadersUseSigningUserAgent(t *testing.T) {
 	original := map[string]string{"Referer": "https://example.test/"}
 	headers := cloudMediaInternalHeaders(original)

@@ -1,4 +1,4 @@
-import { Database, FileText, FolderInput, Pencil, Search, Sparkles, Trash2 } from 'lucide-react'
+import { Database, FileText, FolderInput, Image, Pencil, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
 import type { Media } from '../types'
@@ -12,6 +12,7 @@ type MediaDetailAdminPanelProps = {
   onMetadataEdit: () => void
   onOrganize: () => void
   onProbe: () => void
+  onGenerateArtwork: () => void
   onExportNFO: () => void
   onSoftDelete: () => void
 }
@@ -25,6 +26,7 @@ export function MediaDetailAdminPanel({
   onMetadataEdit,
   onOrganize,
   onProbe,
+  onGenerateArtwork,
   onExportNFO,
   onSoftDelete,
 }: MediaDetailAdminPanelProps) {
@@ -60,6 +62,12 @@ export function MediaDetailAdminPanel({
           <Database size={13} className="text-gray-600" />
           <span>探测媒体轨 (ffprobe)</span>
         </button>
+        {canGenerateArtwork(media) && (
+          <button onClick={onGenerateArtwork} className="btn-outline py-2 px-3.5 text-xs gap-1.5 border-gray-200 hover:border-brand-500/50 hover:bg-brand-50">
+            <Image size={13} className="text-gray-600" />
+            <span>按时间生成预览图</span>
+          </button>
+        )}
         <button onClick={onExportNFO} className="btn-outline py-2 px-3.5 text-xs gap-1.5 border-gray-200 hover:border-brand-500/50 hover:bg-brand-50">
           <FileText size={13} />
           <span>写出本地 NFO 属性</span>
@@ -78,4 +86,8 @@ export function MediaDetailAdminPanel({
 
 function isEpisodeArtworkTarget(media: Media): boolean {
   return media.season_num > 0 || media.episode_num > 0
+}
+
+function canGenerateArtwork(media: Media): boolean {
+  return media.season_num === 0 && media.episode_num === 0 && !media.poster_url?.trim() && !media.backdrop_url?.trim()
 }

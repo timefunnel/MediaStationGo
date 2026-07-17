@@ -6,6 +6,7 @@ import { libraryAPI, mediaAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
 import { buildResourceImportFeedURL, buildSubscriptionAliases, subscriptionsAPI } from '../api/subscriptions'
 import { confirmAction } from '../components/confirmAction'
+import { GeneratedArtworkDialog } from '../components/GeneratedArtworkDialog'
 import { useAuthStore } from '../stores/auth'
 import type { Library, MediaPart, MediaVersion } from '../types'
 import { MediaDetailBackdrop } from './MediaDetailArtwork'
@@ -39,6 +40,7 @@ export function MediaDetailPage() {
   const [partsLoading, setPartsLoading] = useState(true)
   const [subscribing, setSubscribing] = useState(false)
   const [subscribed, setSubscribed] = useState(false)
+  const [generatedArtworkOpen, setGeneratedArtworkOpen] = useState(false)
 
   const loadVersions = useCallback(async () => {
     if (!id) return
@@ -201,6 +203,7 @@ export function MediaDetailPage() {
         onMetadataEdit={() => detail.setMetadataEditOpen(true)}
         onOrganize={() => detail.setOrganizeOpen(true)}
         onProbe={detail.reprobe}
+        onGenerateArtwork={() => setGeneratedArtworkOpen(true)}
         onExportNFO={detail.exportNFO}
         onSoftDelete={detail.softDelete}
         versions={versions}
@@ -222,6 +225,12 @@ export function MediaDetailPage() {
         onManualScrapeApplied={detail.refresh}
         onMetadataSaved={detail.handleMetadataSaved}
         onOrganized={detail.refresh}
+      />
+      <GeneratedArtworkDialog
+        open={generatedArtworkOpen}
+        media={media}
+        onClose={() => setGeneratedArtworkOpen(false)}
+        onGenerated={detail.handleMetadataSaved}
       />
       {upgradeLibrary && (
         <ResourceSearchDrawer

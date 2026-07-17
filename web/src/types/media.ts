@@ -40,6 +40,7 @@ export interface Media {
   backdrop_url?: string
   generated_poster_url?: string
   generated_backdrop_url?: string
+  generated_artwork_seek_sec?: number
   overview?: string
   rating: number
   year: number

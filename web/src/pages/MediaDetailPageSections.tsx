@@ -34,6 +34,7 @@ interface MediaDetailMainContentProps extends MediaDetailPlaybackActionsProps {
   onMetadataEdit: () => void
   onOrganize: () => void
   onProbe: () => void
+  onGenerateArtwork: () => void
   onExportNFO: () => void
   onSoftDelete: () => void
   versions: MediaVersion[]
@@ -181,6 +182,7 @@ export function MediaDetailMainContent({
   onMetadataEdit,
   onOrganize,
   onProbe,
+  onGenerateArtwork,
   onExportNFO,
   onSoftDelete,
   versions,
@@ -226,6 +228,7 @@ export function MediaDetailMainContent({
               onMetadataEdit={onMetadataEdit}
               onOrganize={onOrganize}
               onProbe={onProbe}
+              onGenerateArtwork={onGenerateArtwork}
               onExportNFO={onExportNFO}
               onSoftDelete={onSoftDelete}
             />
