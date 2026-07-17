@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, Film } from 'lucide-react'
+import { Film } from 'lucide-react'
 
 import { MediaCard } from '../components/MediaCard'
+import { Pagination } from '../components/Pagination'
 import type { Media } from '../types'
 import type { SeriesCard } from '../utils/groupSeries'
 
@@ -98,58 +99,9 @@ export function LibraryMediaSections({
       )}
 
       {!selectedSeries && entryCount > 0 && totalPages > 1 && (
-        <LibraryPagination page={page} totalPages={totalPages} onPageChange={setPage} />
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} className="pt-2" />
       )}
     </>
-  )
-}
-
-function LibraryPagination({
-  page,
-  totalPages,
-  onPageChange,
-}: {
-  page: number
-  totalPages: number
-  onPageChange: (page: number) => void
-}) {
-  return (
-    <div className="flex items-center justify-center gap-3 pt-2">
-      <button
-        type="button"
-        className="btn-outline h-10 w-10 justify-center p-0"
-        disabled={page <= 1}
-        onClick={() => onPageChange(Math.max(1, page - 1))}
-        aria-label="上一页"
-        title="上一页"
-      >
-        <ChevronLeft size={17} />
-      </button>
-      <label className="flex h-10 items-center gap-2 text-sm text-ink-50">
-        <span>第</span>
-        <select
-          className="input-base h-9 min-w-20 py-1 text-center"
-          value={page}
-          onChange={(event) => onPageChange(Number(event.target.value))}
-          aria-label="跳转页码"
-        >
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map((value) => (
-            <option key={value} value={value}>{value}</option>
-          ))}
-        </select>
-        <span>/ {totalPages} 页</span>
-      </label>
-      <button
-        type="button"
-        className="btn-outline h-10 w-10 justify-center p-0"
-        disabled={page >= totalPages}
-        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-        aria-label="下一页"
-        title="下一页"
-      >
-        <ChevronRight size={17} />
-      </button>
-    </div>
   )
 }
 
