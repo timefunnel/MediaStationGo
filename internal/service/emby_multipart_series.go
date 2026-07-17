@@ -35,12 +35,13 @@ func (e *EmbyService) multipartSeriesGroupsFromMedia(rows []model.Media) []embyS
 			continue
 		}
 		anchor := parts[0]
+		posterURL, backdropURL := multipartArtworkForMedia(anchor)
 		group := embySeriesGroup{
 			ID:          multipartSeriesID(anchor.LibraryID, anchor.PartGroupKey),
 			LibraryID:   anchor.LibraryID,
 			Name:        firstNonEmpty(anchor.PartGroupTitle, anchor.Title),
-			PosterURL:   anchor.PosterURL,
-			BackdropURL: anchor.BackdropURL,
+			PosterURL:   posterURL,
+			BackdropURL: backdropURL,
 			Overview:    anchor.Overview,
 			Rating:      anchor.Rating,
 			Year:        anchor.Year,
@@ -52,14 +53,15 @@ func (e *EmbyService) multipartSeriesGroupsFromMedia(rows []model.Media) []embyS
 		}
 		for index := range parts {
 			part := multipartEpisodeView(parts[index], group.ID, index+1)
+			partPosterURL, partBackdropURL := multipartArtworkForMedia(part)
 			if part.CreatedAt.After(group.CreatedAt) {
 				group.CreatedAt = part.CreatedAt
 			}
-			if group.PosterURL == "" && part.PosterURL != "" {
-				group.PosterURL = part.PosterURL
+			if group.PosterURL == "" && partPosterURL != "" {
+				group.PosterURL = partPosterURL
 			}
-			if group.BackdropURL == "" && part.BackdropURL != "" {
-				group.BackdropURL = part.BackdropURL
+			if group.BackdropURL == "" && partBackdropURL != "" {
+				group.BackdropURL = partBackdropURL
 			}
 			if group.Overview == "" && part.Overview != "" {
 				group.Overview = part.Overview
@@ -69,6 +71,12 @@ func (e *EmbyService) multipartSeriesGroupsFromMedia(rows []model.Media) []embyS
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+func multipartArtworkForMedia(row model.Media) (string, string) {
+	posterURL := firstNonEmpty(row.PosterURL, row.GeneratedPosterURL)
+	backdropURL := firstNonEmpty(row.BackdropURL, row.GeneratedBackdropURL)
+	return posterURL, backdropURL
 }
 
 func multipartEpisodeView(row model.Media, seriesID string, episodeNumber int) model.Media {

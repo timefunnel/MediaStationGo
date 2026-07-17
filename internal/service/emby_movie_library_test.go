@@ -231,7 +231,7 @@ func TestEmbyMovieLibraryExposesMultipartVideoAsVirtualSeries(t *testing.T) {
 	}
 	rows := []model.Media{
 		{Base: model.Base{ID: "part-3"}, LibraryID: lib.ID, Title: "作品 A 第 3 段", Path: "/media/other/作品 A/003.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 3, Container: "mp4"},
-		{Base: model.Base{ID: "part-1"}, LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 1, Container: "mp4", PosterURL: "https://image.example/work-a.jpg"},
+		{Base: model.Base{ID: "part-1"}, LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 1, Container: "mp4", GeneratedPosterURL: "https://image.example/work-a-generated.jpg", GeneratedBackdropURL: "https://image.example/work-a-generated-backdrop.jpg"},
 		{Base: model.Base{ID: "part-2"}, LibraryID: lib.ID, Title: "作品 A 第 2 段", Path: "/media/other/作品 A/002.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 2, Container: "mp4"},
 	}
 	if err := svc.repo.DB.Create(&rows).Error; err != nil {
@@ -249,6 +249,12 @@ func TestEmbyMovieLibraryExposesMultipartVideoAsVirtualSeries(t *testing.T) {
 	seriesID, _ := items[0]["Id"].(string)
 	if seriesID == "" || !strings.HasPrefix(seriesID, embyVirtualSeriesPrefix) {
 		t.Fatalf("multipart series has invalid id: %#v", items[0])
+	}
+	if tags, ok := items[0]["ImageTags"].(map[string]string); !ok || tags["Primary"] == "" {
+		t.Fatalf("multipart series did not expose generated primary artwork: %#v", items[0])
+	}
+	if tags, ok := items[0]["BackdropImageTags"].([]string); !ok || len(tags) != 1 {
+		t.Fatalf("multipart series did not expose generated backdrop artwork: %#v", items[0])
 	}
 	recursive, err := svc.Items(t.Context(), ItemsParams{
 		ParentID: lib.ID, Recursive: true, IncludeItemTypes: []string{"Movie"}, Limit: 1,
@@ -292,8 +298,12 @@ func TestEmbyMovieLibraryExposesMultipartVideoAsVirtualSeries(t *testing.T) {
 		t.Fatalf("cold-cache multipart series lookup failed: %#v err=%v", coldEpisodes, err)
 	}
 	artwork, err := svc.ImageURL(t.Context(), seriesID, "Primary")
-	if err != nil || artwork != "https://image.example/work-a.jpg" {
+	if err != nil || artwork != "https://image.example/work-a-generated.jpg" {
 		t.Fatalf("cold-cache multipart series artwork failed: %q err=%v", artwork, err)
+	}
+	backdrop, err := svc.ImageURL(t.Context(), seriesID, "Backdrop")
+	if err != nil || backdrop != "https://image.example/work-a-generated-backdrop.jpg" {
+		t.Fatalf("cold-cache multipart series backdrop failed: %q err=%v", backdrop, err)
 	}
 	directPart, err := svc.Item(t.Context(), "part-2", "")
 	if err != nil {
