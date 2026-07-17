@@ -146,6 +146,31 @@ func TestEmbyPlaybackInfoSubtitleDeliveryURLServesNativeSRT(t *testing.T) {
 	})
 
 	token := signedTestToken(t, secret)
+	detailReq := httptest.NewRequest(http.MethodGet, "/emby/Users/user-1/Items/media-sub?Fields=MediaSources", nil)
+	detailReq.Header.Set("X-Emby-Token", token)
+	detailRecorder := httptest.NewRecorder()
+	router.ServeHTTP(detailRecorder, detailReq)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("unexpected item detail status: %d body=%s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode item detail: %v", err)
+	}
+	detailSource := detail["MediaSources"].([]any)[0].(map[string]any)
+	detailStreams := detailSource["MediaStreams"].([]any)
+	var detailDeliveryURL string
+	for _, raw := range detailStreams {
+		stream := raw.(map[string]any)
+		if stream["Type"] == "Subtitle" {
+			detailDeliveryURL, _ = stream["DeliveryUrl"].(string)
+			break
+		}
+	}
+	if detailDeliveryURL == "" || !strings.Contains(detailDeliveryURL, "api_key=") {
+		t.Fatalf("item detail should expose a tokenized external subtitle: %#v", detailStreams)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/emby/Items/media-sub/PlaybackInfo", nil)
 	req.Header.Set("X-Emby-Token", token)
 	w := httptest.NewRecorder()

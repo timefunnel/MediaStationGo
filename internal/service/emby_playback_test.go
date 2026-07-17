@@ -127,10 +127,18 @@ func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
 		t.Fatalf("item: %v", err)
 	}
 	embeddedStreams := item["MediaSources"].([]map[string]any)[0]["MediaStreams"].([]map[string]any)
+	var embeddedSubtitle map[string]any
 	for _, stream := range embeddedStreams {
 		if stream["Type"] == "Subtitle" {
-			t.Fatalf("embedded item payload should not discover subtitles: %#v", embeddedStreams)
+			embeddedSubtitle = stream
+			break
 		}
+	}
+	if embeddedSubtitle == nil {
+		t.Fatalf("item detail should expose external subtitles before playback: %#v", embeddedStreams)
+	}
+	if embeddedSubtitle["Codec"] != "srt" || embeddedSubtitle["DeliveryUrl"] != subtitle["DeliveryUrl"] {
+		t.Fatalf("item detail subtitle should match playback info: item=%#v playback=%#v", embeddedSubtitle, subtitle)
 	}
 }
 

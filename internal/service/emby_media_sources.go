@@ -157,6 +157,37 @@ func (e *EmbyService) attachExternalSubtitleStreams(ctx context.Context, m *mode
 	}
 }
 
+// attachExternalSubtitleStreamsToItem mirrors Emby item-detail responses:
+// clients inspect MediaSources there before requesting PlaybackInfo. Library
+// listings deliberately keep the lightweight embedded payload to avoid a
+// cloud subtitle discovery request for every listed media item.
+func (e *EmbyService) attachExternalSubtitleStreamsToItem(ctx context.Context, item map[string]any, primary *model.Media) error {
+	if e == nil || e.repo == nil || e.repo.Media == nil || item == nil || primary == nil {
+		return nil
+	}
+	sources, ok := item["MediaSources"].([]map[string]any)
+	if !ok {
+		return nil
+	}
+	for _, source := range sources {
+		media := primary
+		sourceID, _ := source["Id"].(string)
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID != "" && sourceID != primary.ID {
+			row, err := e.repo.Media.FindByID(ctx, sourceID)
+			if err != nil {
+				return err
+			}
+			if row == nil {
+				continue
+			}
+			media = row
+		}
+		e.attachExternalSubtitleStreams(ctx, media, source)
+	}
+	return nil
+}
+
 func nextMediaStreamIndex(streams []map[string]any) int {
 	next := 0
 	for _, stream := range streams {

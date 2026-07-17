@@ -79,7 +79,11 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 			watchedAt = h.WatchedAt
 		}
 	}
-	return e.itemPayload(ctx, m, fav, pos, watchedAt), nil
+	item := e.itemPayload(ctx, m, fav, pos, watchedAt)
+	if err := e.attachExternalSubtitleStreamsToItem(ctx, item, m); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 // LatestItems 最近添加，全库或指定库。
