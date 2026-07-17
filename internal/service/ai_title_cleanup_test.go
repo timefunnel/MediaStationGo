@@ -122,3 +122,40 @@ func TestCleanMediaTitlesRunsDirectoryGroupsConcurrently(t *testing.T) {
 		t.Fatalf("items=%d progress=%d max_active=%d", len(items), progress, maxActive.Load())
 	}
 }
+
+func TestCleanMediaTitlesRejectsDuplicateTitlesAcrossConcurrentGroups(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Groups []MediaTitleCleanupGroup `json:"groups"`
+		}
+		if len(request.Messages) < 2 || json.Unmarshal([]byte(request.Messages[1].Content), &payload) != nil {
+			t.Fatal("invalid cleanup request")
+		}
+		id := payload.Groups[0].Items[0].MediaID
+		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
+			"content": `{"items":[{"media_id":"` + id + `","title":"同名作品","relation":"standalone","confidence":0.9}]}`,
+		}}}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ai := NewAIService(&config.Config{AI: config.AIConfig{
+		Enabled: true, APIBase: server.URL, APIKey: "test", Model: "test",
+	}}, zap.NewNop(), nil)
+	groups := []MediaTitleCleanupGroup{
+		{SourceDirectory: "A", Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "a.mp4"}}},
+		{SourceDirectory: "B", Items: []MediaTitleCleanupSource{{MediaID: "b", Filename: "b.mp4"}}},
+	}
+	if _, err := ai.CleanMediaTitlesWithProgress(t.Context(), groups, nil); err == nil {
+		t.Fatal("cross-directory duplicate titles should fail global validation")
+	}
+}

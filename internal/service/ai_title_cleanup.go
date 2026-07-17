@@ -137,7 +137,7 @@ func (a *AIService) CleanMediaTitlesWithProgress(
 		}
 		out = append(out, batch...)
 	}
-	return out, nil
+	return validateMediaTitleCleanupSuggestions(groups, out)
 }
 
 func (a *AIService) cleanMediaTitleBatch(
