@@ -1,4 +1,4 @@
-import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Flame, RefreshCw, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem, DiscoverSection } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
@@ -20,6 +20,9 @@ export function DiscoverHeader({
   onRefresh: () => void
   onToggleSection: (key: string) => void
 }) {
+	const generalSections = sections.filter((section) => section.group !== 'adult')
+	const adultSections = sections.filter((section) => section.group === 'adult')
+
   return (
     <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
       <div className="flex items-center gap-4">
@@ -46,29 +49,71 @@ export function DiscoverHeader({
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           刷新
         </button>
-        <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-          {sections.map((section) => {
-            const active = selected.includes(section.key)
-            return (
-              <button
-                key={section.key}
-                type="button"
-                onClick={() => onToggleSection(section.key)}
-                className={
-                  'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
-                  (active
-                    ? 'border-primary-400 bg-primary-400/15 text-brand-500'
-                    : 'border-gray-200 bg-white text-gray-500 hover:border-primary-300 hover:text-ink-600')
-                }
-              >
-                {section.label}
-              </button>
-            )
-          })}
-        </div>
+		<div className="space-y-2 lg:max-w-3xl">
+			<div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+				{generalSections.map((section) => (
+					<DiscoverSectionToggle
+						key={section.key}
+						section={section}
+						active={selected.includes(section.key)}
+						onToggle={onToggleSection}
+					/>
+				))}
+			</div>
+			{adultSections.length > 0 && (
+				<div className="flex flex-col gap-2 border-t border-rose-200/70 pt-2 sm:flex-row sm:items-center sm:justify-end">
+					<div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600">
+						<Flame size={14} />
+						成人专区
+					</div>
+					<div className="flex flex-wrap gap-2">
+						{adultSections.map((section) => (
+							<DiscoverSectionToggle
+								key={section.key}
+								section={section}
+								active={selected.includes(section.key)}
+								onToggle={onToggleSection}
+								adult
+							/>
+						))}
+					</div>
+				</div>
+			)}
+		</div>
       </div>
     </header>
   )
+}
+
+function DiscoverSectionToggle({
+	section,
+	active,
+	onToggle,
+	adult = false,
+}: {
+	section: DiscoverSection
+	active: boolean
+	onToggle: (key: string) => void
+	adult?: boolean
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onToggle(section.key)}
+			className={
+				'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
+				(active
+					? adult
+						? 'border-rose-400 bg-rose-50 text-rose-700'
+						: 'border-primary-400 bg-primary-400/15 text-brand-500'
+					: adult
+						? 'border-rose-200 bg-white text-rose-500 hover:border-rose-400 hover:text-rose-700'
+						: 'border-gray-200 bg-white text-gray-500 hover:border-primary-300 hover:text-ink-600')
+			}
+		>
+			{section.label}
+		</button>
+	)
 }
 
 export function DiscoverEmptySelection() {

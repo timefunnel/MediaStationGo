@@ -1,0 +1,402 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/ShukeBta/MediaStationGo/internal/model"
+)
+
+var (
+	adultListStrongPattern  = regexp.MustCompile(`(?is)<strong[^>]*>(.*?)</strong>`)
+	adultListDatePattern    = regexp.MustCompile(`(?:19|20)\d{2}-\d{2}-\d{2}`)
+	adultListScorePattern   = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
+	adultPerformerIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+)
+
+func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMediaResult, error) {
+	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
+		return base + "/rankings/movies?p=daily&t=censored"
+	}, parseJavDBMovieList)
+	return limitAdultDiscoveryItems(items, 30), err
+}
+
+func (p *AdultProvider) DiscoverJavBusLatest(ctx context.Context, page int) ([]ExternalMediaResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	items, err := p.discoverAdultList(ctx, "javbus", func(base string) string {
+		if page == 1 {
+			return base + "/"
+		}
+		return fmt.Sprintf("%s/page/%d", base, page)
+	}, parseJavBusMovieList)
+	return limitAdultDiscoveryItems(items, 30), err
+}
+
+func (p *AdultProvider) DiscoverJavDBPerformers(ctx context.Context) ([]ExternalMediaResult, error) {
+	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
+		return base + "/rankings/actors?t=censored"
+	}, parseJavDBPerformerList)
+	return limitAdultDiscoveryItems(items, 30), err
+}
+
+func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sourceID string, page int) ([]ExternalMediaResult, error) {
+	base, profileURL, ok := p.AdultPerformerProfile(ctx, source, sourceID)
+	if !ok {
+		return nil, errors.New("unsupported adult performer source")
+	}
+	if page < 1 {
+		page = 1
+	}
+	target := profileURL
+	if page > 1 {
+		target += "?page=" + strconv.Itoa(page)
+	}
+	body, err := p.fetchText(ctx, target, base)
+	if err != nil {
+		return nil, err
+	}
+	items := parseJavDBMovieList(body, base)
+	if len(items) == 0 {
+		return nil, fmt.Errorf("adult performer page returned no usable works")
+	}
+	return limitAdultDiscoveryItems(items, 40), nil
+}
+
+func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, follows []model.AdultPerformerFollow, page int) ([]ExternalMediaResult, error) {
+	if len(follows) == 0 {
+		return []ExternalMediaResult{}, nil
+	}
+	type result struct {
+		follow model.AdultPerformerFollow
+		items  []ExternalMediaResult
+		err    error
+	}
+	results := make(chan result, len(follows))
+	semaphore := make(chan struct{}, 3)
+	var wg sync.WaitGroup
+	for _, follow := range follows {
+		follow := follow
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				results <- result{follow: follow, err: ctx.Err()}
+				return
+			}
+			items, err := p.DiscoverPerformerWorks(ctx, follow.Source, follow.SourceID, page)
+			results <- result{follow: follow, items: items, err: err}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	out := make([]ExternalMediaResult, 0, len(follows)*8)
+	seen := map[string]struct{}{}
+	errs := make([]error, 0)
+	for fetched := range results {
+		if fetched.err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", fetched.follow.Name, fetched.err))
+			continue
+		}
+		person := PersonMetadata{
+			Name:       fetched.follow.Name,
+			ImageURL:   fetched.follow.ImageURL,
+			ProfileURL: fetched.follow.ProfileURL,
+			Source:     fetched.follow.Source,
+			SourceID:   fetched.follow.SourceID,
+		}
+		for _, item := range fetched.items {
+			key := strings.ToLower(strings.TrimSpace(item.Source + "\x00" + item.OriginalName))
+			if key == "" {
+				key = strings.ToLower(strings.TrimSpace(item.Source + "\x00" + item.Title))
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			item.Actors = []string{fetched.follow.Name}
+			item.People = []PersonMetadata{person}
+			out = append(out, item)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].ReleaseDate > out[j].ReleaseDate
+	})
+	if len(out) > 40 {
+		out = out[:40]
+	}
+	if len(out) == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return out, nil
+}
+
+func limitAdultDiscoveryItems(items []ExternalMediaResult, limit int) []ExternalMediaResult {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
+}
+
+func (p *AdultProvider) AdultPerformerProfile(ctx context.Context, source, sourceID string) (string, string, bool) {
+	source = strings.ToLower(strings.TrimSpace(source))
+	sourceID = strings.TrimSpace(sourceID)
+	if source != "javdb" || !adultPerformerIDPattern.MatchString(sourceID) {
+		return "", "", false
+	}
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != source {
+			continue
+		}
+		base = strings.TrimRight(base, "/")
+		return base, base + "/actors/" + url.PathEscape(sourceID), true
+	}
+	return "", "", false
+}
+
+func NormalizeAdultPerformerImageURL(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") {
+		return "", false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host != "jdbstatic.com" && !strings.HasSuffix(host, ".jdbstatic.com") {
+		return "", false
+	}
+	return u.String(), true
+}
+
+func (p *AdultProvider) discoverAdultList(
+	ctx context.Context,
+	source string,
+	targetURL func(base string) string,
+	parse func(body, base string) []ExternalMediaResult,
+) ([]ExternalMediaResult, error) {
+	if p == nil {
+		return nil, errors.New("adult provider is unavailable")
+	}
+	var lastErr error
+	foundSource := false
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != source {
+			continue
+		}
+		foundSource = true
+		base = strings.TrimRight(base, "/")
+		body, err := p.fetchText(ctx, targetURL(base), base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		items := parse(body, base)
+		if len(items) > 0 {
+			return items, nil
+		}
+		lastErr = fmt.Errorf("adult source %s returned no usable discovery items", base)
+	}
+	if !foundSource {
+		return nil, fmt.Errorf("adult source %s is not configured", source)
+	}
+	return nil, lastErr
+}
+
+func parseJavDBMovieList(body, base string) []ExternalMediaResult {
+	return parseAdultMovieList(body, base, "javdb", "box", "/v/")
+}
+
+func parseJavBusMovieList(body, base string) []ExternalMediaResult {
+	return parseAdultMovieList(body, base, "javbus", "movie-box", "")
+}
+
+func parseAdultMovieList(body, base, source, className, hrefNeedle string) []ExternalMediaResult {
+	out := make([]ExternalMediaResult, 0, 40)
+	seen := map[string]struct{}{}
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 3 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		classes := " " + strings.ToLower(strings.TrimSpace(attrs["class"])) + " "
+		if !strings.Contains(classes, " "+className+" ") {
+			continue
+		}
+		href := strings.TrimSpace(attrs["href"])
+		if href == "" || (hrefNeedle != "" && !strings.Contains(href, hrefNeedle)) {
+			continue
+		}
+		inner := found[2]
+		code := adultListCode(inner, href)
+		if code == "" {
+			continue
+		}
+		key := strings.ToUpper(code)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		detailURL := absolutizeURL(base, href)
+		title := adultListTitle(attrs, inner, code)
+		item := ExternalMediaResult{
+			Source:           source,
+			MediaType:        "adult",
+			Title:            firstNonEmpty(title, code),
+			OriginalName:     code,
+			PosterURL:        absolutizeURL(base, firstAdultListImage(inner)),
+			ReleaseDate:      adultListReleaseDate(inner),
+			Rating:           adultListRating(inner),
+			SubscribeKeyword: code,
+			SubscribeAliases: compactUniqueStrings(code, title),
+			Genres:           []string{"Adult", source},
+			NSFW:             true,
+			ProviderURL:      detailURL,
+			ProviderID:       adultProviderItemID(detailURL),
+		}
+		if len(item.ReleaseDate) >= 4 {
+			item.Year, _ = strconv.Atoi(item.ReleaseDate[:4])
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func parseJavDBPerformerList(body, base string) []ExternalMediaResult {
+	out := make([]ExternalMediaResult, 0, 40)
+	seen := map[string]struct{}{}
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 3 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		href := strings.TrimSpace(attrs["href"])
+		sourceID := adultPerformerSourceID(href)
+		if sourceID == "" {
+			continue
+		}
+		if _, exists := seen[sourceID]; exists {
+			continue
+		}
+		name := stripAdultHTML(found[2])
+		if m := adultListStrongPattern.FindStringSubmatch(found[2]); len(m) > 1 {
+			name = stripAdultHTML(m[1])
+		}
+		if name == "" {
+			name = strings.TrimSpace(strings.Split(attrs["title"], ",")[0])
+		}
+		if !validAdultActorName(name) {
+			continue
+		}
+		seen[sourceID] = struct{}{}
+		profileURL := absolutizeURL(base, href)
+		out = append(out, ExternalMediaResult{
+			Source:      "javdb",
+			MediaType:   "person",
+			Title:       name,
+			PosterURL:   absolutizeURL(base, firstAdultListImage(found[2])),
+			NSFW:        true,
+			ProviderURL: profileURL,
+			ProviderID:  sourceID,
+			People: []PersonMetadata{{
+				Name:       name,
+				ImageURL:   absolutizeURL(base, firstAdultListImage(found[2])),
+				ProfileURL: profileURL,
+				Source:     "javdb",
+				SourceID:   sourceID,
+			}},
+		})
+	}
+	return out
+}
+
+func adultListCode(inner, href string) string {
+	if m := adultListStrongPattern.FindStringSubmatch(inner); len(m) > 1 {
+		if code := normalizeAdultCode(stripAdultHTML(m[1])); code != "" {
+			return code
+		}
+	}
+	for _, raw := range regexp.MustCompile(`(?is)<date[^>]*>(.*?)</date>`).FindAllStringSubmatch(inner, -1) {
+		if len(raw) > 1 {
+			if code := normalizeAdultCode(stripAdultHTML(raw[1])); code != "" {
+				return code
+			}
+		}
+	}
+	return normalizeAdultCode(href)
+}
+
+func adultListTitle(attrs map[string]string, inner, code string) string {
+	if title := strings.TrimSpace(attrs["title"]); title != "" {
+		return strings.TrimSpace(strings.TrimPrefix(title, code))
+	}
+	if image := adultImagePattern.FindStringSubmatch(inner); len(image) > 1 {
+		imageAttrs := adultAttrs(image[1])
+		if title := firstText(imageAttrs["title"], imageAttrs["alt"]); title != "" {
+			return strings.TrimSpace(strings.TrimPrefix(title, code))
+		}
+	}
+	return ""
+}
+
+func firstAdultListImage(inner string) string {
+	image := adultImagePattern.FindStringSubmatch(inner)
+	if len(image) < 2 {
+		return ""
+	}
+	attrs := adultAttrs(image[1])
+	return firstText(attrs["data-src"], attrs["data-original"], attrs["data-lazy-src"], attrs["src"])
+}
+
+func adultListReleaseDate(inner string) string {
+	return adultListDatePattern.FindString(inner)
+}
+
+func adultListRating(inner string) float32 {
+	m := adultListScorePattern.FindStringSubmatch(stripAdultHTML(inner))
+	if len(m) < 2 {
+		return 0
+	}
+	value, _ := strconv.ParseFloat(m[1], 32)
+	return float32(value)
+}
+
+func adultProviderItemID(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(u.Path[strings.LastIndex(u.Path, "/")+1:]), "/")
+}
+
+func adultPerformerSourceID(href string) string {
+	u, err := url.Parse(strings.TrimSpace(href))
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 2 || parts[0] != "actors" || !adultPerformerIDPattern.MatchString(parts[1]) {
+		return ""
+	}
+	switch strings.ToLower(parts[1]) {
+	case "censored", "uncensored", "western":
+		return ""
+	default:
+		return parts[1]
+	}
+}

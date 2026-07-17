@@ -24,6 +24,7 @@ type discoverSectionDef struct {
 	Key      string
 	Label    string
 	Provider string
+	Group    string
 }
 
 var discoverSectionCatalog = []discoverSectionDef{
@@ -39,6 +40,10 @@ var discoverSectionCatalog = []discoverSectionDef{
 	{Key: "douban_hot_tv", Label: "豆瓣热门剧集", Provider: "douban"},
 	{Key: "douban_top_movie", Label: "豆瓣高分电影", Provider: "douban"},
 	{Key: "bangumi_calendar", Label: "Bangumi 每日放送", Provider: "bangumi"},
+	{Key: "adult_javdb_popular", Label: "JavDB 今日热门", Provider: "adult", Group: "adult"},
+	{Key: "adult_javbus_latest", Label: "JavBus 最近新作", Provider: "adult", Group: "adult"},
+	{Key: "adult_javdb_performers", Label: "JavDB 热门女优", Provider: "adult", Group: "adult"},
+	{Key: "adult_followed", Label: "关注女优新作", Provider: "adult", Group: "adult"},
 }
 
 const discoverFeedSectionTimeout = 20 * time.Second
@@ -51,8 +56,14 @@ const discoverFeedSlowSectionThreshold = 2 * time.Second
 func discoverSectionsHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sections := make([]gin.H, 0, len(discoverSectionCatalog))
+		adultAllowed := discoverAdultAllowed(c, svc)
 		for _, section := range enabledDiscoverSections(c.Request.Context(), svc) {
-			sections = append(sections, gin.H{"key": section.Key, "label": section.Label, "provider": section.Provider})
+			if section.Group == "adult" && !adultAllowed {
+				continue
+			}
+			sections = append(sections, gin.H{
+				"key": section.Key, "label": section.Label, "provider": section.Provider, "group": section.Group,
+			})
 		}
 		c.JSON(http.StatusOK, gin.H{"sections": sections})
 	}
@@ -76,9 +87,16 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 		out := gin.H{}
 		meta := gin.H{}
 		artworkItems := []service.ExternalMediaResult{}
+		userID := currentUserID(c)
+		adultAllowed := discoverAdultAllowed(c, svc)
 		for _, raw := range keys {
 			k := strings.TrimSpace(raw)
 			if k == "" {
+				continue
+			}
+			if discoverSectionProvider(k) == "adult" && !adultAllowed {
+				out[k] = []service.ExternalMediaResult{}
+				meta[k] = gin.H{"page": page, "has_next": false, "disabled": true}
 				continue
 			}
 			if provider := discoverSectionProvider(k); provider != "" && !discoverProviderEnabled(c.Request.Context(), svc, provider) {
@@ -89,33 +107,38 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			sectionTimeout := discoverSectionTimeout(k)
 			sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
 			started := time.Now()
-			items, err := discoverSectionItems(sectionCtx, svc, k, page)
+			items, err := discoverSectionItems(sectionCtx, svc, k, page, userID)
 			elapsed := time.Since(started)
 			cancel()
 			metaEntry := gin.H{"page": page, "has_next": false, "duration_ms": elapsed.Milliseconds()}
+			cacheKey := discoverSectionCacheKeyForUser(k, userID)
 			if err != nil {
 				logDiscoverFetchFailed(svc, k, page, elapsed, sectionTimeout, err)
-				if cached, ok := cachedDiscoverSection(svc, k, page); ok {
+				if cached, ok := cachedDiscoverSection(svc, cacheKey, page); ok {
 					items = cached
 					metaEntry["stale"] = true
 					metaEntry["warning"] = discoverFeedStaleMessage(err)
-				} else if fallbackItems, fallbackKey, ok := fallbackDiscoverSectionItems(c.Request.Context(), svc, k, page); ok {
+				} else if fallbackItems, fallbackKey, ok := fallbackDiscoverSectionItems(c.Request.Context(), svc, k, page, userID); ok {
 					items = fallbackItems
 					metaEntry["fallback"] = fallbackKey
 					metaEntry["warning"] = discoverFeedFallbackMessage(fallbackKey, err)
-					rememberDiscoverSection(svc, k, page, items)
+					rememberDiscoverSection(svc, cacheKey, page, items)
 				} else {
 					metaEntry["error"] = discoverFeedErrorMessage(err)
 					items = nil
 				}
 			} else {
 				logDiscoverFetchSlow(svc, k, page, elapsed, len(items))
-				rememberDiscoverSection(svc, k, page, items)
+				rememberDiscoverSection(svc, cacheKey, page, items)
 			}
 			service.EnrichExternalMediaLibraryLinks(
 				c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
 			)
-			artworkItems = append(artworkItems, items...)
+			warmItems := items
+			if discoverSectionProvider(k) == "adult" && len(warmItems) > 12 {
+				warmItems = warmItems[:12]
+			}
+			artworkItems = append(artworkItems, warmItems...)
 			out[k] = items
 			metaEntry["has_next"] = discoverSectionHasNext(k, len(items))
 			meta[k] = metaEntry
@@ -142,14 +165,14 @@ func rememberDiscoverSection(svc *service.Container, key string, page int, items
 	svc.Discover.RememberSection(key, page, items)
 }
 
-func fallbackDiscoverSectionItems(parent context.Context, svc *service.Container, key string, page int) ([]service.ExternalMediaResult, string, bool) {
+func fallbackDiscoverSectionItems(parent context.Context, svc *service.Container, key string, page int, userID string) ([]service.ExternalMediaResult, string, bool) {
 	fallbackKey := fallbackDiscoverSectionKey(key)
 	if fallbackKey == "" || svc == nil || svc.Discover == nil {
 		return nil, "", false
 	}
 	ctx, cancel := context.WithTimeout(parent, discoverSectionTimeout(fallbackKey))
 	defer cancel()
-	items, err := discoverSectionItems(ctx, svc, fallbackKey, page)
+	items, err := discoverSectionItems(ctx, svc, fallbackKey, page, userID)
 	if err != nil || len(items) == 0 {
 		return nil, fallbackKey, false
 	}
@@ -285,6 +308,8 @@ func discoverSectionProvider(key string) string {
 		}
 	}
 	switch key {
+	case "adult_javdb_popular", "adult_javbus_latest", "adult_javdb_performers", "adult_followed":
+		return "adult"
 	case "trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
 		return "tmdb"
 	default:
@@ -303,7 +328,7 @@ func discoverProviderEnabled(ctx context.Context, svc *service.Container, provid
 	return cfg.Enabled
 }
 
-func discoverSectionItems(ctx context.Context, svc *service.Container, k string, page int) ([]service.ExternalMediaResult, error) {
+func discoverSectionItems(ctx context.Context, svc *service.Container, k string, page int, userID string) ([]service.ExternalMediaResult, error) {
 	switch k {
 	case "tmdb_trending_day", "tmdb_trending_week", "tmdb_latest_movie", "tmdb_latest_tv", "tmdb_popular_movie", "tmdb_popular_tv", "tmdb_top_rated_movie", "tmdb_upcoming_movie",
 		"trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
@@ -321,6 +346,37 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 			return []service.ExternalMediaResult{}, nil
 		}
 		return svc.Bangumi.Calendar(ctx)
+	case "adult_javdb_popular":
+		if svc.Adult == nil || page > 1 {
+			return []service.ExternalMediaResult{}, nil
+		}
+		return svc.Adult.DiscoverJavDBPopular(ctx)
+	case "adult_javbus_latest":
+		if svc.Adult == nil {
+			return []service.ExternalMediaResult{}, nil
+		}
+		return svc.Adult.DiscoverJavBusLatest(ctx, page)
+	case "adult_javdb_performers":
+		if svc.Adult == nil || page > 1 {
+			return []service.ExternalMediaResult{}, nil
+		}
+		items, err := svc.Adult.DiscoverJavDBPerformers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := markAdultPerformerFollows(ctx, svc, userID, items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	case "adult_followed":
+		if svc.Adult == nil || svc.Repo == nil || svc.Repo.AdultFollow == nil {
+			return []service.ExternalMediaResult{}, nil
+		}
+		follows, err := svc.Repo.AdultFollow.ListByUser(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		return svc.Adult.DiscoverFollowedPerformerWorks(ctx, follows, page)
 	default:
 		return []service.ExternalMediaResult{}, nil
 	}
@@ -335,7 +391,73 @@ func discoverSectionHasNext(key string, itemCount int) bool {
 		return itemCount >= 20
 	case "douban":
 		return itemCount >= 24
+	case "adult":
+		switch key {
+		case "adult_javbus_latest":
+			return itemCount >= 30
+		case "adult_followed":
+			return itemCount >= 40
+		default:
+			return false
+		}
 	default:
 		return false
 	}
+}
+
+func discoverSectionCacheKeyForUser(key, userID string) string {
+	switch key {
+	case "adult_javdb_performers", "adult_followed":
+		return key + ":" + strings.TrimSpace(userID)
+	default:
+		return key
+	}
+}
+
+func markAdultPerformerFollows(ctx context.Context, svc *service.Container, userID string, items []service.ExternalMediaResult) error {
+	if svc == nil || svc.Repo == nil || svc.Repo.AdultFollow == nil || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	follows, err := svc.Repo.AdultFollow.ListByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	followed := make(map[string]struct{}, len(follows))
+	for _, follow := range follows {
+		key := strings.ToLower(strings.TrimSpace(follow.Source)) + "\x00" + strings.TrimSpace(follow.SourceID)
+		followed[key] = struct{}{}
+	}
+	for index := range items {
+		key := strings.ToLower(strings.TrimSpace(items[index].Source)) + "\x00" + strings.TrimSpace(items[index].ProviderID)
+		_, items[index].Followed = followed[key]
+	}
+	return nil
+}
+
+func discoverAdultAllowed(c *gin.Context, svc *service.Container) bool {
+	if c == nil || svc == nil || svc.Repo == nil || svc.Repo.Library == nil {
+		return false
+	}
+	visibility := mediaVisibilityForRequest(c, svc)
+	if !visibility.IncludeNSFW {
+		return false
+	}
+	libraries, err := svc.Repo.Library.List(c.Request.Context())
+	if err != nil {
+		return false
+	}
+	configured := map[string]struct{}{}
+	for _, id := range service.AdultLibraryIDs(c.Request.Context(), svc.Repo) {
+		configured[id] = struct{}{}
+	}
+	for _, library := range libraries {
+		_, explicitlyAdult := configured[library.ID]
+		if !explicitlyAdult && !service.LibraryLooksAdult(library) {
+			continue
+		}
+		if service.LibraryVisibleForUser(c.Request.Context(), svc.Repo, library, visibility) {
+			return true
+		}
+	}
+	return false
 }

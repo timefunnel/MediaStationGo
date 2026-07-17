@@ -38,6 +38,7 @@ func AllModels() []interface{} {
 		&Series{},
 		&Media{},
 		&Person{},
+		&AdultPerformerFollow{},
 		&PlaybackHistory{},
 		&Favorite{},
 		&Playlist{},

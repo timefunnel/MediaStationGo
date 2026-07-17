@@ -116,11 +116,11 @@ func (b *serviceContainerBuilder) initProviderServices() {
 	b.c.Fanart = NewFanartProvider(b.cfg, b.log)
 	b.c.RecognitionWords = NewRecognitionWordsService(b.log, b.repos)
 
-	adult := NewAdultProvider(b.log, b.c.APIConfig)
+	b.c.Adult = NewAdultProvider(b.log, b.c.APIConfig)
 	b.c.Scraper = NewScraperService(
 		b.cfg, b.log, b.repos,
 		b.c.TMDb, b.c.Bangumi, b.c.TheTVDB, b.c.Fanart,
-		b.c.WSHub, adult,
+		b.c.WSHub, b.c.Adult,
 	)
 	b.c.Scraper.SetRuntimeCache(b.c.Cache)
 	b.c.Scraper.SetDouban(b.c.Douban)

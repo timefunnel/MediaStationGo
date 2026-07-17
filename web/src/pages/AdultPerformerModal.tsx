@@ -1,0 +1,156 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Heart, LoaderCircle, X } from 'lucide-react'
+import toast from 'react-hot-toast'
+
+import { imageURL } from '../api/client'
+import { discoverAPI, type AdultPerformerFollow, type DiscoverItem } from '../api/discover'
+import { ContentRow } from './DiscoverContentRow'
+
+export function AdultPerformerModal({
+	item,
+	onClose,
+	onSelectWork,
+	onFollowChanged,
+}: {
+	item: DiscoverItem
+	onClose: () => void
+	onSelectWork: (item: DiscoverItem) => void
+	onFollowChanged: () => void
+}) {
+	const source = item.source || 'javdb'
+	const sourceID = item.provider_id || ''
+	const [follows, setFollows] = useState<AdultPerformerFollow[]>([])
+	const [works, setWorks] = useState<DiscoverItem[]>([])
+	const [page, setPage] = useState(1)
+	const [canNext, setCanNext] = useState(false)
+	const [loading, setLoading] = useState(true)
+	const [saving, setSaving] = useState(false)
+	const [error, setError] = useState('')
+	const follow = useMemo(
+		() => follows.find((entry) => entry.source === source && entry.source_id === sourceID),
+		[follows, source, sourceID],
+	)
+	const portrait = imageURL(item.poster_url, undefined, { maxWidth: 480, quality: 84, retryFailed: true })
+
+	useEffect(() => {
+		let cancelled = false
+		if (!sourceID) {
+			setLoading(false)
+			setError('演员来源信息不完整')
+			return
+		}
+		setLoading(true)
+		setError('')
+		Promise.all([discoverAPI.adultFollows(), discoverAPI.adultPerformerWorks(source, sourceID, page)])
+			.then(([nextFollows, result]) => {
+				if (cancelled) return
+				setFollows(nextFollows)
+				setWorks(result.items ?? [])
+				setCanNext(Boolean(result.has_next))
+			})
+			.catch((requestError) => {
+				if (cancelled) return
+				const message = (requestError as { response?: { data?: { error?: string } } })?.response?.data?.error
+				setError(message || '演员作品暂时无法加载')
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false)
+			})
+		return () => {
+			cancelled = true
+		}
+	}, [page, source, sourceID])
+
+	const toggleFollow = async () => {
+		if (!sourceID || saving) return
+		setSaving(true)
+		try {
+			if (follow) {
+				await discoverAPI.unfollowAdultPerformer(follow.id)
+				setFollows((current) => current.filter((entry) => entry.id !== follow.id))
+				toast.success('已取消关注')
+			} else {
+				const created = await discoverAPI.followAdultPerformer({
+					name: item.title,
+					source,
+					source_id: sourceID,
+					image_url: item.poster_url,
+				})
+				setFollows((current) => [...current, created])
+				toast.success('已关注该女优')
+			}
+			onFollowChanged()
+		} catch (requestError) {
+			const message = (requestError as { response?: { data?: { error?: string } } })?.response?.data?.error
+			toast.error(message || '关注操作失败')
+		} finally {
+			setSaving(false)
+		}
+	}
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-5">
+			<div className="max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-white/60 bg-white p-4 shadow-2xl sm:p-5">
+				<header className="mb-5 flex items-start justify-between gap-4">
+					<div>
+						<p className="text-xs font-semibold uppercase text-rose-500">JavDB 热门女优</p>
+						<h2 className="mt-1 text-2xl font-bold text-ink-600">{item.title}</h2>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						aria-label="关闭"
+						className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-ink-600"
+					>
+						<X size={18} />
+					</button>
+				</header>
+
+				<div className="grid gap-5 lg:grid-cols-[220px_1fr]">
+					<aside className="space-y-3">
+						<div className="aspect-[3/4] overflow-hidden rounded-lg bg-gray-100">
+							{portrait && <img src={portrait} alt={item.title} className="h-full w-full object-cover" />}
+						</div>
+						<button
+							type="button"
+							disabled={!sourceID || saving}
+							onClick={() => void toggleFollow()}
+							className={
+								'inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition disabled:opacity-50 ' +
+								(follow
+									? 'border-rose-300 bg-rose-50 text-rose-700'
+									: 'border-gray-200 bg-white text-ink-600 hover:border-rose-300 hover:text-rose-600')
+							}
+						>
+							{saving ? <LoaderCircle size={16} className="animate-spin" /> : <Heart size={16} fill={follow ? 'currentColor' : 'none'} />}
+							{follow ? '已关注' : '关注女优'}
+						</button>
+					</aside>
+
+					<div className="min-w-0">
+						{loading ? (
+							<div className="flex min-h-52 items-center justify-center gap-2 text-sm text-gray-500">
+								<LoaderCircle size={18} className="animate-spin" />
+								正在加载近期作品
+							</div>
+						) : error ? (
+							<div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{error}</div>
+						) : works.length === 0 ? (
+							<div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">暂无可展示作品</div>
+						) : (
+							<ContentRow
+								title="近期作品"
+								items={works}
+								page={page}
+								canNext={canNext}
+								priority
+								onPageChange={(delta) => setPage((current) => Math.max(1, current + delta))}
+								onSelect={onSelectWork}
+							/>
+						)}
+					</div>
+				</div>
+			</div>
+		</div>
+	)
+}

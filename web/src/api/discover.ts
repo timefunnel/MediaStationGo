@@ -24,12 +24,34 @@ export interface DiscoverItem extends Partial<Media> {
   in_library?: boolean
   media_id?: string
   library_id?: string
+	provider_url?: string
+	provider_id?: string
+	followed?: boolean
+	people?: DiscoverPerson[]
+}
+
+export interface DiscoverPerson {
+	name: string
+	image_url?: string
+	profile_url?: string
+	source?: string
+	source_id?: string
 }
 
 export interface DiscoverSection {
   key: string
   label: string
   provider?: string
+	group?: string
+}
+
+export interface AdultPerformerFollow {
+	id: string
+	name: string
+	source: string
+	source_id: string
+	image_url?: string
+	profile_url?: string
 }
 
 export interface DiscoverFeedMeta {
@@ -83,4 +105,20 @@ export const discoverAPI = {
         }
         return { items, meta }
       }),
+	adultFollows: () =>
+		api.get<{ items: AdultPerformerFollow[] }>('/discover/adult/follows').then((r) => r.data.items ?? []),
+	followAdultPerformer: (input: {
+		name: string
+		source: string
+		source_id: string
+		image_url?: string
+	}) => api.post<AdultPerformerFollow>('/discover/adult/follows', input).then((r) => r.data),
+	unfollowAdultPerformer: (id: string) => api.delete(`/discover/adult/follows/${id}`),
+	adultPerformerWorks: (source: string, sourceID: string, page = 1) =>
+		api
+			.get<{ items: DiscoverItem[]; page: number; has_next: boolean }>(
+				`/discover/adult/performers/${encodeURIComponent(source)}/${encodeURIComponent(sourceID)}/works`,
+				{ params: { page } },
+			)
+			.then((r) => r.data),
 }

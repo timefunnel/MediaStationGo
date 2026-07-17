@@ -56,6 +56,9 @@ func EnrichExternalMediaLibraryLinks(
 	seenTMDb, seenBangumi := map[int]struct{}{}, map[int]struct{}{}
 	seenDouban, seenTitle := map[string]struct{}{}, map[string]struct{}{}
 	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.MediaType), "person") {
+			continue
+		}
 		if item.TMDbID > 0 {
 			if _, ok := seenTMDb[item.TMDbID]; !ok {
 				seenTMDb[item.TMDbID] = struct{}{}
@@ -121,6 +124,9 @@ func EnrichExternalMediaLibraryLinks(
 		return
 	}
 	for index := range items {
+		if strings.EqualFold(strings.TrimSpace(items[index].MediaType), "person") {
+			continue
+		}
 		if row := bestLocalMediaLink(items[index], rows); row != nil {
 			items[index].InLibrary = true
 			items[index].LocalMediaCount = maxInt(items[index].LocalMediaCount, 1)

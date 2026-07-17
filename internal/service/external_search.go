@@ -40,6 +40,9 @@ type ExternalMediaResult struct {
 	Actors             []string         `json:"actors,omitempty"`
 	People             []PersonMetadata `json:"people,omitempty"`
 	NSFW               bool             `json:"nsfw,omitempty"`
+	ProviderURL        string           `json:"provider_url,omitempty"`
+	ProviderID         string           `json:"provider_id,omitempty"`
+	Followed           bool             `json:"followed,omitempty"`
 }
 
 // SearchExternalMedia fans out one normalized search intent to TMDb, Douban

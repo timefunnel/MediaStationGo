@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Heart, Info } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
@@ -179,6 +179,7 @@ function DiscoverCard({
 }) {
   const cardRef = useRef<HTMLButtonElement>(null)
   const source = discoverItemSource(item)
+	const isPerson = item.media_type === 'person'
   const imageCandidates = useMemo(
     () =>
       [item.poster_url, item.backdrop_url]
@@ -285,23 +286,36 @@ function DiscoverCard({
             已入库
           </div>
         )}
+		{isPerson && item.followed && (
+			<div className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-lg border border-rose-300/50 bg-rose-600/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+				<Heart size={10} fill="currentColor" />
+				已关注
+			</div>
+		)}
       </div>
       <div className="space-y-0.5 px-2.5 py-2">
         <p className="truncate text-xs font-medium text-ink-600 transition-colors group-hover:text-brand-500">
           {item.title}
         </p>
-        <p className="text-[11px] text-sand-500">
+		<p className={isPerson ? 'hidden' : 'text-[11px] text-sand-500'}>
           {[item.media_type, item.year && item.year > 0 ? item.year : ''].filter(Boolean).join(' · ') || '推荐'}
         </p>
-        <p className="flex items-center gap-1 pt-1 text-[10px] font-semibold text-brand-500">
+		{isPerson && <p className="text-[11px] text-sand-500">女优</p>}
+		<p className={isPerson ? 'hidden' : 'flex items-center gap-1 pt-1 text-[10px] font-semibold text-brand-500'}>
           <Info size={10} />
           {item.in_library && item.media_id ? '查看库内作品' : '详情 / 订阅'}
-        </p>
+		</p>
+		{isPerson && (
+			<p className="flex items-center gap-1 pt-1 text-[10px] font-semibold text-rose-600">
+				<Heart size={10} />
+				查看作品 / 关注
+			</p>
+		)}
       </div>
     </button>
   )
 }
 
 function discoverKey(item: DiscoverItem, index: number): string {
-  return `${item.source || 'source'}:${item.tmdb_id || item.douban_id || item.bangumi_id || item.title}:${index}`
+	return `${item.source || 'source'}:${item.provider_id || item.tmdb_id || item.douban_id || item.bangumi_id || item.title}:${index}`
 }

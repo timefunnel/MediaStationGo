@@ -42,3 +42,20 @@ func TestDiscoverSectionCacheExpires(t *testing.T) {
 		t.Fatalf("expired cache should miss, got %#v", got)
 	}
 }
+
+func TestDiscoverSectionCacheDeleteSection(t *testing.T) {
+	cache := NewDiscoverSectionCache(time.Hour)
+	cache.Set("adult_followed:user-1", 1, []ExternalMediaResult{{Title: "A"}})
+	cache.Set("adult_followed:user-1", 2, []ExternalMediaResult{{Title: "B"}})
+	cache.Set("adult_followed:user-2", 1, []ExternalMediaResult{{Title: "C"}})
+	cache.DeleteSection("adult_followed:user-1")
+	if _, ok := cache.Get("adult_followed:user-1", 1); ok {
+		t.Fatal("page 1 should be invalidated")
+	}
+	if _, ok := cache.Get("adult_followed:user-1", 2); ok {
+		t.Fatal("page 2 should be invalidated")
+	}
+	if _, ok := cache.Get("adult_followed:user-2", 1); !ok {
+		t.Fatal("another user's cache must remain")
+	}
+}

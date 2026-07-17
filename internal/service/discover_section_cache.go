@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +44,13 @@ func (d *DiscoverService) CachedSection(key string, page int) ([]ExternalMediaRe
 	return d.sectionCache.Get(key, page)
 }
 
+func (d *DiscoverService) ForgetSection(key string) {
+	if d == nil || d.sectionCache == nil {
+		return
+	}
+	d.sectionCache.DeleteSection(key)
+}
+
 func (c *DiscoverSectionCache) Set(key string, page int, items []ExternalMediaResult) {
 	if c == nil || key == "" || page < 1 || len(items) == 0 {
 		return
@@ -68,6 +76,20 @@ func (c *DiscoverSectionCache) Get(key string, page int) ([]ExternalMediaResult,
 	return cloneExternalMediaResults(entry.items), true
 }
 
+func (c *DiscoverSectionCache) DeleteSection(key string) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	prefix := strings.TrimSpace(key) + ":"
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for cacheKey := range c.entries {
+		if strings.HasPrefix(cacheKey, prefix) {
+			delete(c.entries, cacheKey)
+		}
+	}
+}
+
 func discoverSectionCacheKey(key string, page int) string {
 	return fmt.Sprintf("%s:%d", key, page)
 }
@@ -81,7 +103,18 @@ func cloneExternalMediaResults(items []ExternalMediaResult) []ExternalMediaResul
 		out[i].Languages = cloneStrings(item.Languages)
 		out[i].Countries = cloneStrings(item.Countries)
 		out[i].Genres = cloneStrings(item.Genres)
+		out[i].Actors = cloneStrings(item.Actors)
+		out[i].People = clonePersonMetadata(item.People)
 	}
+	return out
+}
+
+func clonePersonMetadata(items []PersonMetadata) []PersonMetadata {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]PersonMetadata, len(items))
+	copy(out, items)
 	return out
 }
 

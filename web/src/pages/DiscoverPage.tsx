@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { discoverAPI, type DiscoverItem, type DiscoverSection } from '../api/discover'
+import { AdultPerformerModal } from './AdultPerformerModal'
 import { DiscoverSkeleton } from './DiscoverContentRow'
 import { DiscoverDetailModal } from './DiscoverDetailModal'
 import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './DiscoverPageSections'
@@ -204,7 +205,16 @@ export function DiscoverPage() {
         />
       )}
 
-      {activeItem && (
+		{activeItem?.media_type === 'person' && (
+			<AdultPerformerModal
+				item={activeItem}
+				onClose={() => setActiveItem(null)}
+				onSelectWork={setActiveItem}
+				onFollowChanged={() => setReloadSeq((current) => current + 1)}
+			/>
+		)}
+
+		{activeItem && activeItem.media_type !== 'person' && (
         <DiscoverDetailModal
           item={activeItem}
           onClose={() => setActiveItem(null)}

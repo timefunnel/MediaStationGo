@@ -28,6 +28,7 @@ type Container struct {
 	Transcoder          *TranscoderService
 	FFprobe             *FFprobeService
 	TMDb                *TMDbProvider
+	Adult               *AdultProvider
 	Bangumi             *BangumiProvider
 	TheTVDB             *TheTVDBProvider
 	Fanart              *FanartProvider
