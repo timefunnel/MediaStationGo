@@ -1,18 +1,11 @@
 import { api } from './client'
 
-export type MediaTitleRelation = 'standalone' | 'version' | 'part'
-
 export interface MediaTitleCleanupSuggestion {
   media_id: string
   current_title?: string
   source_directory?: string
   filename?: string
   title: string
-  relation: MediaTitleRelation
-  group_key?: string
-  existing_group_key?: string
-  group_title?: string
-  part_index?: number
   year?: number
   confidence: number
   reason?: string
@@ -30,7 +23,7 @@ export interface MediaTitleCleanupJob {
   id: string
   library_id: string
   status: 'queued' | 'running' | 'completed' | 'failed'
-  stage: 'queued' | 'preparing' | 'cleaning' | 'grouping' | 'validating' | 'completed' | 'failed'
+  stage: 'queued' | 'preparing' | 'cleaning' | 'validating' | 'completed' | 'failed'
   message: string
   progress: number
   completed_groups: number

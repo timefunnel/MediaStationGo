@@ -1,4 +1,4 @@
-import { Globe, WandSparkles } from 'lucide-react'
+import { GitMerge, Globe, WandSparkles } from 'lucide-react'
 
 import type { Library } from '../types'
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
@@ -15,11 +15,13 @@ type LibraryPageHeaderProps = {
   scraping: boolean
   repairing: boolean
   canCleanTitles: boolean
+  canManageAggregation: boolean
   onScrapeEpisodeArtworkChange: (checked: boolean) => void
   onScan: () => void
   onScrape: () => void
   onRepairRescrape: () => void
   onCleanTitles: () => void
+  onManageAggregation: () => void
   onResourceSearch: () => void
 }
 
@@ -34,11 +36,13 @@ export function LibraryPageHeader({
   scraping,
   repairing,
   canCleanTitles,
+  canManageAggregation,
   onScrapeEpisodeArtworkChange,
   onScan,
   onScrape,
   onRepairRescrape,
   onCleanTitles,
+  onManageAggregation,
   onResourceSearch,
 }: LibraryPageHeaderProps) {
   const displayPath = library ? libraryDisplayPath(library.path) : ''
@@ -91,6 +95,12 @@ export function LibraryPageHeader({
             <button type="button" onClick={onCleanTitles} className="btn-outline">
               <WandSparkles size={16} />
               AI 清洗标题
+            </button>
+          )}
+          {canManageAggregation && (
+            <button type="button" onClick={onManageAggregation} className="btn-outline">
+              <GitMerge size={16} />
+              手动聚合
             </button>
           )}
           </>

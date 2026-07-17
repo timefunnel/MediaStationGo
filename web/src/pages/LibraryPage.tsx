@@ -19,6 +19,7 @@ import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { LibraryActorFilter } from './LibraryActorFilter'
 import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
 import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
+import { ManualMediaAggregationDialog } from '../components/ManualMediaAggregationDialog'
 
 export function LibraryPage() {
   const { id = '' } = useParams()
@@ -34,6 +35,7 @@ export function LibraryPage() {
   const [resourceInitialQuery, setResourceInitialQuery] = useState('')
   const [resourceTaskID, setResourceTaskID] = useState('')
   const [titleCleanupOpen, setTitleCleanupOpen] = useState(false)
+  const [aggregationOpen, setAggregationOpen] = useState(false)
 
   // 剧集模式：选中某个剧集后展开详情
   const [selectedSeries, setSelectedSeries] = useState<SeriesCard | null>(null)
@@ -168,11 +170,13 @@ export function LibraryPage() {
         scraping={scraping}
         repairing={repairing}
         canCleanTitles={role === 'admin' && library?.title_mode === 'filename'}
+        canManageAggregation={role === 'admin' && !isSeriesLibrary}
         onScrapeEpisodeArtworkChange={setScrapeEpisodeArtwork}
         onScan={handleScan}
         onScrape={handleScrape}
         onRepairRescrape={handleRepairRescrape}
         onCleanTitles={() => setTitleCleanupOpen(true)}
+        onManageAggregation={() => setAggregationOpen(true)}
         onResourceSearch={() => {
           setResourceInitialQuery('')
           setResourceTaskID('')
@@ -264,6 +268,15 @@ export function LibraryPage() {
         libraryID={id}
         libraryName={library?.name ?? '媒体库'}
         onClose={() => setTitleCleanupOpen(false)}
+        onApplied={reloadCurrentLibrary}
+      />
+
+      <ManualMediaAggregationDialog
+        open={aggregationOpen}
+        libraryID={id}
+        libraryName={library?.name ?? '媒体库'}
+        items={items}
+        onClose={() => setAggregationOpen(false)}
         onApplied={reloadCurrentLibrary}
       />
     </div>

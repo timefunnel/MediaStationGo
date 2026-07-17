@@ -12,12 +12,7 @@ import (
 )
 
 const (
-	MediaTitleRelationStandalone = "standalone"
-	MediaTitleRelationVersion    = "version"
-	MediaTitleRelationPart       = "part"
-
 	mediaTitleCleanupStageCleaning = "cleaning"
-	mediaTitleCleanupStageGrouping = "grouping"
 	mediaTitleCleanupMaxAttempts   = 2
 )
 
@@ -31,58 +26,27 @@ type MediaTitleCleanupSource struct {
 	Filename        string `json:"filename"`
 }
 
-type MediaTitleCleanupExistingItem struct {
-	MediaID   string `json:"media_id"`
-	Title     string `json:"title"`
-	Year      int    `json:"year,omitempty"`
-	Filename  string `json:"filename,omitempty"`
-	PartIndex int    `json:"part_index,omitempty"`
-}
-
-type MediaTitleCleanupExistingGroup struct {
-	Relation   string                          `json:"relation"`
-	GroupKey   string                          `json:"group_key"`
-	GroupTitle string                          `json:"group_title,omitempty"`
-	Items      []MediaTitleCleanupExistingItem `json:"items"`
-}
-
 type MediaTitleCleanupGroup struct {
-	SourceDirectory string                           `json:"source_directory"`
-	Items           []MediaTitleCleanupSource        `json:"items"`
-	ExistingGroups  []MediaTitleCleanupExistingGroup `json:"existing_groups,omitempty"`
-	DirectoryKey    string                           `json:"-"`
+	SourceDirectory string                    `json:"source_directory"`
+	Items           []MediaTitleCleanupSource `json:"items"`
+	DirectoryKey    string                    `json:"-"`
 }
 
 type MediaTitleCleanupSuggestion struct {
-	MediaID          string  `json:"media_id"`
-	CurrentTitle     string  `json:"current_title,omitempty"`
-	SourceDirectory  string  `json:"source_directory,omitempty"`
-	Filename         string  `json:"filename,omitempty"`
-	Title            string  `json:"title"`
-	Relation         string  `json:"relation"`
-	GroupKey         string  `json:"group_key,omitempty"`
-	ExistingGroupKey string  `json:"existing_group_key,omitempty"`
-	GroupTitle       string  `json:"group_title,omitempty"`
-	PartIndex        int     `json:"part_index,omitempty"`
-	Year             int     `json:"year,omitempty"`
-	Confidence       float64 `json:"confidence"`
-	Reason           string  `json:"reason,omitempty"`
+	MediaID         string  `json:"media_id"`
+	CurrentTitle    string  `json:"current_title,omitempty"`
+	SourceDirectory string  `json:"source_directory,omitempty"`
+	Filename        string  `json:"filename,omitempty"`
+	Title           string  `json:"title"`
+	Year            int     `json:"year,omitempty"`
+	Confidence      float64 `json:"confidence"`
+	Reason          string  `json:"reason,omitempty"`
 }
 
 type mediaTitleNormalization struct {
 	MediaID    string
 	Title      string
 	Year       int
-	Confidence float64
-	Reason     string
-}
-
-type mediaTitleRelationDecision struct {
-	MediaID    string
-	Relation   string
-	GroupKey   string
-	GroupTitle string
-	PartIndex  int
 	Confidence float64
 	Reason     string
 }
@@ -99,35 +63,12 @@ type aiTitleNormalizationResponse struct {
 	Items *[]aiTitleNormalizationItem `json:"items"`
 }
 
-type aiTitleRelationItem struct {
-	MediaID    string   `json:"media_id"`
-	Relation   string   `json:"relation"`
-	GroupKey   *string  `json:"group_key,omitempty"`
-	GroupTitle *string  `json:"group_title,omitempty"`
-	PartIndex  *int     `json:"part_index,omitempty"`
-	Confidence *float64 `json:"confidence"`
-	Reason     string   `json:"reason"`
-}
-
-type aiTitleRelationResponse struct {
-	Items *[]aiTitleRelationItem `json:"items"`
-}
-
-type mediaTitleGroupingCandidate struct {
-	MediaID           string `json:"media_id"`
-	StandardizedTitle string `json:"standardized_title"`
-	Year              int    `json:"year"`
-	SourceDirectory   string `json:"source_directory"`
-	DirectoryChain    string `json:"directory_chain"`
-	Filename          string `json:"filename"`
-}
-
 func (a *AIService) CleanMediaTitles(ctx context.Context, groups []MediaTitleCleanupGroup) ([]MediaTitleCleanupSuggestion, error) {
 	return a.CleanMediaTitlesWithProgress(ctx, groups, nil)
 }
 
-// CleanMediaTitlesWithProgress first normalizes every title, waits for the
-// whole stage to pass validation, and only then classifies relationships.
+// CleanMediaTitlesWithProgress only normalizes titles and years. Media
+// relationships are managed explicitly by the manual grouping API.
 func (a *AIService) CleanMediaTitlesWithProgress(
 	ctx context.Context,
 	groups []MediaTitleCleanupGroup,
@@ -141,7 +82,7 @@ func (a *AIService) CleanMediaTitlesWithProgress(
 		return nil, ErrAITitleCleanupUnavailable
 	}
 
-	normalizedBatches, err := runOrderedTitleCleanupStage(ctx, len(groups), func(stageCtx context.Context, index int) ([]mediaTitleNormalization, error) {
+	batches, err := runOrderedTitleCleanupStage(ctx, len(groups), func(stageCtx context.Context, index int) ([]mediaTitleNormalization, error) {
 		return a.normalizeMediaTitleBatch(stageCtx, runtime, groups[index])
 	}, func(completed, total int) {
 		if onProgress != nil {
@@ -153,7 +94,7 @@ func (a *AIService) CleanMediaTitlesWithProgress(
 	}
 
 	normalizedByID := make(map[string]mediaTitleNormalization)
-	for _, batch := range normalizedBatches {
+	for _, batch := range batches {
 		for _, item := range batch {
 			if _, exists := normalizedByID[item.MediaID]; exists {
 				return nil, fmt.Errorf("AI 标题清洗重复返回 media_id: %s", item.MediaID)
@@ -164,28 +105,21 @@ func (a *AIService) CleanMediaTitlesWithProgress(
 	if len(normalizedByID) != mediaTitleCleanupItemCount(groups) {
 		return nil, fmt.Errorf("AI 标题清洗结果数量不完整: got=%d want=%d", len(normalizedByID), mediaTitleCleanupItemCount(groups))
 	}
-	if onProgress != nil {
-		onProgress(mediaTitleCleanupStageGrouping, 0, len(groups))
-	}
-
-	relationBatches, err := runOrderedTitleCleanupStage(ctx, len(groups), func(stageCtx context.Context, index int) ([]mediaTitleRelationDecision, error) {
-		return a.classifyMediaTitleBatch(stageCtx, runtime, groups[index], normalizedByID)
-	}, func(completed, total int) {
-		if onProgress != nil {
-			onProgress(mediaTitleCleanupStageGrouping, completed, total)
-		}
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	out := make([]MediaTitleCleanupSuggestion, 0, len(normalizedByID))
-	for groupIndex, decisions := range relationBatches {
-		items, buildErr := buildMediaTitleCleanupGroupSuggestions(groupIndex, groups[groupIndex], normalizedByID, decisions)
-		if buildErr != nil {
-			return nil, buildErr
+	for _, group := range groups {
+		for _, source := range group.Items {
+			normalized, ok := normalizedByID[source.MediaID]
+			if !ok {
+				return nil, fmt.Errorf("AI 标题清洗缺少 media_id: %s", source.MediaID)
+			}
+			out = append(out, MediaTitleCleanupSuggestion{
+				MediaID: source.MediaID, CurrentTitle: source.CurrentTitle,
+				SourceDirectory: source.SourceDirectory, Filename: source.Filename,
+				Title: normalized.Title, Year: normalized.Year,
+				Confidence: normalized.Confidence, Reason: normalized.Reason,
+			})
 		}
-		out = append(out, items...)
 	}
 	return validateMediaTitleCleanupSuggestions(groups, out)
 }
@@ -265,19 +199,19 @@ func (a *AIService) normalizeMediaTitleBatch(
 	if err != nil {
 		return nil, err
 	}
-	const system = `你是媒体文件标题标准化器。只做标题和年份清洗，不判断文件之间的关系。
+	const system = `你是媒体文件标题标准化器。只做标题和年份清洗，不判断、推测或输出文件之间的聚合关系。
 只能依据输入的目录名、目录层级、当前标题和文件名，不得虚构作品、演员或外部元数据。
 标题优先提取有语义的中文描述：保留人物或作品名、场景、情节、主题等能区分内容的中文短语，不得只剩下人名、品牌名或一串数字。
 只删除站点域名、引流前后缀、画质、编码、发布组、“AI增强”等制作标记和无意义分隔符。不要把有语义的中文内容描述当成噪声删除。
 数字只是弱证据：当前标题中的数字、“-数字”、括号数字或文件名尾号，不得单独解释为年份、集数或分段。只有原始文字明确出现“第N集/第N段/Part N/CD N/上中下”等语义标记时，才在标题中保留该序号。
 标题开头的“孤立数字 + 空格 + 中文描述”通常是来源排序号，应删除这个孤立数字；但“3月”、“12月新作”、“第3季”等数字与语义单位直接相连的内容必须保留。例如“22 8月新品，极品母狗…”应从“8月新品，极品母狗…”开始。
 当前标题可能是旧清洗结果，如果它的分段数字只来自“mp4_ (8)”这类无语义文件名，必须忽略该数字，不得继续输出“第8段”。
-文件名末尾的裸数字可以作为关系聚合时的弱顺序线索，但不得在标题清洗阶段改写成“第N段”。例如“我与护士小母狗2.mp4”和“我与护士小母狗3.mp4”可以在后续关系阶段判断顺序，但清洗标题必须去掉旧 current_title 中的“第2段/第3段”；“无套内岄18岁小嫩逼-10.mp4”也不得输出“第10段”。
+文件名末尾的裸数字不得在标题清洗阶段改写成“第N段”。例如“我与护士小母狗2.mp4”和“我与护士小母狗3.mp4”都不能仅凭尾号生成分段标题；“无套内射18岁小嫩逼-10.mp4”也不得输出“第10段”。
 当前标题只是弱参考，可能来自过去的过度清洗。如果 source_directory 或 filename 包含更丰富的中文描述，不得直接复制较短的 current_title，必须从原始描述重建标题。
 对于中文描述丰富的资源，清洗后至少保留“人物或主体 + 核心情节/场景 + 一个有辨识度的特征”，不得缩成“人名 + 极短动作”。例如“小敏儿 粉色性感连衣裙小学妹以性换租”不得只输出“小敏儿 以性换租”。
 文件名无语义而目录名有明确中文描述时，以描述性目录名为标题基础。但广告、药品推广、引流等文件名本身已有独立语义时，不得用父目录影片标题覆盖它。
 例如：“玩偶姐姐hongkongdoll-111最新会员私信短片 穿着可爱的黑色JK超诱惑黑丝”应提取为“玩偶姐姐 穿着可爱的黑色JK超诱惑黑丝”，不得输出“第111段”。
-每个 media_id 必须返回且只能返回一次。year 不确定时返回 0。只输出纯 JSON。
+每个 media_id 必须返回且只能返回一次。year 不确定时返回 0。不得输出 relation、group_key、group_title、part_index 等聚合字段。只输出纯 JSON。
 格式：{"items":[{"media_id":"...","title":"...","year":0,"confidence":0.0,"reason":"简短依据"}]}`
 	requestSystem := system
 	requestUser := string(payload)
@@ -352,199 +286,6 @@ func parseMediaTitleNormalizationResponse(group MediaTitleCleanupGroup, raw stri
 	return out, nil
 }
 
-func (a *AIService) classifyMediaTitleBatch(
-	ctx context.Context,
-	runtime aiRuntimeConfig,
-	group MediaTitleCleanupGroup,
-	normalizedByID map[string]mediaTitleNormalization,
-) ([]mediaTitleRelationDecision, error) {
-	candidates := make([]mediaTitleGroupingCandidate, 0, len(group.Items))
-	for _, source := range group.Items {
-		normalized, ok := normalizedByID[source.MediaID]
-		if !ok {
-			return nil, fmt.Errorf("关系聚合缺少已清洗标题: %s", source.MediaID)
-		}
-		candidates = append(candidates, mediaTitleGroupingCandidate{
-			MediaID: source.MediaID, StandardizedTitle: normalized.Title, Year: normalized.Year,
-			SourceDirectory: source.SourceDirectory, DirectoryChain: source.DirectoryChain, Filename: source.Filename,
-		})
-	}
-	payload, err := json.Marshal(map[string]any{
-		"source_directory": group.SourceDirectory,
-		"candidates":       candidates,
-		"existing_groups":  group.ExistingGroups,
-	})
-	if err != nil {
-		return nil, err
-	}
-	const system = `你是媒体关系聚合器。输入中的 candidates 已完成标题标准化，你不得修改或重新输出标题、年份。
-只判断每个 candidate 与同目录候选或 existing_groups 的关系：
-- standalone：独立作品；
-- version：同一完整作品的不同清晰度、编码或发行版本，组内标准标题和年份必须相同；
-- part：同一作品的连续分段、章节或花絮，group_title 为共同作品名。新组有 N 个文件时，part_index 必须恰好为 1..N 且每个序号只出现一次；加入历史组时，历史项与新项的 part_index 合集也必须从 1 开始连续、无重复、无跳号。
-数字后缀、括号数字和当前标题中的“第N段”都只是弱证据。若原始文件名只是“mp4_ (2)”、“mp4_ (8)”等副本编号，不得直接把 2、8 当作 part_index；已确认属于同一作品时，应按 candidates 的稳定顺序连续编为 1..N，不得因副本编号跳号而拆成 standalone。
-version 只适用于画质、编码、片源或发行版本差异。广告、药品推广、引流短片或其他与影片内容无关的文件，必须使用 standalone，不得作为影片的 version 或 part。
-existing_groups 是只读的历史聚合结果。候选属于历史组时，必须原样复用该组 group_key；不得为同一作品创建第二个组。
-新组只有至少两个 candidate 明确属于同一作品时才能建立。无法确定时使用 standalone 并降低 confidence。
-每个 candidate media_id 必须返回且只能返回一次。只输出纯 JSON，不得输出 title 或 year 字段。
-格式：{"items":[{"media_id":"...","relation":"standalone|version|part","group_key":"仅 version/part 填写","group_title":"仅 part 填写","part_index":1,"confidence":0.0,"reason":"简短依据"}]}`
-	requestSystem := system
-	requestUser := string(payload)
-	var firstValidationErr error
-	for attempt := 0; attempt < mediaTitleCleanupMaxAttempts; attempt++ {
-		raw, completeErr := a.completeBatch(ctx, runtime, requestSystem, requestUser, 0)
-		if completeErr != nil {
-			return nil, completeErr
-		}
-		items, validationErr := parseMediaTitleRelationResponse(group, raw)
-		if validationErr == nil {
-			_, validationErr = validateMediaTitleRelationBatch(group, normalizedByID, items)
-		}
-		if validationErr == nil {
-			return items, nil
-		}
-		if firstValidationErr == nil {
-			firstValidationErr = validationErr
-		}
-		if attempt+1 >= mediaTitleCleanupMaxAttempts {
-			return nil, mediaTitleCleanupRetryError("关系聚合", firstValidationErr, validationErr)
-		}
-		requestSystem, requestUser, err = mediaTitleCleanupCorrectionRequest(system, string(payload), raw, validationErr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return nil, errors.New("AI 关系聚合未生成有效结果")
-}
-
-func parseMediaTitleRelationResponse(group MediaTitleCleanupGroup, raw string) ([]mediaTitleRelationDecision, error) {
-	var response aiTitleRelationResponse
-	if err := decodeStrictAIJSON(raw, &response); err != nil {
-		return nil, fmt.Errorf("AI 关系聚合返回了非法 JSON: %w", err)
-	}
-	if response.Items == nil {
-		return nil, errors.New("AI 关系聚合缺少 items")
-	}
-	expected := make(map[string]struct{}, len(group.Items))
-	for _, source := range group.Items {
-		expected[source.MediaID] = struct{}{}
-	}
-	if len(*response.Items) != len(expected) {
-		return nil, fmt.Errorf("AI 关系聚合结果数量不完整: got=%d want=%d", len(*response.Items), len(expected))
-	}
-	seen := make(map[string]struct{}, len(expected))
-	out := make([]mediaTitleRelationDecision, 0, len(expected))
-	for _, wire := range *response.Items {
-		id := strings.TrimSpace(wire.MediaID)
-		if _, ok := expected[id]; !ok {
-			return nil, fmt.Errorf("AI 关系聚合返回了未知 media_id: %s", id)
-		}
-		if _, exists := seen[id]; exists {
-			return nil, fmt.Errorf("AI 关系聚合重复返回 media_id: %s", id)
-		}
-		seen[id] = struct{}{}
-		if wire.Confidence == nil || *wire.Confidence < 0 || *wire.Confidence > 1 {
-			return nil, fmt.Errorf("AI 关系聚合返回了无效置信度: %s", id)
-		}
-		item := mediaTitleRelationDecision{
-			MediaID: id, Relation: strings.ToLower(strings.TrimSpace(wire.Relation)),
-			Confidence: *wire.Confidence, Reason: strings.TrimSpace(wire.Reason),
-		}
-		if wire.GroupKey != nil {
-			item.GroupKey = strings.ToLower(strings.TrimSpace(*wire.GroupKey))
-		}
-		if wire.GroupTitle != nil {
-			item.GroupTitle = strings.Join(strings.Fields(strings.TrimSpace(*wire.GroupTitle)), " ")
-		}
-		if wire.PartIndex != nil {
-			item.PartIndex = *wire.PartIndex
-		}
-		switch item.Relation {
-		case MediaTitleRelationStandalone:
-			if item.GroupKey != "" || item.GroupTitle != "" || item.PartIndex != 0 {
-				return nil, fmt.Errorf("AI 关系聚合的 standalone 携带了分组字段: %s", id)
-			}
-		case MediaTitleRelationVersion:
-			if item.GroupKey == "" || item.GroupTitle != "" || item.PartIndex != 0 {
-				return nil, fmt.Errorf("AI 关系聚合的 version 字段无效: %s", id)
-			}
-		case MediaTitleRelationPart:
-			if item.GroupKey == "" || item.GroupTitle == "" || item.PartIndex <= 0 {
-				return nil, fmt.Errorf("AI 关系聚合的 part 缺少有效分组或序号: %s", id)
-			}
-		default:
-			return nil, fmt.Errorf("AI 关系聚合返回了未知关系: %s", item.Relation)
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-func validateMediaTitleRelationBatch(
-	group MediaTitleCleanupGroup,
-	normalizedByID map[string]mediaTitleNormalization,
-	decisions []mediaTitleRelationDecision,
-) ([]MediaTitleCleanupSuggestion, error) {
-	items, err := buildMediaTitleCleanupGroupSuggestions(-1, group, normalizedByID, decisions)
-	if err != nil {
-		return nil, err
-	}
-	return validateMediaTitleCleanupSuggestions([]MediaTitleCleanupGroup{group}, items)
-}
-
-func buildMediaTitleCleanupGroupSuggestions(
-	groupIndex int,
-	group MediaTitleCleanupGroup,
-	normalizedByID map[string]mediaTitleNormalization,
-	decisions []mediaTitleRelationDecision,
-) ([]MediaTitleCleanupSuggestion, error) {
-	sources := make(map[string]MediaTitleCleanupSource, len(group.Items))
-	existingKeys := make(map[string]string, len(group.ExistingGroups))
-	for _, source := range group.Items {
-		sources[source.MediaID] = source
-	}
-	for _, existing := range group.ExistingGroups {
-		existingKeys[existing.Relation+"\x00"+strings.ToLower(strings.TrimSpace(existing.GroupKey))] = existing.GroupKey
-	}
-	out := make([]MediaTitleCleanupSuggestion, 0, len(decisions))
-	for _, decision := range decisions {
-		normalized, ok := normalizedByID[decision.MediaID]
-		if !ok {
-			return nil, fmt.Errorf("AI 关系聚合返回了未知 media_id: %s", decision.MediaID)
-		}
-		source, ok := sources[decision.MediaID]
-		if !ok {
-			return nil, fmt.Errorf("AI 关系聚合返回了非当前目录 media_id: %s", decision.MediaID)
-		}
-		groupKey := strings.ToLower(strings.TrimSpace(decision.GroupKey))
-		existingGroupKey := ""
-		if groupKey != "" {
-			if persisted, exists := existingKeys[decision.Relation+"\x00"+groupKey]; exists {
-				groupKey = persisted
-				existingGroupKey = persisted
-			} else if groupIndex >= 0 {
-				groupKey = fmt.Sprintf("g%d:%s", groupIndex, groupKey)
-			}
-		}
-		out = append(out, MediaTitleCleanupSuggestion{
-			MediaID:          decision.MediaID,
-			CurrentTitle:     source.CurrentTitle,
-			SourceDirectory:  source.SourceDirectory,
-			Filename:         source.Filename,
-			Title:            normalized.Title,
-			Relation:         decision.Relation,
-			GroupKey:         groupKey,
-			ExistingGroupKey: existingGroupKey,
-			GroupTitle:       decision.GroupTitle,
-			PartIndex:        decision.PartIndex,
-			Year:             normalized.Year,
-			Confidence:       minFloat64(normalized.Confidence, decision.Confidence),
-			Reason:           joinMediaTitleCleanupReasons(normalized.Reason, decision.Reason),
-		})
-	}
-	return out, nil
-}
-
 func mediaTitleCleanupCorrectionRequest(system, originalInput, previousOutput string, validationErr error) (string, string, error) {
 	var input any
 	if err := json.Unmarshal([]byte(originalInput), &input); err != nil {
@@ -603,21 +344,17 @@ func decodeStrictAIJSON(raw string, target any) error {
 func validateMediaTitleCleanupSuggestions(groups []MediaTitleCleanupGroup, suggestions []MediaTitleCleanupSuggestion) ([]MediaTitleCleanupSuggestion, error) {
 	expected := make(map[string]MediaTitleCleanupSource)
 	order := make(map[string]int)
-	existing := make(map[string]MediaTitleCleanupExistingGroup)
 	for _, group := range groups {
 		for _, item := range group.Items {
-			if strings.TrimSpace(item.MediaID) == "" {
+			id := strings.TrimSpace(item.MediaID)
+			if id == "" {
 				return nil, errors.New("AI 标题清洗输入包含空 media_id")
 			}
-			if _, duplicate := expected[item.MediaID]; duplicate {
-				return nil, fmt.Errorf("AI 标题清洗输入重复 media_id: %s", item.MediaID)
+			if _, duplicate := expected[id]; duplicate {
+				return nil, fmt.Errorf("AI 标题清洗输入重复 media_id: %s", id)
 			}
-			order[item.MediaID] = len(order)
-			expected[item.MediaID] = item
-		}
-		for _, contextGroup := range group.ExistingGroups {
-			key := contextGroup.Relation + "\x00" + strings.ToLower(strings.TrimSpace(contextGroup.GroupKey))
-			existing[key] = contextGroup
+			order[id] = len(order)
+			expected[id] = item
 		}
 	}
 	if len(suggestions) != len(expected) {
@@ -625,11 +362,10 @@ func validateMediaTitleCleanupSuggestions(groups []MediaTitleCleanupGroup, sugge
 	}
 
 	seen := make(map[string]struct{}, len(suggestions))
-	versionGroups := map[string][]MediaTitleCleanupSuggestion{}
-	partGroups := map[string][]MediaTitleCleanupSuggestion{}
 	for i := range suggestions {
 		item := &suggestions[i]
-		source, ok := expected[strings.TrimSpace(item.MediaID)]
+		item.MediaID = strings.TrimSpace(item.MediaID)
+		source, ok := expected[item.MediaID]
 		if !ok {
 			return nil, fmt.Errorf("AI 标题清洗返回了未知 media_id: %s", item.MediaID)
 		}
@@ -641,36 +377,6 @@ func validateMediaTitleCleanupSuggestions(groups []MediaTitleCleanupGroup, sugge
 		if item.Title == "" || len([]rune(item.Title)) > 255 {
 			return nil, fmt.Errorf("AI 标题清洗返回了无效标题: %s", item.MediaID)
 		}
-		item.Relation = strings.ToLower(strings.TrimSpace(item.Relation))
-		item.GroupKey = strings.ToLower(strings.TrimSpace(item.GroupKey))
-		item.ExistingGroupKey = strings.ToLower(strings.TrimSpace(item.ExistingGroupKey))
-		switch item.Relation {
-		case MediaTitleRelationStandalone:
-			if item.GroupKey != "" || item.ExistingGroupKey != "" || item.GroupTitle != "" || item.PartIndex != 0 {
-				return nil, fmt.Errorf("AI 标题清洗的 standalone 携带了分组字段: %s", item.MediaID)
-			}
-		case MediaTitleRelationVersion:
-			if item.GroupKey == "" || item.GroupTitle != "" || item.PartIndex != 0 {
-				return nil, fmt.Errorf("AI 标题清洗的 version 字段无效: %s", item.MediaID)
-			}
-			versionGroups[item.GroupKey] = append(versionGroups[item.GroupKey], *item)
-		case MediaTitleRelationPart:
-			item.GroupTitle = strings.Join(strings.Fields(strings.TrimSpace(item.GroupTitle)), " ")
-			if item.GroupKey == "" || item.GroupTitle == "" || item.PartIndex <= 0 {
-				return nil, fmt.Errorf("AI 标题清洗的 part 缺少有效分组或序号: %s", item.MediaID)
-			}
-			partGroups[item.GroupKey] = append(partGroups[item.GroupKey], *item)
-		default:
-			return nil, fmt.Errorf("AI 标题清洗返回了未知关系: %s", item.Relation)
-		}
-		if item.ExistingGroupKey != "" {
-			if item.ExistingGroupKey != item.GroupKey {
-				return nil, fmt.Errorf("AI 标题清洗的历史组键不一致: %s", item.MediaID)
-			}
-			if _, ok := existing[item.Relation+"\x00"+item.ExistingGroupKey]; !ok {
-				return nil, fmt.Errorf("AI 标题清洗引用了未知历史组: %s", item.MediaID)
-			}
-		}
 		if item.Year < 0 || item.Year > 2100 {
 			return nil, fmt.Errorf("AI 标题清洗返回了无效年份: %s", item.MediaID)
 		}
@@ -681,58 +387,6 @@ func validateMediaTitleCleanupSuggestions(groups []MediaTitleCleanupGroup, sugge
 		item.CurrentTitle = source.CurrentTitle
 		item.SourceDirectory = source.SourceDirectory
 		item.Filename = source.Filename
-	}
-
-	for key, items := range versionGroups {
-		contextGroup, hasExisting := existing[MediaTitleRelationVersion+"\x00"+key]
-		if len(items) < 2 && !hasExisting {
-			return nil, fmt.Errorf("AI 标题清洗的 version 分组只有一个文件: %s", key)
-		}
-		title, year := items[0].Title, items[0].Year
-		if hasExisting && len(contextGroup.Items) > 0 {
-			title, year = contextGroup.Items[0].Title, contextGroup.Items[0].Year
-		}
-		for _, item := range items {
-			if item.Title != title || item.Year != year {
-				return nil, fmt.Errorf("AI 标题清洗的 version 分组标题或年份不一致: %s", key)
-			}
-		}
-	}
-	for key, items := range partGroups {
-		contextGroup, hasExisting := existing[MediaTitleRelationPart+"\x00"+key]
-		total := len(items)
-		indices := make(map[int]struct{}, len(items))
-		groupTitle := items[0].GroupTitle
-		year := items[0].Year
-		if hasExisting {
-			total += len(contextGroup.Items)
-			groupTitle = contextGroup.GroupTitle
-			if len(contextGroup.Items) > 0 {
-				year = contextGroup.Items[0].Year
-			}
-			for _, contextItem := range contextGroup.Items {
-				if contextItem.PartIndex > 0 {
-					indices[contextItem.PartIndex] = struct{}{}
-				}
-			}
-		}
-		if total < 2 {
-			return nil, fmt.Errorf("AI 标题清洗的 part 分组只有一个文件: %s", key)
-		}
-		for _, item := range items {
-			if item.GroupTitle != groupTitle || item.Year != year {
-				return nil, fmt.Errorf("AI 标题清洗的 part 分组标题或年份不一致: %s", key)
-			}
-			if _, exists := indices[item.PartIndex]; exists {
-				return nil, fmt.Errorf("AI 标题清洗的 part 分组序号重复: %s", key)
-			}
-			indices[item.PartIndex] = struct{}{}
-		}
-		for index := 1; index <= total; index++ {
-			if _, ok := indices[index]; !ok {
-				return nil, fmt.Errorf("AI 标题清洗的 part 分组序号不连续: %s", key)
-			}
-		}
 	}
 	sort.SliceStable(suggestions, func(i, j int) bool {
 		return order[suggestions[i].MediaID] < order[suggestions[j].MediaID]
@@ -755,24 +409,4 @@ func mediaTitleCleanupSourceOrder(items []MediaTitleCleanupSource, mediaID strin
 		}
 	}
 	return len(items)
-}
-
-func minFloat64(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func joinMediaTitleCleanupReasons(titleReason, relationReason string) string {
-	titleReason = strings.TrimSpace(titleReason)
-	relationReason = strings.TrimSpace(relationReason)
-	switch {
-	case titleReason == "":
-		return relationReason
-	case relationReason == "":
-		return titleReason
-	default:
-		return "标题：" + titleReason + "；关系：" + relationReason
-	}
 }

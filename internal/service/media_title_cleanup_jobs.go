@@ -112,12 +112,7 @@ func (s *MediaService) runTitleCleanupJob(parent context.Context, jobID string, 
 		case mediaTitleCleanupStageCleaning:
 			percent = 10
 			if progress.TotalGroups > 0 {
-				percent = 10 + progress.CompletedGroups*35/progress.TotalGroups
-			}
-		case mediaTitleCleanupStageGrouping:
-			percent = 50
-			if progress.TotalGroups > 0 {
-				percent = 50 + progress.CompletedGroups*40/progress.TotalGroups
+				percent = 10 + progress.CompletedGroups*80/progress.TotalGroups
 			}
 		case "validating":
 			percent = 95
@@ -164,7 +159,7 @@ func titleCleanupJobTimeout(groupLimit int) time.Duration {
 		groupLimit = 30
 	}
 	waves := (groupLimit + 2) / 3
-	timeout := time.Duration(2*waves)*90*time.Second + 30*time.Second
+	timeout := time.Duration(waves)*90*time.Second + 30*time.Second
 	if timeout < 2*time.Minute {
 		return 2 * time.Minute
 	}

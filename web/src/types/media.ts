@@ -15,6 +15,7 @@ export interface Media {
   part_group_key?: string
   part_group_title?: string
   part_index?: number
+  version_group_key?: string
   title_cleanup_version?: number
   path: string
   relative_path?: string

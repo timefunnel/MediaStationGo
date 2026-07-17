@@ -124,11 +124,10 @@ export function AITitleCleanupDialog({
   if (!open) return null
 
   const toggle = (item: MediaTitleCleanupSuggestion) => {
-    const ids = selectionGroupIDs(item, preview?.suggestions ?? [])
     setSelected((current) => {
       const next = new Set(current)
-      const shouldSelect = ids.some((id) => !next.has(id))
-      ids.forEach((id) => shouldSelect ? next.add(id) : next.delete(id))
+      if (next.has(item.media_id)) next.delete(item.media_id)
+      else next.add(item.media_id)
       return next
     })
   }
@@ -162,7 +161,7 @@ export function AITitleCleanupDialog({
               <h2 className="font-display text-xl font-bold text-gray-900">AI 清洗标题</h2>
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              {libraryName} · 同时参考目录名和文件名，应用前不会修改媒体数据
+              {libraryName} · 只清洗标题和年份，不判断或修改作品聚合关系
             </p>
           </div>
           <button type="button" className="btn-ghost h-9 w-9 p-0" onClick={onClose} aria-label="关闭">
@@ -232,9 +231,6 @@ export function AITitleCleanupDialog({
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className="rounded bg-gray-100 px-2 py-1 font-semibold text-gray-700">
-                              {relationLabel(item.relation)}
-                            </span>
                             <span className={confidence >= 80 ? 'text-emerald-600' : 'text-amber-600'}>
                               置信度 {confidence}%
                             </span>
@@ -275,44 +271,13 @@ export function AITitleCleanupDialog({
 }
 
 function defaultSelectedItems(items: MediaTitleCleanupSuggestion[]): Set<string> {
-  const selected = new Set<string>()
-  const relationGroups = new Map<string, MediaTitleCleanupSuggestion[]>()
-  items.forEach((item) => {
-    if ((item.relation === 'version' || item.relation === 'part') && item.group_key) {
-      const key = `${item.relation}:${item.group_key}`
-      relationGroups.set(key, [...(relationGroups.get(key) ?? []), item])
-    } else if (item.confidence >= defaultConfidence) {
-      selected.add(item.media_id)
-    }
-  })
-  relationGroups.forEach((group) => {
-    const joinsExistingGroup = group.some((item) => Boolean(item.existing_group_key))
-    if ((group.length >= 2 || joinsExistingGroup) && group.every((item) => item.confidence >= defaultConfidence)) {
-      group.forEach((item) => selected.add(item.media_id))
-    }
-  })
-  return selected
-}
-
-function selectionGroupIDs(item: MediaTitleCleanupSuggestion, items: MediaTitleCleanupSuggestion[]): string[] {
-  if ((item.relation !== 'version' && item.relation !== 'part') || !item.group_key) return [item.media_id]
-  return items
-    .filter((candidate) => candidate.relation === item.relation && candidate.group_key === item.group_key)
-    .map((candidate) => candidate.media_id)
-}
-
-function relationLabel(relation: MediaTitleCleanupSuggestion['relation']): string {
-  if (relation === 'version') return '真实版本'
-  if (relation === 'part') return '分段 / 短片'
-  return '独立作品'
+  return new Set(items.filter((item) => item.confidence >= defaultConfidence).map((item) => item.media_id))
 }
 
 function cleanupStageLabel(stage: MediaTitleCleanupJob['stage']): string {
   switch (stage) {
     case 'cleaning':
       return '标题清洗'
-    case 'grouping':
-      return '关系聚合'
     case 'validating':
       return '最终校验'
     default:

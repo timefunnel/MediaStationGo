@@ -33,6 +33,12 @@ export interface GeneratedArtworkStatus {
   canceled: number
 }
 
+export interface MediaAggregationResult {
+  action: 'group' | 'detach'
+  updated: number
+  group_key?: string
+}
+
 export interface LibraryRootInput {
   name?: string
   path: string
@@ -181,6 +187,11 @@ export const libraryAPI = {
         timeout: LONG_REQUEST_TIMEOUT,
       })
       .then((r) => r.data),
+
+  updateAggregation: (
+    id: string,
+    payload: { action: 'group' | 'detach'; media_ids: string[]; title?: string },
+  ) => api.post<MediaAggregationResult>(`/libraries/${id}/media-aggregation`, payload).then((r) => r.data),
 }
 
 export const mediaAPI = {

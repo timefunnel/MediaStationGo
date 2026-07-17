@@ -15,161 +15,85 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 )
 
-func TestCleanMediaTitlesRunsNormalizationBeforeRelationshipClassification(t *testing.T) {
+func TestCleanMediaTitlesOnlyRunsNormalization(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, user := decodeAIRequestMessages(t, r)
+		system, _ := decodeAIRequestMessages(t, r)
+		calls.Add(1)
+		if !strings.Contains(system, "标题标准化器") || !strings.Contains(system, "不判断、推测或输出文件之间的聚合关系") {
+			t.Fatalf("unexpected prompt: %s", system)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(system, "标题标准化器"):
-			calls.Add(1)
-			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":2025,"confidence":0.96,"reason":"去除画质"},{"media_id":"b","title":"作品 A","year":2025,"confidence":0.91,"reason":"去除编码"}]}`)
-		case strings.Contains(system, "关系聚合器"):
-			if calls.Load() != 1 {
-				t.Fatalf("relationship stage started before normalization barrier")
-			}
-			if !strings.Contains(user, `"standardized_title":"作品 A"`) {
-				t.Fatalf("relationship input does not use normalized titles: %s", user)
-			}
-			calls.Add(1)
-			writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"version","group_key":"work-a","confidence":0.94,"reason":"同作品不同画质"},{"media_id":"b","relation":"version","group_key":"work-a","confidence":0.93,"reason":"同作品不同画质"}]}`)
-		default:
-			t.Fatalf("unexpected system prompt: %s", system)
-		}
-	}))
-	defer server.Close()
-
-	ai := newTestTitleCleanupAI(server.URL)
-	groups := []MediaTitleCleanupGroup{{
-		SourceDirectory: "作品 A",
-		Items: []MediaTitleCleanupSource{
-			{MediaID: "a", CurrentTitle: "A.1080p", SourceDirectory: "作品 A", Filename: "A.1080p.mkv"},
-			{MediaID: "b", CurrentTitle: "A.2160p", SourceDirectory: "作品 A", Filename: "A.2160p.mkv"},
-		},
-	}}
-	items, err := ai.CleanMediaTitles(t.Context(), groups)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != 2 || len(items) != 2 {
-		t.Fatalf("calls=%d items=%#v", calls.Load(), items)
-	}
-	if items[0].Title != "作品 A" || items[0].Relation != MediaTitleRelationVersion || items[0].Confidence != 0.94 {
-		t.Fatalf("unexpected suggestion: %#v", items[0])
-	}
-}
-
-func TestCleanMediaTitlesCanJoinExistingPartGroup(t *testing.T) {
-	const existingKey = "c01d2e3f4a5b6c7d8e9f001122334455"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, user := decodeAIRequestMessages(t, r)
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			writeAIContent(t, w, `{"items":[{"media_id":"part-3","title":"作品 A 第 3 段","year":0,"confidence":0.92,"reason":"目录与序号"}]}`)
-			return
-		}
-		if !strings.Contains(user, existingKey) {
-			t.Fatalf("existing group is missing from relationship input: %s", user)
-		}
-		writeAIContent(t, w, `{"items":[{"media_id":"part-3","relation":"part","group_key":"`+existingKey+`","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"续入现有分段"}]}`)
-	}))
-	defer server.Close()
-
-	ai := newTestTitleCleanupAI(server.URL)
-	groups := []MediaTitleCleanupGroup{{
-		SourceDirectory: "作品 A",
-		Items:           []MediaTitleCleanupSource{{MediaID: "part-3", CurrentTitle: "003", SourceDirectory: "作品 A", Filename: "003.mp4"}},
-		ExistingGroups: []MediaTitleCleanupExistingGroup{{
-			Relation: MediaTitleRelationPart, GroupKey: existingKey, GroupTitle: "作品 A",
-			Items: []MediaTitleCleanupExistingItem{
-				{MediaID: "part-1", Title: "作品 A 第 1 段", PartIndex: 1},
-				{MediaID: "part-2", Title: "作品 A 第 2 段", PartIndex: 2},
-			},
-		}},
-	}}
-	items, err := ai.CleanMediaTitles(t.Context(), groups)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].ExistingGroupKey != existingKey || items[0].PartIndex != 3 {
-		t.Fatalf("existing group was not reused: %#v", items)
-	}
-}
-
-func TestCleanMediaTitlesRetriesInvalidPartIndexesWithValidationFeedback(t *testing.T) {
-	var relationCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, user := decodeAIRequestMessages(t, r)
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A 第 1 段","year":0,"confidence":0.9,"reason":"文件名"},{"media_id":"b","title":"作品 A 第 2 段","year":0,"confidence":0.9,"reason":"文件名"}]}`)
-			return
-		}
-		call := relationCalls.Add(1)
-		if call == 1 {
-			writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"分段"}]}`)
-			return
-		}
-		if !strings.Contains(system, "上一轮输出未通过服务端校验") ||
-			!strings.Contains(user, "part 分组序号不连续") ||
-			!strings.Contains(user, `"previous_output"`) {
-			t.Fatalf("correction request lacks validation context: system=%s user=%s", system, user)
-		}
-		writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":2,"confidence":0.9,"reason":"修正连续序号"}]}`)
+		writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":2025,"confidence":0.96,"reason":"去除画质"},{"media_id":"b","title":"作品 A","year":2025,"confidence":0.91,"reason":"去除编码"}]}`)
 	}))
 	defer server.Close()
 
 	items, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
 		SourceDirectory: "作品 A",
 		Items: []MediaTitleCleanupSource{
-			{MediaID: "a", Filename: "01.mp4"},
-			{MediaID: "b", Filename: "02.mp4"},
+			{MediaID: "a", CurrentTitle: "A.1080p", SourceDirectory: "作品 A", Filename: "A.1080p.mkv"},
+			{MediaID: "b", CurrentTitle: "A.2160p", SourceDirectory: "作品 A", Filename: "A.2160p.mkv"},
 		},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if relationCalls.Load() != 2 || len(items) != 2 || items[1].PartIndex != 2 {
-		t.Fatalf("relation_calls=%d items=%#v", relationCalls.Load(), items)
+	if calls.Load() != 1 || len(items) != 2 {
+		t.Fatalf("calls=%d items=%#v", calls.Load(), items)
+	}
+	if items[0].Title != "作品 A" || items[0].Confidence != 0.96 || items[0].CurrentTitle != "A.1080p" {
+		t.Fatalf("unexpected suggestion: %#v", items[0])
 	}
 }
 
-func TestCleanMediaTitlePromptsPrioritizeChineseDescriptionsOverNumericSuffixes(t *testing.T) {
+func TestCleanMediaTitlesRetriesInvalidNormalizationWithValidationFeedback(t *testing.T) {
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, _ := decodeAIRequestMessages(t, r)
+		system, user := decodeAIRequestMessages(t, r)
+		call := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			for _, rule := range []string{
-				"标题优先提取有语义的中文描述",
-				"数字只是弱证据",
-				"孤立数字 + 空格 + 中文描述",
-				"“3月”、“12月新作”、“第3季”",
-				"当前标题只是弱参考",
-				"裸数字可以作为关系聚合时的弱顺序线索",
-				"我与护士小母狗2.mp4",
-				"不得输出“第10段”",
-				"人物或主体 + 核心情节/场景 + 一个有辨识度的特征",
-				"不得只输出“小敏儿 以性换租”",
-				"不得输出“第111段”",
-				"不得用父目录影片标题覆盖它",
-			} {
-				if !strings.Contains(system, rule) {
-					t.Fatalf("normalization prompt missing rule %q", rule)
-				}
-			}
-			writeAIContent(t, w, `{"items":[{"media_id":"main","title":"玩偶姐姐 穿着可爱的黑色JK超诱惑黑丝","year":0,"confidence":0.9,"reason":"中文描述优先"},{"media_id":"ad","title":"私房猛药 提高硬度 延时不射","year":0,"confidence":0.8,"reason":"保留文件独立语义"}]}`)
+		if call == 1 {
+			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"","year":0,"confidence":0.9,"reason":"空标题"}]}`)
 			return
 		}
+		if !strings.Contains(system, "上一轮输出未通过服务端校验") ||
+			!strings.Contains(user, "无效标题") || !strings.Contains(user, `"previous_output"`) {
+			t.Fatalf("correction request lacks validation context: system=%s user=%s", system, user)
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":0,"confidence":0.9,"reason":"修正空标题"}]}`)
+	}))
+	defer server.Close()
+
+	items, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+		Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "a.mp4"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 || len(items) != 1 || items[0].Title != "作品 A" {
+		t.Fatalf("calls=%d items=%#v", calls.Load(), items)
+	}
+}
+
+func TestCleanMediaTitlePromptPrioritizesChineseDescriptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, _ := decodeAIRequestMessages(t, r)
 		for _, rule := range []string{
-			"按 candidates 的稳定顺序连续编为 1..N",
-			"不得因副本编号跳号而拆成 standalone",
-			"必须使用 standalone",
+			"标题优先提取有语义的中文描述",
+			"数字只是弱证据",
+			"孤立数字 + 空格 + 中文描述",
+			"当前标题只是弱参考",
+			"不得输出“第10段”",
+			"人物或主体 + 核心情节/场景 + 一个有辨识度的特征",
+			"不得只输出“小敏儿 以性换租”",
+			"不得输出 relation、group_key、group_title、part_index",
 		} {
 			if !strings.Contains(system, rule) {
-				t.Fatalf("relationship prompt missing rule %q", rule)
+				t.Fatalf("normalization prompt missing rule %q", rule)
 			}
 		}
-		writeAIContent(t, w, `{"items":[{"media_id":"main","relation":"standalone","confidence":0.9,"reason":"主视频"},{"media_id":"ad","relation":"standalone","confidence":0.9,"reason":"独立广告"}]}`)
+		w.Header().Set("Content-Type", "application/json")
+		writeAIContent(t, w, `{"items":[{"media_id":"main","title":"玩偶姐姐 穿着可爱的黑色JK超诱惑黑丝","year":0,"confidence":0.9,"reason":"中文描述优先"},{"media_id":"ad","title":"私房猛药 提高硬度 延时不射","year":0,"confidence":0.8,"reason":"保留文件独立语义"}]}`)
 	}))
 	defer server.Close()
 
@@ -183,53 +107,17 @@ func TestCleanMediaTitlePromptsPrioritizeChineseDescriptionsOverNumericSuffixes(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || strings.Contains(items[0].Title, "111") || items[1].Relation != MediaTitleRelationStandalone {
+	if len(items) != 2 || strings.Contains(items[0].Title, "111") {
 		t.Fatalf("unexpected suggestions: %#v", items)
 	}
 }
 
-func TestCleanMediaTitlesStopsAfterBoundedValidationRetry(t *testing.T) {
-	var relationCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, _ := decodeAIRequestMessages(t, r)
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A 第 1 段","year":0,"confidence":0.9,"reason":"文件名"},{"media_id":"b","title":"作品 A 第 2 段","year":0,"confidence":0.9,"reason":"文件名"}]}`)
-			return
-		}
-		relationCalls.Add(1)
-		writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"分段"}]}`)
-	}))
-	defer server.Close()
-
-	_, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
-		Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "01.mp4"}, {MediaID: "b", Filename: "02.mp4"}},
-	}})
-	if err == nil || !strings.Contains(err.Error(), "纠错后仍未通过校验") || !strings.Contains(err.Error(), "序号不连续") {
-		t.Fatalf("expected bounded validation error, got %v", err)
-	}
-	if relationCalls.Load() != mediaTitleCleanupMaxAttempts {
-		t.Fatalf("relation calls=%d want=%d", relationCalls.Load(), mediaTitleCleanupMaxAttempts)
-	}
-}
-
-func TestCleanMediaTitlesKeepsSameTitleStandaloneItemsSeparate(t *testing.T) {
-	groups := []MediaTitleCleanupGroup{{Items: []MediaTitleCleanupSource{{MediaID: "a"}, {MediaID: "b"}}}}
-	items, err := validateMediaTitleCleanupSuggestions(groups, []MediaTitleCleanupSuggestion{
-		{MediaID: "a", Title: "同名", Relation: MediaTitleRelationStandalone, Confidence: 0.7},
-		{MediaID: "b", Title: "同名", Relation: MediaTitleRelationStandalone, Confidence: 0.7},
-	})
-	if err != nil || len(items) != 2 {
-		t.Fatalf("standalone items must remain separate: items=%#v err=%v", items, err)
-	}
-}
-
-func TestCleanMediaTitlesRunsEachStageWithBoundedConcurrency(t *testing.T) {
+func TestCleanMediaTitlesRunsWithBoundedConcurrency(t *testing.T) {
 	var active atomic.Int32
 	var maxActive atomic.Int32
-	var relationshipCalls atomic.Int32
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, user := decodeAIRequestMessages(t, r)
+		_, user := decodeAIRequestMessages(t, r)
 		current := active.Add(1)
 		for {
 			previous := maxActive.Load()
@@ -239,61 +127,43 @@ func TestCleanMediaTitlesRunsEachStageWithBoundedConcurrency(t *testing.T) {
 		}
 		time.Sleep(60 * time.Millisecond)
 		active.Add(-1)
+		calls.Add(1)
 		id := cleanupRequestMediaID(t, user)
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			writeAIContent(t, w, `{"items":[{"media_id":"`+id+`","title":"作品 `+id+`","year":0,"confidence":0.9,"reason":"清洗"}]}`)
-			return
-		}
-		relationshipCalls.Add(1)
-		writeAIContent(t, w, `{"items":[{"media_id":"`+id+`","relation":"standalone","confidence":0.9,"reason":"独立"}]}`)
+		writeAIContent(t, w, `{"items":[{"media_id":"`+id+`","title":"作品 `+id+`","year":0,"confidence":0.9,"reason":"清洗"}]}`)
 	}))
 	defer server.Close()
 
-	ai := newTestTitleCleanupAI(server.URL)
 	groups := make([]MediaTitleCleanupGroup, 3)
 	for i, id := range []string{"a", "b", "c"} {
 		groups[i] = MediaTitleCleanupGroup{SourceDirectory: id, Items: []MediaTitleCleanupSource{{MediaID: id, Filename: id + ".mp4"}}}
 	}
 	var mu sync.Mutex
-	progress := map[string]int{}
-	items, err := ai.CleanMediaTitlesWithProgress(t.Context(), groups, func(stage string, done, total int) {
+	progress := 0
+	items, err := newTestTitleCleanupAI(server.URL).CleanMediaTitlesWithProgress(t.Context(), groups, func(stage string, done, total int) {
 		mu.Lock()
 		defer mu.Unlock()
-		if done == 0 {
-			progress[stage] = 0
-			return
+		if stage != mediaTitleCleanupStageCleaning || total != 3 || done <= progress {
+			t.Fatalf("progress stage=%s value=%d/%d previous=%d", stage, done, total, progress)
 		}
-		if total != 3 || done <= progress[stage] {
-			t.Fatalf("progress stage=%s value=%d/%d previous=%d", stage, done, total, progress[stage])
-		}
-		progress[stage] = done
+		progress = done
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || progress[mediaTitleCleanupStageCleaning] != 3 || progress[mediaTitleCleanupStageGrouping] != 3 {
-		t.Fatalf("items=%d progress=%#v", len(items), progress)
-	}
-	if relationshipCalls.Load() != 3 || maxActive.Load() < 2 || maxActive.Load() > 3 {
-		t.Fatalf("relationship_calls=%d max_active=%d", relationshipCalls.Load(), maxActive.Load())
+	if len(items) != 3 || progress != 3 || calls.Load() != 3 || maxActive.Load() < 2 || maxActive.Load() > 3 {
+		t.Fatalf("items=%d progress=%d calls=%d max_active=%d", len(items), progress, calls.Load(), maxActive.Load())
 	}
 }
 
-func TestCleanMediaTitlesRejectsUnknownStageFields(t *testing.T) {
+func TestCleanMediaTitlesRejectsAggregationFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		system, _ := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(system, "标题标准化器") {
-			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":0,"confidence":0.9,"relation":"part"}]}`)
-			return
-		}
-		t.Fatal("relationship stage must not run after invalid normalization output")
+		writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":0,"confidence":0.9,"relation":"part"}]}`)
 	}))
 	defer server.Close()
 
-	ai := newTestTitleCleanupAI(server.URL)
-	_, err := ai.CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+	_, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
 		Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "a.mp4"}},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
@@ -340,13 +210,11 @@ func cleanupRequestMediaID(t *testing.T, user string) string {
 	if err := json.Unmarshal([]byte(user), &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"items", "candidates"} {
-		var items []struct {
-			MediaID string `json:"media_id"`
-		}
-		if raw, ok := payload[key]; ok && json.Unmarshal(raw, &items) == nil && len(items) > 0 {
-			return items[0].MediaID
-		}
+	var items []struct {
+		MediaID string `json:"media_id"`
+	}
+	if raw, ok := payload["items"]; ok && json.Unmarshal(raw, &items) == nil && len(items) > 0 {
+		return items[0].MediaID
 	}
 	t.Fatalf("media id not found in request: %s", user)
 	return ""
