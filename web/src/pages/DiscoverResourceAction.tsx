@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BellPlus, Check, LoaderCircle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowRight, BellPlus, Check, LoaderCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import type { DiscoverItem } from '../api/discover'
@@ -104,6 +105,18 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
 
   return (
     <section className="space-y-3">
+      {item.in_library && item.media_id && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <div>
+            <p className="text-sm font-semibold text-emerald-800">该作品已在媒体库中</p>
+            <p className="text-xs text-emerald-700">可直接打开库内详情；下方仍可继续查找更高质量片源。</p>
+          </div>
+          <Link to={`/media/${item.media_id}`} className="btn-primary shrink-0 px-3 py-2 text-xs">
+            查看库内作品
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      )}
       {loading ? (
         <div className="flex h-11 items-center gap-2 text-sm text-sand-500">
           <LoaderCircle size={16} className="animate-spin" />

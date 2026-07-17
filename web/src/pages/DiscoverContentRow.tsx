@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Info } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
@@ -279,6 +279,12 @@ function DiscoverCard({
             ★ {(item.rating ?? 0).toFixed(1)}
           </div>
         )}
+        {item.in_library && item.media_id && (
+          <div className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-lg border border-emerald-300/40 bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+            <CheckCircle2 size={10} />
+            已入库
+          </div>
+        )}
       </div>
       <div className="space-y-0.5 px-2.5 py-2">
         <p className="truncate text-xs font-medium text-ink-600 transition-colors group-hover:text-brand-500">
@@ -289,7 +295,7 @@ function DiscoverCard({
         </p>
         <p className="flex items-center gap-1 pt-1 text-[10px] font-semibold text-brand-500">
           <Info size={10} />
-          详情 / 订阅
+          {item.in_library && item.media_id ? '查看库内作品' : '详情 / 订阅'}
         </p>
       </div>
     </button>

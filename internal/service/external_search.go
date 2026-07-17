@@ -32,6 +32,8 @@ type ExternalMediaResult struct {
 	LocalMediaCount    int              `json:"local_media_count,omitempty"`
 	MissingEpisodes    []int            `json:"missing_episodes,omitempty"`
 	InLibrary          bool             `json:"in_library"`
+	LocalMediaID       string           `json:"media_id,omitempty"`
+	LocalLibraryID     string           `json:"library_id,omitempty"`
 	Languages          []string         `json:"languages,omitempty"`
 	Countries          []string         `json:"countries,omitempty"`
 	Genres             []string         `json:"genres,omitempty"`

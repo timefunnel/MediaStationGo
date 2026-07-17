@@ -22,6 +22,8 @@ export interface DiscoverItem extends Partial<Media> {
   local_media_count?: number
   missing_episodes?: number[]
   in_library?: boolean
+  media_id?: string
+  library_id?: string
 }
 
 export interface DiscoverSection {

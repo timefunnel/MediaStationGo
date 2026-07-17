@@ -37,6 +37,135 @@ func EnrichExternalMediaAvailability(ctx context.Context, repo *repository.Conta
 	}
 }
 
+// EnrichExternalMediaLibraryLinks resolves discover cards to one visible local
+// media row in a single query. Provider IDs are authoritative; normalized
+// titles are only used when the external item has no matching provider ID.
+func EnrichExternalMediaLibraryLinks(
+	ctx context.Context,
+	repo *repository.Container,
+	items []ExternalMediaResult,
+	visibility MediaVisibility,
+) {
+	if repo == nil || repo.DB == nil || len(items) == 0 {
+		return
+	}
+	tmdbIDs := make([]int, 0)
+	bangumiIDs := make([]int, 0)
+	doubanIDs := make([]string, 0)
+	titleKeys := make([]string, 0)
+	seenTMDb, seenBangumi := map[int]struct{}{}, map[int]struct{}{}
+	seenDouban, seenTitle := map[string]struct{}{}, map[string]struct{}{}
+	for _, item := range items {
+		if item.TMDbID > 0 {
+			if _, ok := seenTMDb[item.TMDbID]; !ok {
+				seenTMDb[item.TMDbID] = struct{}{}
+				tmdbIDs = append(tmdbIDs, item.TMDbID)
+			}
+		}
+		if item.BangumiID > 0 {
+			if _, ok := seenBangumi[item.BangumiID]; !ok {
+				seenBangumi[item.BangumiID] = struct{}{}
+				bangumiIDs = append(bangumiIDs, item.BangumiID)
+			}
+		}
+		if id := strings.TrimSpace(item.DoubanID); id != "" {
+			if _, ok := seenDouban[id]; !ok {
+				seenDouban[id] = struct{}{}
+				doubanIDs = append(doubanIDs, id)
+			}
+		}
+		for _, title := range []string{item.Title, item.OriginalName} {
+			if key := localMediaTitleKey(title); key != "" {
+				if _, ok := seenTitle[key]; !ok {
+					seenTitle[key] = struct{}{}
+					titleKeys = append(titleKeys, key)
+				}
+			}
+		}
+	}
+	clauses := make([]string, 0, 4)
+	args := make([]any, 0, 6)
+	if len(tmdbIDs) > 0 {
+		clauses = append(clauses, "tm_db_id IN ?")
+		args = append(args, tmdbIDs)
+	}
+	if len(bangumiIDs) > 0 {
+		clauses = append(clauses, "bangumi_id IN ?")
+		args = append(args, bangumiIDs)
+	}
+	if len(doubanIDs) > 0 {
+		clauses = append(clauses, "douban_id IN ?")
+		args = append(args, doubanIDs)
+	}
+	if len(titleKeys) > 0 {
+		clauses = append(clauses, "LOWER(TRIM(title)) IN ? OR LOWER(TRIM(original_name)) IN ?")
+		args = append(args, titleKeys, titleKeys)
+	}
+	if len(clauses) == 0 {
+		return
+	}
+	query := repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("deleted_at IS NULL").
+		Where("("+strings.Join(clauses, ") OR (")+")", args...)
+	if !visibility.IncludeNSFW {
+		query = query.Where("nsfw = ?", false)
+	}
+	if len(visibility.HiddenLibraryIDs) > 0 {
+		query = query.Where("library_id NOT IN ?", visibility.HiddenLibraryIDs)
+	}
+	if len(visibility.AllowedLibraryIDs) > 0 {
+		query = query.Where("library_id IN ?", visibility.AllowedLibraryIDs)
+	}
+	var rows []model.Media
+	if err := query.Order("updated_at DESC, created_at DESC").Limit(5000).Find(&rows).Error; err != nil {
+		return
+	}
+	for index := range items {
+		if row := bestLocalMediaLink(items[index], rows); row != nil {
+			items[index].InLibrary = true
+			items[index].LocalMediaCount = maxInt(items[index].LocalMediaCount, 1)
+			items[index].LocalMediaID = row.ID
+			items[index].LocalLibraryID = row.LibraryID
+		}
+	}
+}
+
+func bestLocalMediaLink(item ExternalMediaResult, rows []model.Media) *model.Media {
+	providerMatch := func(row model.Media) bool {
+		return (item.TMDbID > 0 && row.TMDbID == item.TMDbID) ||
+			(item.BangumiID > 0 && row.BangumiID == item.BangumiID) ||
+			(strings.TrimSpace(item.DoubanID) != "" && strings.TrimSpace(row.DoubanID) == strings.TrimSpace(item.DoubanID))
+	}
+	for index := range rows {
+		if providerMatch(rows[index]) && (item.Year <= 0 || rows[index].Year <= 0 || rows[index].Year == item.Year) {
+			return &rows[index]
+		}
+	}
+	for index := range rows {
+		if providerMatch(rows[index]) {
+			return &rows[index]
+		}
+	}
+	keys := map[string]struct{}{}
+	for _, title := range []string{item.Title, item.OriginalName} {
+		if key := localMediaTitleKey(title); key != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	for index := range rows {
+		_, titleMatch := keys[localMediaTitleKey(rows[index].Title)]
+		_, originalMatch := keys[localMediaTitleKey(rows[index].OriginalName)]
+		if (titleMatch || originalMatch) && (item.Year <= 0 || rows[index].Year <= 0 || rows[index].Year == item.Year) {
+			return &rows[index]
+		}
+	}
+	return nil
+}
+
+func localMediaTitleKey(value string) string {
+	return strings.ToLower(strings.TrimSpace(strings.Join(strings.Fields(value), " ")))
+}
+
 func EnrichSubscriptionProgress(ctx context.Context, repo *repository.Container, items []model.Subscription) {
 	for i := range items {
 		availability := SubscriptionLocalAvailability(ctx, repo, &items[i])

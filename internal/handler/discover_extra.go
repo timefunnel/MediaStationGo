@@ -112,6 +112,9 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 				logDiscoverFetchSlow(svc, k, page, elapsed, len(items))
 				rememberDiscoverSection(svc, k, page, items)
 			}
+			service.EnrichExternalMediaLibraryLinks(
+				c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
+			)
 			artworkItems = append(artworkItems, items...)
 			out[k] = items
 			metaEntry["has_next"] = discoverSectionHasNext(k, len(items))
