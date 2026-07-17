@@ -144,6 +144,9 @@ func TestCleanMediaTitlePromptsPrioritizeChineseDescriptionsOverNumericSuffixes(
 				"数字只是弱证据",
 				"孤立数字 + 空格 + 中文描述",
 				"“3月”、“12月新作”、“第3季”",
+				"当前标题只是弱参考",
+				"人物或主体 + 核心情节/场景 + 一个有辨识度的特征",
+				"不得只输出“小敏儿 以性换租”",
 				"不得输出“第111段”",
 				"不得用父目录影片标题覆盖它",
 			} {
