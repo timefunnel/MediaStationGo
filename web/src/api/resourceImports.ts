@@ -87,6 +87,13 @@ export interface ResourceImportTask {
   finished_at?: string
 }
 
+export interface ResourceImportPage {
+  items: ResourceImportTask[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface ResourceImportDuplicateConflict {
   message: string
   can_force: boolean
@@ -107,7 +114,12 @@ type RawResourceImportTask = Partial<ResourceImportTask> & {
   current_stage?: string
   progress_percent?: number
 }
-type ResourceImportListResponse = RawResourceImportTask[] | { items: RawResourceImportTask[] }
+type ResourceImportListResponse = RawResourceImportTask[] | {
+  items: RawResourceImportTask[]
+  total?: number
+  page?: number
+  page_size?: number
+}
 type ResourceImportTaskResponse = RawResourceImportTask | { task: RawResourceImportTask }
 
 export const resourceImportsAPI = {
@@ -147,6 +159,17 @@ export const resourceImportsAPI = {
       })
       .then((response) => unwrapTaskList(response.data)),
 
+  listAllPage: (page = 1, pageSize = 12, status?: string) =>
+    api
+      .get<ResourceImportListResponse>('/resource-imports', {
+        params: {
+          page,
+          page_size: pageSize,
+          ...(status ? { status } : {}),
+        },
+      })
+      .then((response) => unwrapTaskPage(response.data, page, pageSize)),
+
   get: (taskID: string) =>
     api
       .get<ResourceImportTaskResponse>(`/resource-imports/${taskID}`)
@@ -170,6 +193,23 @@ function unwrapTaskList(payload: ResourceImportListResponse): ResourceImportTask
   if (Array.isArray(payload)) return payload.map(normalizeTask)
   if (payload && Array.isArray(payload.items)) return payload.items.map(normalizeTask)
   throw new Error('资源入库任务列表响应格式无效')
+}
+
+function unwrapTaskPage(payload: ResourceImportListResponse, page: number, pageSize: number): ResourceImportPage {
+  if (Array.isArray(payload)) {
+    const items = payload.map(normalizeTask)
+    return { items, total: items.length, page, page_size: pageSize }
+  }
+  if (payload && Array.isArray(payload.items)) {
+    const items = payload.items.map(normalizeTask)
+    return {
+      items,
+      total: payload.total ?? items.length,
+      page: payload.page ?? page,
+      page_size: payload.page_size ?? pageSize,
+    }
+  }
+  throw new Error('资源入库任务分页响应格式无效')
 }
 
 function unwrapTask(payload: ResourceImportTaskResponse): ResourceImportTask {

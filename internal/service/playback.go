@@ -166,6 +166,50 @@ func (p *PlaybackService) RecentHistory(ctx context.Context, userID string, limi
 	if err != nil {
 		return nil, err
 	}
+	return p.hydrateHistoryItems(ctx, rows)
+}
+
+// RecentHistoryPage returns one visibility-aware page and its exact total.
+func (p *PlaybackService) RecentHistoryPage(
+	ctx context.Context,
+	userID string,
+	page int,
+	pageSize int,
+	visibility MediaVisibility,
+) ([]HistoryItem, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	query := p.repo.DB.WithContext(ctx).Model(&model.PlaybackHistory{}).
+		Joins("JOIN media ON media.id = playback_histories.media_id AND media.deleted_at IS NULL").
+		Where("playback_histories.user_id = ?", userID)
+	if !visibility.IncludeNSFW {
+		query = query.Where("media.nsfw = ?", false)
+	}
+	if len(visibility.HiddenLibraryIDs) > 0 {
+		query = query.Where("media.library_id NOT IN ?", visibility.HiddenLibraryIDs)
+	}
+	if len(visibility.AllowedLibraryIDs) > 0 {
+		query = query.Where("media.library_id IN ?", visibility.AllowedLibraryIDs)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []model.PlaybackHistory
+	if err := query.Select("playback_histories.*").
+		Order("playback_histories.watched_at DESC, playback_histories.updated_at DESC, playback_histories.id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	items, err := p.hydrateHistoryItems(ctx, rows)
+	return items, total, err
+}
+
+func (p *PlaybackService) hydrateHistoryItems(ctx context.Context, rows []model.PlaybackHistory) ([]HistoryItem, error) {
 	mediaIDs := make([]string, 0, len(rows))
 	for i := range rows {
 		if rows[i].MediaID != "" {

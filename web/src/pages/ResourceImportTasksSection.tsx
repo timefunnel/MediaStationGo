@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { resourceImportsAPI, type ResourceImportTask } from '../api/resourceImports'
 import { confirmAction } from '../components/confirmAction'
+import { Pagination } from '../components/Pagination'
 import { ResourceImportTaskView } from './ResourceImportTaskView'
 import {
   isResourceImportActive,
@@ -10,7 +11,10 @@ import {
 } from './resourceImportModel'
 
 export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
+  const pageSize = 12
   const [tasks, setTasks] = useState<ResourceImportTask[]>([])
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyTaskID, setBusyTaskID] = useState('')
@@ -18,23 +22,25 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
 
   const load = useCallback(async () => {
     try {
-      const incoming = await resourceImportsAPI.listAll()
-      setTasks(mergeResourceImportTasks([], incoming))
+      const incoming = await resourceImportsAPI.listAllPage(page, pageSize)
+      setTasks(mergeResourceImportTasks([], incoming.items))
+      setTotal(incoming.total)
       setError('')
     } catch (requestError) {
       setError(resourceImportError(requestError, '资源入库任务加载失败'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page])
 
   useEffect(() => {
     let cancelled = false
     const tick = async () => {
       try {
-        const incoming = await resourceImportsAPI.listAll()
+        const incoming = await resourceImportsAPI.listAllPage(page, pageSize)
         if (cancelled) return
-        setTasks(mergeResourceImportTasks([], incoming))
+        setTasks(mergeResourceImportTasks([], incoming.items))
+        setTotal(incoming.total)
         setError('')
       } catch (requestError) {
         if (!cancelled) setError(resourceImportError(requestError, '资源入库任务加载失败'))
@@ -48,10 +54,16 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [])
+  }, [page])
 
   const activeTasks = useMemo(() => tasks.filter((task) => isResourceImportActive(task.status)), [tasks])
   const finishedTasks = useMemo(() => tasks.filter((task) => !isResourceImportActive(task.status)), [tasks])
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  useEffect(() => {
+    if (page <= totalPages) return
+    setPage(totalPages)
+  }, [page, totalPages])
 
   const updateTask = (task: ResourceImportTask) => {
     setTasks((current) => mergeResourceImportTasks(current, [task]))
@@ -105,6 +117,7 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
     try {
       await resourceImportsAPI.removeFailed(task.id)
       setTasks((current) => current.filter((item) => item.id !== task.id))
+      setTotal((current) => Math.max(0, current - 1))
     } catch (requestError) {
       setError(resourceImportError(requestError, '删除失败任务记录失败'))
     } finally {
@@ -163,6 +176,10 @@ export function ResourceImportTasksSection({ isAdmin }: { isAdmin: boolean }) {
               />
             ))}
           </div>
+
+          {totalPages > 1 && (
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} className="pt-1" />
+          )}
         </div>
       )}
     </section>
