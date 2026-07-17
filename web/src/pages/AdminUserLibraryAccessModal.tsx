@@ -64,48 +64,55 @@ export function AdminUserLibraryAccessModal({
           </button>
         </div>
 
-        <div className="max-h-[65vh] space-y-4 overflow-y-auto p-4">
+        <div className="space-y-4 p-4">
           <label className="flex items-center justify-between gap-4 border-b border-gray-200 pb-3">
             <span>
               <span className="block text-sm font-medium text-ink-600">全部媒体库</span>
               <span className="block text-xs text-ink-50">以后新建的媒体库也会自动开放</span>
             </span>
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-primary-400"
+            <AccessSwitch
               checked={allowAll}
-              onChange={(event) => toggleAll(event.target.checked)}
+              disabled={saving}
+              label="允许访问全部媒体库"
+              onChange={toggleAll}
             />
           </label>
 
-          {!allowAll && (
-            <div className="grid gap-2 sm:grid-cols-2">
+          <div
+            className={`h-64 overflow-y-auto rounded-lg border border-gray-200 p-2 transition-opacity ${
+              allowAll ? 'bg-gray-50 opacity-60' : 'bg-white'
+            }`}
+            aria-disabled={allowAll}
+          >
+            <div className="grid gap-1 sm:grid-cols-2">
               {libraries.map((library) => (
-                <label key={library.id} className="flex min-w-0 items-center gap-3 border-b border-gray-100 px-1 py-2">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 accent-primary-400"
-                    checked={selectedIDs.includes(library.id)}
-                    onChange={() => toggleLibrary(library.id)}
-                  />
+                <div key={library.id} className="flex min-w-0 items-center justify-between gap-3 border-b border-gray-100 px-2 py-2.5">
                   <span className="min-w-0">
                     <span className="block truncate text-sm text-ink-600">{library.name}</span>
                     <span className="block truncate text-xs text-ink-50">{library.type}</span>
                   </span>
-                </label>
+                  <AccessSwitch
+                    checked={selectedIDs.includes(library.id)}
+                    disabled={allowAll || saving}
+                    label={`${selectedIDs.includes(library.id) ? '关闭' : '开放'} ${library.name}`}
+                    onChange={() => toggleLibrary(library.id)}
+                  />
+                </div>
               ))}
               {libraries.length === 0 && <p className="text-sm text-ink-50">暂无可分配的媒体库</p>}
             </div>
-          )}
+          </div>
 
-          {!allowAll && selectedIDs.length === 0 && (
-            <p className="text-xs text-red-500">请至少选择一个媒体库，或允许访问全部媒体库。</p>
-          )}
-          {unavailableIDs.length > 0 && (
-            <p className="text-xs text-amber-600">
-              当前配置中有 {unavailableIDs.length} 个已不存在的媒体库，保存后将自动移除。
-            </p>
-          )}
+          <div className="min-h-5 text-xs">
+            {!allowAll && selectedIDs.length === 0 && (
+              <p className="text-red-500">请至少选择一个媒体库，或允许访问全部媒体库。</p>
+            )}
+            {unavailableIDs.length > 0 && (
+              <p className="text-amber-600">
+                当前配置中有 {unavailableIDs.length} 个已不存在的媒体库，保存后将自动移除。
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
@@ -119,5 +126,37 @@ export function AdminUserLibraryAccessModal({
         </div>
       </div>
     </div>
+  )
+}
+
+function AccessSwitch({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed ${
+        checked ? 'bg-brand-500' : 'bg-gray-300'
+      }`}
+      onClick={() => onChange(!checked)}
+    >
+      <span
+        className={`pointer-events-none mt-0.5 inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
   )
 }
