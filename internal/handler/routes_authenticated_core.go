@@ -34,6 +34,7 @@ func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container
 	authed.POST("/libraries/:id/scan", middleware.AdminRequired(), scanLibraryHandler(svc))
 	authed.POST("/libraries/:id/scrape", middleware.AdminRequired(), scrapeLibraryHandler(svc))
 	authed.POST("/libraries/:id/title-cleanup/preview", middleware.AdminRequired(), previewMediaTitleCleanupHandler(svc))
+	authed.GET("/libraries/:id/title-cleanup/preview/:job_id", middleware.AdminRequired(), getMediaTitleCleanupJobHandler(svc))
 	authed.POST("/libraries/:id/title-cleanup/apply", middleware.AdminRequired(), applyMediaTitleCleanupHandler(svc))
 	authed.GET("/libraries/:id/generated-artwork", middleware.AdminRequired(), generatedArtworkStatusHandler(svc))
 	authed.POST("/libraries/:id/generated-artwork", middleware.AdminRequired(), runGeneratedArtworkHandler(svc))
@@ -48,6 +49,7 @@ func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container
 func registerAuthedMediaRoutes(authed *gin.RouterGroup, svc *service.Container) {
 	authed.GET("/media/:id", getMediaHandler(svc))
 	authed.GET("/media/:id/versions", getMediaVersionsHandler(svc))
+	authed.GET("/media/:id/parts", getMediaPartsHandler(svc))
 	authed.DELETE("/media/:id/versions/:version_id", deleteMediaVersionHandler(svc))
 	authed.GET("/media", searchMediaHandler(svc))
 	authed.PATCH("/media/:id/metadata", middleware.AdminRequired(), updateMediaMetadataHandler(svc))

@@ -23,12 +23,23 @@ func previewMediaTitleCleanupHandler(svc *service.Container) gin.HandlerFunc {
 				return
 			}
 		}
-		preview, err := svc.Media.PreviewTitleCleanup(c.Request.Context(), c.Param("id"), req.GroupLimit)
+		job, err := svc.Media.StartTitleCleanupJob(svc.Context(), c.Param("id"), req.GroupLimit)
 		if err != nil {
 			writeMediaTitleCleanupError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, preview)
+		c.JSON(http.StatusAccepted, job)
+	}
+}
+
+func getMediaTitleCleanupJobHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		job, err := svc.Media.GetTitleCleanupJob(c.Param("id"), c.Param("job_id"))
+		if err != nil {
+			writeMediaTitleCleanupError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, job)
 	}
 }
 
@@ -52,6 +63,8 @@ func writeMediaTitleCleanupError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "媒体库不存在"})
+	case errors.Is(err, service.ErrMediaTitleCleanupJobNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrAITitleCleanupUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrMediaTitleCleanupLibraryMode), errors.Is(err, service.ErrMediaTitleCleanupNoCandidates):

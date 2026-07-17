@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -11,20 +13,23 @@ import (
 	"gorm.io/gorm"
 )
 
-const MediaScrapeStatusTitleCleaned = "title_cleaned"
+const (
+	MediaScrapeStatusTitleCleaned   = "title_cleaned"
+	currentMediaTitleCleanupVersion = 2
+)
 
 var (
-	ErrMediaTitleCleanupLibraryMode = errors.New("仅保留原始文件名的媒体库支持 AI 标题清洗")
-	ErrMediaTitleCleanupNoCandidates = errors.New("没有可清洗的未匹配媒体")
+	ErrMediaTitleCleanupLibraryMode  = errors.New("仅保留原始文件名的媒体库支持 AI 标题清洗")
+	ErrMediaTitleCleanupNoCandidates = errors.New("没有待处理的标题清洗记录")
 )
 
 type MediaTitleCleanupPreview struct {
-	LibraryID      string                         `json:"library_id"`
-	CandidateCount int                            `json:"candidate_count"`
-	BatchCount     int                            `json:"batch_count"`
-	RemainingCount int                            `json:"remaining_count"`
-	Groups         []MediaTitleCleanupGroup       `json:"groups"`
-	Suggestions    []MediaTitleCleanupSuggestion  `json:"suggestions"`
+	LibraryID      string                        `json:"library_id"`
+	CandidateCount int                           `json:"candidate_count"`
+	BatchCount     int                           `json:"batch_count"`
+	RemainingCount int                           `json:"remaining_count"`
+	Groups         []MediaTitleCleanupGroup      `json:"groups"`
+	Suggestions    []MediaTitleCleanupSuggestion `json:"suggestions"`
 }
 
 type MediaTitleCleanupApplyRequest struct {
@@ -43,6 +48,22 @@ func (s *MediaService) SetAI(ai *AIService) *MediaService {
 }
 
 func (s *MediaService) PreviewTitleCleanup(ctx context.Context, libraryID string, groupLimit int) (*MediaTitleCleanupPreview, error) {
+	return s.previewTitleCleanup(ctx, libraryID, groupLimit, nil)
+}
+
+type mediaTitleCleanupProgress struct {
+	Stage           string
+	Message         string
+	CompletedGroups int
+	TotalGroups     int
+}
+
+func (s *MediaService) previewTitleCleanup(
+	ctx context.Context,
+	libraryID string,
+	groupLimit int,
+	onProgress func(mediaTitleCleanupProgress),
+) (*MediaTitleCleanupPreview, error) {
 	lib, err := s.titleCleanupLibrary(ctx, libraryID)
 	if err != nil {
 		return nil, err
@@ -61,9 +82,26 @@ func (s *MediaService) PreviewTitleCleanup(ctx context.Context, libraryID string
 	if len(groups) == 0 {
 		return nil, ErrMediaTitleCleanupNoCandidates
 	}
-	suggestions, err := s.ai.CleanMediaTitles(ctx, groups)
+	if onProgress != nil {
+		onProgress(mediaTitleCleanupProgress{
+			Stage: "analyzing", Message: "正在并行分析目录和文件名", TotalGroups: len(groups),
+		})
+	}
+	suggestions, err := s.ai.CleanMediaTitlesWithProgress(ctx, groups, func(completed, total int) {
+		if onProgress != nil {
+			onProgress(mediaTitleCleanupProgress{
+				Stage: "analyzing", Message: fmt.Sprintf("已完成 %d/%d 个目录", completed, total),
+				CompletedGroups: completed, TotalGroups: total,
+			})
+		}
+	})
 	if err != nil {
 		return nil, err
+	}
+	if onProgress != nil {
+		onProgress(mediaTitleCleanupProgress{
+			Stage: "validating", Message: "正在校验分组关系", CompletedGroups: len(groups), TotalGroups: len(groups),
+		})
 	}
 	batchCount := 0
 	for _, group := range groups {
@@ -125,14 +163,24 @@ func (s *MediaService) ApplyTitleCleanup(ctx context.Context, libraryID string, 
 		for _, row := range rows {
 			item := byID[row.ID]
 			updates := map[string]any{
-				"title":          item.Title,
-				"original_name":  "",
-				"year":           item.Year,
-				"season_num":     0,
-				"episode_num":    0,
-				"series_id":      "",
-				"episode_title":  "",
-				"scrape_status":  MediaScrapeStatusTitleCleaned,
+				"title":                 item.Title,
+				"original_name":         "",
+				"year":                  item.Year,
+				"season_num":            0,
+				"episode_num":           0,
+				"series_id":             "",
+				"episode_title":         "",
+				"scrape_status":         MediaScrapeStatusTitleCleaned,
+				"part_group_key":        "",
+				"part_group_title":      "",
+				"part_index":            0,
+				"title_cleanup_version": currentMediaTitleCleanupVersion,
+			}
+			if item.Relation == MediaTitleRelationPart {
+				directoryKey, _, _ := mediaTitleCleanupDirectory(row.Path, lib.Path)
+				updates["part_group_key"] = stableMediaPartGroupKey(lib.ID, directoryKey, item.GroupKey)
+				updates["part_group_title"] = item.GroupTitle
+				updates["part_index"] = item.PartIndex
 			}
 			if err := tx.Model(&model.Media{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
 				return err
@@ -172,7 +220,8 @@ func (s *MediaService) titleCleanupCandidates(ctx context.Context, libraryID str
 	var rows []model.Media
 	err := s.repo.DB.WithContext(ctx).
 		Where("library_id = ? AND deleted_at IS NULL", libraryID).
-		Where("LOWER(COALESCE(scrape_status, '')) IN ?", []string{"", "pending", "no_match"}).
+		Where("(LOWER(COALESCE(scrape_status, '')) IN ? OR (LOWER(COALESCE(scrape_status, '')) = ? AND COALESCE(title_cleanup_version, 0) < ?))",
+			[]string{"", "pending", "no_match"}, MediaScrapeStatusTitleCleaned, currentMediaTitleCleanupVersion).
 		Where("COALESCE(tm_db_id, 0) = 0 AND COALESCE(bangumi_id, 0) = 0").
 		Where("COALESCE(douban_id, '') = '' AND COALESCE(thetvdb_id, '') = ''").
 		Order("created_at DESC, path ASC").
@@ -183,9 +232,18 @@ func (s *MediaService) titleCleanupCandidates(ctx context.Context, libraryID str
 
 func mediaEligibleForTitleCleanup(media model.Media) bool {
 	status := strings.ToLower(strings.TrimSpace(media.ScrapeStatus))
-	return (status == "" || status == "pending" || status == "no_match") &&
+	statusEligible := status == "" || status == "pending" || status == "no_match" ||
+		(status == MediaScrapeStatusTitleCleaned && media.TitleCleanupVersion < currentMediaTitleCleanupVersion)
+	return statusEligible &&
 		media.TMDbID == 0 && media.BangumiID == 0 &&
 		strings.TrimSpace(media.DoubanID) == "" && strings.TrimSpace(media.TheTVDBID) == ""
+}
+
+func stableMediaPartGroupKey(libraryID, directoryKey, modelGroupKey string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		strings.TrimSpace(libraryID), strings.TrimSpace(directoryKey), strings.TrimSpace(modelGroupKey),
+	}, "\x1f")))
+	return hex.EncodeToString(sum[:16])
 }
 
 func selectMediaTitleCleanupGroups(rows []model.Media, lib *model.Library, groupLimit, itemLimit int) []MediaTitleCleanupGroup {
@@ -215,7 +273,7 @@ func selectMediaTitleCleanupGroups(rows []model.Media, lib *model.Library, group
 			key: key,
 			group: MediaTitleCleanupGroup{
 				SourceDirectory: sourceDirectory,
-				Items: []MediaTitleCleanupSource{mediaTitleCleanupSource(row, sourceDirectory, directoryChain)},
+				Items:           []MediaTitleCleanupSource{mediaTitleCleanupSource(row, sourceDirectory, directoryChain)},
 			},
 		})
 	}

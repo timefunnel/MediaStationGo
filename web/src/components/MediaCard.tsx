@@ -25,6 +25,7 @@ export const MediaCard = ({
   const displayTitle = media.display_title?.trim() || media.title
   const displayRating = rating ?? media.rating
   const versionCount = media.versions?.length ?? 0
+  const partCount = media.parts?.length ?? 0
 
   useEffect(() => {
     setPosterFit('cover')
@@ -82,7 +83,14 @@ export const MediaCard = ({
             </span>
           )}
 
-          {count === undefined && versionCount > 1 && (
+          {count === undefined && partCount > 1 && (
+            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-xl border border-white/15 bg-[#111827]/90 px-2 py-1 text-[10px] font-bold text-white shadow-sm">
+              <Layers size={10} className="text-[#c9954a]" />
+              <span>{partCount} 片段</span>
+            </span>
+          )}
+
+          {count === undefined && partCount <= 1 && versionCount > 1 && (
             <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-xl border border-white/15 bg-[#111827]/90 px-2 py-1 text-[10px] font-bold text-white shadow-sm">
               <Layers size={10} className="text-[#c9954a]" />
               <span>{versionCount} 版本</span>

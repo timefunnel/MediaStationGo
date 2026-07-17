@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -104,6 +105,9 @@ func (s *MediaService) GetMedia(ctx context.Context, id string) (*model.Media, e
 	}
 	items := []model.Media{*media}
 	s.attachLibraryMetadata(ctx, items)
+	if title := strings.TrimSpace(items[0].PartGroupTitle); title != "" {
+		items[0].DisplayTitle = title
+	}
 	*media = items[0]
 	return media, nil
 }

@@ -12,6 +12,10 @@ export interface Media {
   display_title?: string
   original_name?: string
   episode_title?: string
+  part_group_key?: string
+  part_group_title?: string
+  part_index?: number
+  title_cleanup_version?: number
   path: string
   relative_path?: string
   size_bytes: number
@@ -58,6 +62,7 @@ export interface Media {
   is_duplicate?: boolean
   duplicate_of?: string
   versions?: Media[]
+  parts?: Media[]
   created_at: string
   updated_at: string
 }
@@ -70,6 +75,14 @@ export interface MediaVersion extends Media {
 export interface MediaVersionList {
   items: MediaVersion[]
   can_manage_versions: boolean
+}
+
+export interface MediaPart extends Media {
+  is_current: boolean
+}
+
+export interface MediaPartList {
+  items: MediaPart[]
 }
 
 export interface Playlist {

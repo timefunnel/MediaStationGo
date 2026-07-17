@@ -12,6 +12,7 @@ import (
 type MediaItem struct {
 	model.Media
 	Versions []model.Media `json:"versions,omitempty"`
+	Parts    []model.Media `json:"parts,omitempty"`
 }
 
 func normalizeGroupedMediaPage(page, pageSize int) (int, int) {
@@ -67,34 +68,49 @@ func groupMediaVersions(items []model.Media) []MediaItem {
 	}
 	type group struct {
 		key     string
+		kind    string
 		primary model.Media
 		rows    []model.Media
 	}
 	groups := make([]group, 0, len(items))
 	byKey := make(map[string]int, len(items))
 	for _, item := range items {
+		kind := "version"
 		key := mediaVersionGroupKey(item)
+		if partKey := mediaPartGroupKey(item); partKey != "" {
+			kind = "part"
+			key = partKey
+		}
 		if key == "" {
 			groups = append(groups, group{primary: item, rows: []model.Media{item}})
 			continue
 		}
 		if idx, ok := byKey[key]; ok {
 			groups[idx].rows = append(groups[idx].rows, item)
-			if betterMediaVersion(item, groups[idx].primary) {
+			if (kind == "part" && betterMediaPart(item, groups[idx].primary)) ||
+				(kind != "part" && betterMediaVersion(item, groups[idx].primary)) {
 				groups[idx].primary = item
 			}
 			continue
 		}
 		byKey[key] = len(groups)
-		groups = append(groups, group{key: key, primary: item, rows: []model.Media{item}})
+		groups = append(groups, group{key: key, kind: kind, primary: item, rows: []model.Media{item}})
 	}
 	out := make([]MediaItem, 0, len(groups))
 	for _, g := range groups {
-		sort.SliceStable(g.rows, func(i, j int) bool {
-			return betterMediaVersion(g.rows[i], g.rows[j])
-		})
+		if g.kind == "part" {
+			sort.SliceStable(g.rows, func(i, j int) bool { return betterMediaPart(g.rows[i], g.rows[j]) })
+		} else {
+			sort.SliceStable(g.rows, func(i, j int) bool { return betterMediaVersion(g.rows[i], g.rows[j]) })
+		}
 		item := MediaItem{Media: g.primary}
-		if len(g.rows) > 1 {
+		if g.kind == "part" {
+			item.Media.Title = firstNonEmpty(g.primary.PartGroupTitle, g.primary.Title)
+			item.Media.DisplayTitle = item.Media.Title
+			if len(g.rows) > 1 {
+				item.Parts = g.rows
+			}
+		} else if len(g.rows) > 1 {
 			item.Versions = g.rows
 		}
 		out = append(out, item)
@@ -106,6 +122,9 @@ func groupMediaVersions(items []model.Media) []MediaItem {
 }
 
 func mediaVersionGroupKey(m model.Media) string {
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		return "part-source:" + strings.TrimSpace(m.ID)
+	}
 	if m.SeasonNum > 0 || m.EpisodeNum > 0 {
 		switch {
 		case m.TMDbID > 0:
@@ -160,6 +179,27 @@ func mediaVersionGroupKey(m model.Media) string {
 		_, year = CleanQuery(m.Path)
 	}
 	return fmt.Sprintf("movie:%s:%d", title, year)
+}
+
+func mediaPartGroupKey(m model.Media) string {
+	key := strings.TrimSpace(m.PartGroupKey)
+	if key == "" {
+		return ""
+	}
+	return "part:" + strings.ToLower(strings.TrimSpace(m.LibraryID)) + ":" + strings.ToLower(key)
+}
+
+func betterMediaPart(candidate, current model.Media) bool {
+	if candidate.PartIndex > 0 && current.PartIndex > 0 && candidate.PartIndex != current.PartIndex {
+		return candidate.PartIndex < current.PartIndex
+	}
+	if candidate.PartIndex > 0 && current.PartIndex <= 0 {
+		return true
+	}
+	if candidate.PartIndex <= 0 && current.PartIndex > 0 {
+		return false
+	}
+	return betterMediaVersion(candidate, current)
 }
 
 func mediaVersionTitleKey(value string) (string, int) {

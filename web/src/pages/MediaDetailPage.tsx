@@ -6,7 +6,7 @@ import { libraryAPI, mediaAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
 import { confirmAction } from '../components/confirmAction'
 import { useAuthStore } from '../stores/auth'
-import type { Library, MediaVersion } from '../types'
+import type { Library, MediaPart, MediaVersion } from '../types'
 import { MediaDetailBackdrop } from './MediaDetailArtwork'
 import {
   MediaDetailBackButton,
@@ -34,6 +34,8 @@ export function MediaDetailPage() {
   const [versions, setVersions] = useState<MediaVersion[]>([])
   const [versionsLoading, setVersionsLoading] = useState(true)
   const [versionDeletingID, setVersionDeletingID] = useState('')
+  const [parts, setParts] = useState<MediaPart[]>([])
+  const [partsLoading, setPartsLoading] = useState(true)
 
   const loadVersions = useCallback(async () => {
     if (!id) return
@@ -53,6 +55,15 @@ export function MediaDetailPage() {
       toast.error(message || '片源版本加载失败')
     })
   }, [loadVersions])
+
+  useEffect(() => {
+    if (!id) return
+    setPartsLoading(true)
+    mediaAPI.listParts(id)
+      .then((result) => setParts(result.items ?? []))
+      .catch(() => setParts([]))
+      .finally(() => setPartsLoading(false))
+  }, [id])
 
   const openUpgrade = useCallback(async () => {
     if (!detail.media || upgradeOpening) return
@@ -146,6 +157,8 @@ export function MediaDetailPage() {
         onSoftDelete={detail.softDelete}
         versions={versions}
         versionsLoading={versionsLoading}
+        parts={parts}
+        partsLoading={partsLoading}
         versionDeletingID={versionDeletingID}
         onDeleteVersion={(version) => void deleteVersion(version)}
       />

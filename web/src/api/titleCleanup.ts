@@ -1,4 +1,4 @@
-import { api, LONG_REQUEST_TIMEOUT } from './client'
+import { api } from './client'
 
 export type MediaTitleRelation = 'standalone' | 'version' | 'part'
 
@@ -10,6 +10,8 @@ export interface MediaTitleCleanupSuggestion {
   title: string
   relation: MediaTitleRelation
   group_key?: string
+  group_title?: string
+  part_index?: number
   year?: number
   confidence: number
   reason?: string
@@ -23,12 +25,33 @@ export interface MediaTitleCleanupPreview {
   suggestions: MediaTitleCleanupSuggestion[]
 }
 
+export interface MediaTitleCleanupJob {
+  id: string
+  library_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  stage: string
+  message: string
+  progress: number
+  completed_groups: number
+  total_groups: number
+  preview?: MediaTitleCleanupPreview
+  error?: string
+  started_at: string
+  updated_at: string
+  finished_at?: string
+}
+
 export const titleCleanupAPI = {
-  preview: (libraryID: string, groupLimit = 5) =>
+  startPreview: (libraryID: string, groupLimit = 5) =>
     api
-      .post<MediaTitleCleanupPreview>(`/libraries/${libraryID}/title-cleanup/preview`, {
+      .post<MediaTitleCleanupJob>(`/libraries/${libraryID}/title-cleanup/preview`, {
         group_limit: groupLimit,
-      }, { timeout: LONG_REQUEST_TIMEOUT })
+      })
+      .then((response) => response.data),
+
+  previewStatus: (libraryID: string, jobID: string) =>
+    api
+      .get<MediaTitleCleanupJob>(`/libraries/${libraryID}/title-cleanup/preview/${jobID}`)
       .then((response) => response.data),
 
   apply: (libraryID: string, items: MediaTitleCleanupSuggestion[]) =>

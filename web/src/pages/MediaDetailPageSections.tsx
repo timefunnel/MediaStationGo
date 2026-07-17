@@ -5,12 +5,13 @@ import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
 import { ManualScrapeDialog } from '../components/ManualScrapeDialog'
 import { MetadataEditDialog } from '../components/MetadataEditDialog'
 import { OrganizeMediaDialog } from '../components/OrganizeMediaDialog'
-import type { Media, MediaVersion } from '../types'
+import type { Media, MediaPart, MediaVersion } from '../types'
 import { MediaDetailAdminPanel } from './MediaDetailAdminPanel'
 import { MediaDetailPoster } from './MediaDetailArtwork'
 import { MediaDetailMetadata } from './MediaDetailMetadata'
 import { mediaDetailScrapeMediaType } from './MediaDetailPageModel'
 import { MediaDetailVersions } from './MediaDetailVersions'
+import { MediaDetailParts } from './MediaDetailParts'
 
 interface MediaDetailPlaybackActionsProps {
   media: Media
@@ -33,6 +34,8 @@ interface MediaDetailMainContentProps extends MediaDetailPlaybackActionsProps {
   onSoftDelete: () => void
   versions: MediaVersion[]
   versionsLoading: boolean
+  parts: MediaPart[]
+  partsLoading: boolean
   versionDeletingID: string
   onDeleteVersion: (version: MediaVersion) => void
 }
@@ -158,6 +161,8 @@ export function MediaDetailMainContent({
   onSoftDelete,
   versions,
   versionsLoading,
+  parts,
+  partsLoading,
   versionDeletingID,
   onDeleteVersion,
 }: MediaDetailMainContentProps) {
@@ -182,6 +187,7 @@ export function MediaDetailMainContent({
             deletingID={versionDeletingID}
             onDelete={onDeleteVersion}
           />
+          <MediaDetailParts parts={parts} loading={partsLoading} />
           {isAdmin && (
             <MediaDetailAdminPanel
               media={media}

@@ -120,6 +120,26 @@ func getMediaVersionsHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func getMediaPartsHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		result, err := svc.Media.ListMediaParts(c.Request.Context(), media.ID)
+		if err != nil {
+			writeMediaVersionError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func deleteMediaVersionHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))

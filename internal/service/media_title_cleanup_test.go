@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -32,7 +34,7 @@ func TestPreviewAndApplyMediaTitleCleanup(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"media_id\":\"` + rows[0].ID + `\",\"title\":\"作品 A 第一段\",\"relation\":\"part\",\"confidence\":0.92},{\"media_id\":\"` + rows[1].ID + `\",\"title\":\"作品 A 第二段\",\"relation\":\"part\",\"confidence\":0.88}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"media_id\":\"` + rows[0].ID + `\",\"title\":\"作品 A 第一段\",\"relation\":\"part\",\"group_key\":\"work-a\",\"group_title\":\"作品 A\",\"part_index\":1,\"confidence\":0.92},{\"media_id\":\"` + rows[1].ID + `\",\"title\":\"作品 A 第二段\",\"relation\":\"part\",\"group_key\":\"work-a\",\"group_title\":\"作品 A\",\"part_index\":2,\"confidence\":0.88}]}"}}]}`))
 	}))
 	defer server.Close()
 	ai := NewAIService(&config.Config{AI: config.AIConfig{
@@ -63,8 +65,76 @@ func TestPreviewAndApplyMediaTitleCleanup(t *testing.T) {
 		if err := repos.DB.First(&stored, "id = ?", rows[i].ID).Error; err != nil {
 			t.Fatal(err)
 		}
-		if stored.Title != want || stored.ScrapeStatus != MediaScrapeStatusTitleCleaned {
+		if stored.Title != want || stored.ScrapeStatus != MediaScrapeStatusTitleCleaned ||
+			stored.PartGroupKey == "" || stored.PartGroupTitle != "作品 A" || stored.PartIndex != i+1 ||
+			stored.TitleCleanupVersion != currentMediaTitleCleanupVersion {
 			t.Fatalf("stored media = %#v", stored)
 		}
 	}
+	grouped := groupMediaVersions(rowsFromDB(t, repos, []string{rows[0].ID, rows[1].ID}))
+	if len(grouped) != 1 || len(grouped[0].Parts) != 2 || grouped[0].Title != "作品 A" {
+		t.Fatalf("part grouping = %#v", grouped)
+	}
+	parts, err := svc.ListMediaParts(t.Context(), rows[1].ID)
+	if err != nil || len(parts.Items) != 2 || parts.Items[0].PartIndex != 1 || parts.Items[1].PartIndex != 2 {
+		t.Fatalf("part list = %#v, err=%v", parts, err)
+	}
+	detail, err := svc.GetMedia(t.Context(), rows[1].ID)
+	if err != nil || detail == nil || detail.DisplayTitle != "作品 A" {
+		t.Fatalf("part detail = %#v, err=%v", detail, err)
+	}
+}
+
+func TestMediaTitleCleanupJobReturnsProgressAndPreview(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", TitleMode: LibraryTitleModeFilename, Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	row := model.Media{LibraryID: lib.ID, Title: "raw", Path: "/media/other/作品 C/raw.mp4", ScrapeStatus: "pending"}
+	if err := repos.DB.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"media_id\":\"` + row.ID + `\",\"title\":\"作品 C\",\"relation\":\"standalone\",\"confidence\":0.91}]}"}}]}`))
+	}))
+	defer server.Close()
+	ai := NewAIService(&config.Config{AI: config.AIConfig{
+		Enabled: true, APIBase: server.URL, APIKey: "test", Model: "test",
+	}}, zap.NewNop(), nil)
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos).SetAI(ai).SetTaskTracker(NewTaskTrackerService(zap.NewNop(), nil))
+
+	job, err := svc.StartTitleCleanupJob(context.Background(), lib.ID, 5)
+	if err != nil || job.Status != MediaTitleCleanupJobQueued {
+		t.Fatalf("start job = %#v, err=%v", job, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err = svc.GetTitleCleanupJob(lib.ID, job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Status == MediaTitleCleanupJobCompleted {
+			if job.Progress != 100 || job.Preview == nil || len(job.Preview.Suggestions) != 1 {
+				t.Fatalf("completed job = %#v", job)
+			}
+			return
+		}
+		if job.Status == MediaTitleCleanupJobFailed {
+			t.Fatalf("job failed: %s", job.Error)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job did not finish: %#v", job)
+}
+
+func rowsFromDB(t *testing.T, repos *repository.Container, ids []string) []model.Media {
+	t.Helper()
+	var rows []model.Media
+	if err := repos.DB.Where("id IN ? AND deleted_at IS NULL", ids).Order("path ASC").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	return rows
 }

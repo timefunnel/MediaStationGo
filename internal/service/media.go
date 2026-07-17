@@ -14,13 +14,16 @@ import (
 
 // MediaService offers high-level CRUD over libraries and media items.
 type MediaService struct {
-	cfg          *config.Config
-	log          *zap.Logger
-	repo         *repository.Container
-	cache        *RuntimeCacheService
-	ai           *AIService
-	cloudDeleter CloudMediaDeleter
-	purgeMu      sync.Mutex
+	cfg              *config.Config
+	log              *zap.Logger
+	repo             *repository.Container
+	cache            *RuntimeCacheService
+	ai               *AIService
+	cloudDeleter     CloudMediaDeleter
+	purgeMu          sync.Mutex
+	tasks            *TaskTrackerService
+	titleCleanupMu   sync.Mutex
+	titleCleanupJobs map[string]*MediaTitleCleanupJob
 }
 
 type CloudMediaDeleter interface {
@@ -67,6 +70,13 @@ func NewMediaService(cfg *config.Config, log *zap.Logger, repo *repository.Conta
 func (s *MediaService) SetRuntimeCache(cache *RuntimeCacheService) *MediaService {
 	if s != nil {
 		s.cache = cache
+	}
+	return s
+}
+
+func (s *MediaService) SetTaskTracker(tasks *TaskTrackerService) *MediaService {
+	if s != nil {
+		s.tasks = tasks
 	}
 	return s
 }

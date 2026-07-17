@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 
 import {
   titleCleanupAPI,
+  type MediaTitleCleanupJob,
   type MediaTitleCleanupPreview,
   type MediaTitleCleanupSuggestion,
 } from '../api/titleCleanup'
@@ -30,20 +31,44 @@ export function AITitleCleanupDialog({
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
+  const [job, setJob] = useState<MediaTitleCleanupJob | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   const load = async () => {
     if (!libraryID) return
     setLoading(true)
     setError('')
+    setPreview(null)
+    setSelected(new Set())
     try {
-      const next = await titleCleanupAPI.preview(libraryID)
-      setPreview(next)
-      setSelected(defaultSelectedItems(next.suggestions))
+      const next = await titleCleanupAPI.startPreview(libraryID)
+      setJob(next)
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - new Date(next.started_at).getTime()) / 1000)))
+      acceptCleanupJob(next)
     } catch (requestError) {
+      setJob(null)
       setPreview(null)
       setSelected(new Set())
       setError(cleanupError(requestError, '生成标题清洗预览失败'))
-    } finally {
+      setLoading(false)
+    }
+  }
+
+  const acceptCleanupJob = (next: MediaTitleCleanupJob) => {
+    setJob(next)
+    if (next.status === 'completed') {
+      if (!next.preview) {
+        setError('清洗任务已完成，但没有返回预览结果')
+        setLoading(false)
+        return
+      }
+      setPreview(next.preview)
+      setSelected(defaultSelectedItems(next.preview.suggestions))
+      setLoading(false)
+      return
+    }
+    if (next.status === 'failed') {
+      setError(next.error || '生成标题清洗预览失败')
       setLoading(false)
     }
   }
@@ -53,6 +78,43 @@ export function AITitleCleanupDialog({
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, libraryID])
+
+  useEffect(() => {
+    if (!open || !job || (job.status !== 'queued' && job.status !== 'running')) return
+    let stopped = false
+    let polling = false
+    const tick = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const next = await titleCleanupAPI.previewStatus(libraryID, job.id)
+        if (!stopped) acceptCleanupJob(next)
+      } catch (requestError) {
+        if (!stopped) {
+          setError(cleanupError(requestError, '读取标题清洗进度失败'))
+          setLoading(false)
+        }
+      } finally {
+        polling = false
+      }
+    }
+    void tick()
+    const timer = window.setInterval(() => void tick(), 1_000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+    // acceptCleanupJob only updates local dialog state for the polled job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, job?.status, libraryID, open])
+
+  useEffect(() => {
+    if (!loading || !job) return
+    const updateElapsed = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - new Date(job.started_at).getTime()) / 1000)))
+    updateElapsed()
+    const timer = window.setInterval(updateElapsed, 1_000)
+    return () => window.clearInterval(timer)
+  }, [job, loading])
 
   const selectedItems = useMemo(
     () => preview?.suggestions.filter((item) => selected.has(item.media_id)) ?? [],
@@ -110,9 +172,24 @@ export function AITitleCleanupDialog({
 
         <div className="flex-1 overflow-y-auto p-5">
           {loading && (
-            <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-gray-500">
-              <LoaderCircle size={18} className="animate-spin" />
-              正在分析目录和文件名…
+            <div className="mx-auto flex min-h-56 w-full max-w-xl flex-col justify-center gap-4">
+              <div className="flex items-center justify-between gap-3 text-sm text-gray-600">
+                <span className="flex min-w-0 items-center gap-2">
+                  <LoaderCircle size={18} className="shrink-0 animate-spin" />
+                  <span className="truncate">{job?.message || '正在准备目录和文件信息'}</span>
+                </span>
+                <span className="shrink-0 tabular-nums">{elapsedSeconds} 秒</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded bg-gray-100" aria-label="清洗进度">
+                <div
+                  className="h-full rounded bg-brand-500 transition-[width] duration-300"
+                  style={{ width: `${Math.min(100, Math.max(2, job?.progress ?? 2))}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-500">
+                <span>{job?.total_groups ? `目录 ${job.completed_groups}/${job.total_groups}` : '正在统计本批目录'}</span>
+                <span>{job?.progress ?? 1}%</span>
+              </div>
             </div>
           )}
 
@@ -195,15 +272,16 @@ export function AITitleCleanupDialog({
 
 function defaultSelectedItems(items: MediaTitleCleanupSuggestion[]): Set<string> {
   const selected = new Set<string>()
-  const versionGroups = new Map<string, MediaTitleCleanupSuggestion[]>()
+  const relationGroups = new Map<string, MediaTitleCleanupSuggestion[]>()
   items.forEach((item) => {
-    if (item.relation === 'version' && item.group_key) {
-      versionGroups.set(item.group_key, [...(versionGroups.get(item.group_key) ?? []), item])
+    if ((item.relation === 'version' || item.relation === 'part') && item.group_key) {
+      const key = `${item.relation}:${item.group_key}`
+      relationGroups.set(key, [...(relationGroups.get(key) ?? []), item])
     } else if (item.confidence >= defaultConfidence) {
       selected.add(item.media_id)
     }
   })
-  versionGroups.forEach((group) => {
+  relationGroups.forEach((group) => {
     if (group.length >= 2 && group.every((item) => item.confidence >= defaultConfidence)) {
       group.forEach((item) => selected.add(item.media_id))
     }
@@ -212,9 +290,9 @@ function defaultSelectedItems(items: MediaTitleCleanupSuggestion[]): Set<string>
 }
 
 function selectionGroupIDs(item: MediaTitleCleanupSuggestion, items: MediaTitleCleanupSuggestion[]): string[] {
-  if (item.relation !== 'version' || !item.group_key) return [item.media_id]
+  if ((item.relation !== 'version' && item.relation !== 'part') || !item.group_key) return [item.media_id]
   return items
-    .filter((candidate) => candidate.relation === 'version' && candidate.group_key === item.group_key)
+    .filter((candidate) => candidate.relation === item.relation && candidate.group_key === item.group_key)
     .map((candidate) => candidate.media_id)
 }
 
