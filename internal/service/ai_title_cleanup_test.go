@@ -96,6 +96,69 @@ func TestCleanMediaTitlesCanJoinExistingPartGroup(t *testing.T) {
 	}
 }
 
+func TestCleanMediaTitlesRetriesInvalidPartIndexesWithValidationFeedback(t *testing.T) {
+	var relationCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, user := decodeAIRequestMessages(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A 第 1 段","year":0,"confidence":0.9,"reason":"文件名"},{"media_id":"b","title":"作品 A 第 2 段","year":0,"confidence":0.9,"reason":"文件名"}]}`)
+			return
+		}
+		call := relationCalls.Add(1)
+		if call == 1 {
+			writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"分段"}]}`)
+			return
+		}
+		if !strings.Contains(system, "上一轮输出未通过服务端校验") ||
+			!strings.Contains(user, "part 分组序号不连续") ||
+			!strings.Contains(user, `"previous_output"`) {
+			t.Fatalf("correction request lacks validation context: system=%s user=%s", system, user)
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":2,"confidence":0.9,"reason":"修正连续序号"}]}`)
+	}))
+	defer server.Close()
+
+	items, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+		SourceDirectory: "作品 A",
+		Items: []MediaTitleCleanupSource{
+			{MediaID: "a", Filename: "01.mp4"},
+			{MediaID: "b", Filename: "02.mp4"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relationCalls.Load() != 2 || len(items) != 2 || items[1].PartIndex != 2 {
+		t.Fatalf("relation_calls=%d items=%#v", relationCalls.Load(), items)
+	}
+}
+
+func TestCleanMediaTitlesStopsAfterBoundedValidationRetry(t *testing.T) {
+	var relationCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, _ := decodeAIRequestMessages(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A 第 1 段","year":0,"confidence":0.9,"reason":"文件名"},{"media_id":"b","title":"作品 A 第 2 段","year":0,"confidence":0.9,"reason":"文件名"}]}`)
+			return
+		}
+		relationCalls.Add(1)
+		writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.9,"reason":"分段"},{"media_id":"b","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"分段"}]}`)
+	}))
+	defer server.Close()
+
+	_, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+		Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "01.mp4"}, {MediaID: "b", Filename: "02.mp4"}},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "纠错后仍未通过校验") || !strings.Contains(err.Error(), "序号不连续") {
+		t.Fatalf("expected bounded validation error, got %v", err)
+	}
+	if relationCalls.Load() != mediaTitleCleanupMaxAttempts {
+		t.Fatalf("relation calls=%d want=%d", relationCalls.Load(), mediaTitleCleanupMaxAttempts)
+	}
+}
+
 func TestCleanMediaTitlesKeepsSameTitleStandaloneItemsSeparate(t *testing.T) {
 	groups := []MediaTitleCleanupGroup{{Items: []MediaTitleCleanupSource{{MediaID: "a"}, {MediaID: "b"}}}}
 	items, err := validateMediaTitleCleanupSuggestions(groups, []MediaTitleCleanupSuggestion{
