@@ -35,11 +35,21 @@ func (e *EmbyService) ImageURL(ctx context.Context, id, imageType string) (strin
 		if raw, ok := e.cachedArtworkURL(id, imageType); ok {
 			return raw, nil
 		}
+		if season, ok, err := e.findSeasonGroup(ctx, id, ""); err != nil {
+			return "", err
+		} else if ok {
+			return pick(season.Series.PosterURL, season.Series.BackdropURL), nil
+		}
 		return "", nil
 	}
 	if strings.HasPrefix(id, embyVirtualSeriesPrefix) {
 		if raw, ok := e.cachedArtworkURL(id, imageType); ok {
 			return raw, nil
+		}
+		if series, ok, err := e.findSeriesGroup(ctx, id, ""); err != nil {
+			return "", err
+		} else if ok {
+			return pick(series.PosterURL, series.BackdropURL), nil
 		}
 		return "", nil
 	}

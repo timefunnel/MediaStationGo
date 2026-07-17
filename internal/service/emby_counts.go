@@ -28,6 +28,11 @@ func (e *EmbyService) ItemCounts(ctx context.Context, userID string) (map[string
 	if err := e.filterEpisodeItems(ctx, base()).Count(&episodeCount).Error; err != nil {
 		return nil, err
 	}
+	var multipartEpisodeCount int64
+	if err := base().Where("COALESCE(part_group_key, '') <> ''").Count(&multipartEpisodeCount).Error; err != nil {
+		return nil, err
+	}
+	episodeCount += multipartEpisodeCount
 
 	seriesCount, err := e.countVisibleSeries(ctx, userID)
 	if err != nil {
@@ -44,14 +49,18 @@ func (e *EmbyService) ItemCounts(ctx context.Context, userID string) (map[string
 
 func (e *EmbyService) countVisibleSeries(ctx context.Context, userID string) (int, error) {
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
-		Select("id, library_id, series_id, title, original_name, path, season_num, episode_num").
-		Where("season_num > 0 OR episode_num > 0")
+		Select("id, library_id, series_id, title, original_name, path, season_num, episode_num, part_group_key").
+		Where("season_num > 0 OR episode_num > 0 OR COALESCE(part_group_key, '') <> ''")
 	q = e.applyUserMediaVisibility(ctx, q, userID)
 
 	seen := map[string]struct{}{}
 	var rows []model.Media
 	err := q.Order("media.id asc").FindInBatches(&rows, 1000, func(tx *gorm.DB, batch int) error {
 		for i := range rows {
+			if key := strings.TrimSpace(rows[i].PartGroupKey); key != "" {
+				seen[multipartSeriesID(rows[i].LibraryID, key)] = struct{}{}
+				continue
+			}
 			key := strings.TrimSpace(rows[i].SeriesID)
 			if key == "" {
 				key = stableEmbyID(embyVirtualSeriesPrefix, rows[i].LibraryID, e.seriesNameForMedia(&rows[i]))

@@ -229,6 +229,10 @@ func (e *EmbyService) collapseMediaVersionRows(ctx context.Context, rows []model
 	indexByKey := make(map[string]int, len(rows))
 	for _, row := range rows {
 		if partKey := mediaPartGroupKey(row); partKey != "" {
+			if row.SeasonNum > 0 || row.EpisodeNum > 0 {
+				out = append(out, row)
+				continue
+			}
 			if idx, ok := indexByKey[partKey]; ok {
 				partCount := out[idx].PartCount + 1
 				if betterMediaPart(row, out[idx]) {
@@ -262,7 +266,9 @@ func (e *EmbyService) collapseMediaVersionRows(ctx context.Context, rows []model
 }
 
 func (e *EmbyService) seriesItemsForLibrary(ctx context.Context, libraryID string, p ItemsParams) (map[string]any, error) {
-	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("season_num > 0 OR episode_num > 0")
+	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("season_num > 0 OR episode_num > 0").
+		Where("COALESCE(part_group_key, '') = ''")
 	q = e.applyUserMediaVisibility(ctx, q, p.UserID)
 	if libraryID != "" {
 		q = q.Where("library_id IN ?", e.mergedLibraryIDs(ctx, libraryID))
@@ -279,6 +285,19 @@ func (e *EmbyService) seriesItemsForLibrary(ctx context.Context, libraryID strin
 		return nil, err
 	}
 	groups := e.seriesGroupsFromMedia(rows)
+	partQ := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("COALESCE(part_group_key, '') <> ''")
+	partQ = e.applyUserMediaVisibility(ctx, partQ, p.UserID)
+	if libraryID != "" {
+		partQ = partQ.Where("library_id IN ?", e.mergedLibraryIDs(ctx, libraryID))
+	}
+	partQ = applyEmbyMediaSearch(partQ, p)
+	var multipartRows []model.Media
+	if err := partQ.Order("media.part_group_key ASC, media.part_index ASC, media.created_at ASC").
+		Limit(embySeriesGroupingLimit).Find(&multipartRows).Error; err != nil {
+		return nil, err
+	}
+	groups = append(groups, e.multipartSeriesGroupsFromMedia(multipartRows)...)
 	sortSeriesGroups(groups, p)
 	total := len(groups)
 	items := make([]map[string]any, 0, minInt(p.Limit, len(groups)))

@@ -45,7 +45,8 @@ func (e *EmbyService) libraryHasMultipartContent(ctx context.Context, libraryID 
 // Series,从根本上消除「电影库里整部剧被拆成单集」的现象。
 func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
 	libIDs := e.mergedLibraryIDs(ctx, p.ParentID)
-	includeSeries := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Series")
+	hasMultipart := e.libraryHasMultipartContent(ctx, p.ParentID)
+	includeSeries := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Series") || hasMultipart
 	includeMovies := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Movie")
 	apply := func(q *gorm.DB) *gorm.DB {
 		q = e.applyUserMediaVisibility(ctx, q, p.UserID)
@@ -75,6 +76,19 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		}
 	}
 	seriesGroups := e.seriesGroupsFromMedia(episodicRows)
+	if includeSeries && hasMultipart {
+		multipartQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
+		if multipartQ == nil {
+			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
+		}
+		var multipartRows []model.Media
+		if err := multipartQ.Where("COALESCE(part_group_key, '') <> ''").
+			Order("media.part_group_key ASC, media.part_index ASC, media.created_at ASC").
+			Limit(embySeriesGroupingLimit).Find(&multipartRows).Error; err != nil {
+			return nil, err
+		}
+		seriesGroups = append(seriesGroups, e.multipartSeriesGroupsFromMedia(multipartRows)...)
+	}
 
 	// 真正的电影 -> Movie 项(剔除剧集结构行)。
 	var movieRows []model.Media
@@ -84,6 +98,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 		}
 		movieQ = filterLikelyEpisodicPathsFromMovieQuery(movieQ).
+			Where("COALESCE(part_group_key, '') = ''").
 			Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit)
 		if err := movieQ.Find(&movieRows).Error; err != nil {
 			return nil, err
@@ -173,6 +188,9 @@ func (e *EmbyService) mediaShouldBeEpisode(ctx context.Context, m *model.Media) 
 	if m == nil || (m.SeasonNum <= 0 && m.EpisodeNum <= 0) {
 		return false
 	}
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		return true
+	}
 	if e.mediaBelongsToEpisodicLibrary(ctx, m) {
 		return true
 	}
@@ -191,9 +209,9 @@ func embyLibraryTypeIsEpisodic(typ string) bool {
 func (e *EmbyService) filterMovieItems(ctx context.Context, q *gorm.DB) *gorm.DB {
 	episodicIDs := e.episodicLibraryIDs(ctx)
 	if len(episodicIDs) == 0 {
-		return filterLikelyEpisodicPathsFromMovieQuery(q)
+		return filterLikelyEpisodicPathsFromMovieQuery(q).Where("COALESCE(media.part_group_key, '') = ''")
 	}
-	q = q.Where("(media.season_num = 0 AND media.episode_num = 0) OR media.library_id NOT IN ?", episodicIDs)
+	q = q.Where("((media.season_num = 0 AND media.episode_num = 0) OR media.library_id NOT IN ?) AND COALESCE(media.part_group_key, '') = ''", episodicIDs)
 	return filterLikelyEpisodicPathsFromMovieQuery(q)
 }
 

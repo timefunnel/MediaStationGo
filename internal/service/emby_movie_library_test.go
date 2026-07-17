@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -222,7 +223,7 @@ func TestEmbyMovieLibraryGroupsEpisodicContentIntoSeries(t *testing.T) {
 	}
 }
 
-func TestEmbyMovieLibraryExposesMultipartVideoThroughAdditionalParts(t *testing.T) {
+func TestEmbyMovieLibraryExposesMultipartVideoAsVirtualSeries(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
@@ -230,7 +231,7 @@ func TestEmbyMovieLibraryExposesMultipartVideoThroughAdditionalParts(t *testing.
 	}
 	rows := []model.Media{
 		{Base: model.Base{ID: "part-3"}, LibraryID: lib.ID, Title: "作品 A 第 3 段", Path: "/media/other/作品 A/003.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 3, Container: "mp4"},
-		{Base: model.Base{ID: "part-1"}, LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 1, Container: "mp4"},
+		{Base: model.Base{ID: "part-1"}, LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 1, Container: "mp4", PosterURL: "https://image.example/work-a.jpg"},
 		{Base: model.Base{ID: "part-2"}, LibraryID: lib.ID, Title: "作品 A 第 2 段", Path: "/media/other/作品 A/002.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 2, Container: "mp4"},
 	}
 	if err := svc.repo.DB.Create(&rows).Error; err != nil {
@@ -242,12 +243,12 @@ func TestEmbyMovieLibraryExposesMultipartVideoThroughAdditionalParts(t *testing.
 		t.Fatal(err)
 	}
 	items := root["Items"].([]map[string]any)
-	if len(items) != 1 || items[0]["Id"] != "part-1" || items[0]["Name"] != "作品 A" || items[0]["PartCount"] != 3 {
-		t.Fatalf("multipart work was not collapsed to its first part: %#v", items)
+	if len(items) != 1 || items[0]["Type"] != "Series" || items[0]["Name"] != "作品 A" {
+		t.Fatalf("multipart work was not exposed as one virtual series: %#v", items)
 	}
-	sources := items[0]["MediaSources"].([]map[string]any)
-	if len(sources) != 1 || sources[0]["Id"] != "part-1" {
-		t.Fatalf("parts must not be exposed as selectable versions: %#v", sources)
+	seriesID, _ := items[0]["Id"].(string)
+	if seriesID == "" || !strings.HasPrefix(seriesID, embyVirtualSeriesPrefix) {
+		t.Fatalf("multipart series has invalid id: %#v", items[0])
 	}
 	recursive, err := svc.Items(t.Context(), ItemsParams{
 		ParentID: lib.ID, Recursive: true, IncludeItemTypes: []string{"Movie"}, Limit: 1,
@@ -255,8 +256,58 @@ func TestEmbyMovieLibraryExposesMultipartVideoThroughAdditionalParts(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recursive["TotalRecordCount"] != int64(1) || len(recursive["Items"].([]map[string]any)) != 1 {
-		t.Fatalf("recursive movie query counted physical parts: %#v", recursive)
+	if recursive["TotalRecordCount"] != 1 || len(recursive["Items"].([]map[string]any)) != 1 || recursive["Items"].([]map[string]any)[0]["Type"] != "Series" {
+		t.Fatalf("recursive movie query did not preserve the multipart group: %#v", recursive)
+	}
+
+	episodes, err := svc.Items(t.Context(), ItemsParams{
+		ParentID: seriesID, Recursive: true, IncludeItemTypes: []string{"Episode"}, Limit: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	episodeItems := episodes["Items"].([]map[string]any)
+	if len(episodeItems) != 3 {
+		t.Fatalf("multipart series did not expose every ordered part: %#v", episodes)
+	}
+	for index, item := range episodeItems {
+		wantID := []string{"part-1", "part-2", "part-3"}[index]
+		if item["Id"] != wantID || item["Type"] != "Episode" || item["IndexNumber"] != index+1 || item["SeriesId"] != seriesID {
+			t.Fatalf("multipart episode %d is invalid: %#v", index, item)
+		}
+		partSources := item["MediaSources"].([]map[string]any)
+		if len(partSources) != 1 || partSources[0]["Id"] != wantID {
+			t.Fatalf("multipart episode %d leaked another source: %#v", index, partSources)
+		}
+	}
+	svc.virtualMu.Lock()
+	svc.virtualSeries = nil
+	svc.virtualSeasons = nil
+	svc.virtualArtwork = nil
+	svc.virtualMu.Unlock()
+	coldEpisodes, err := svc.Items(t.Context(), ItemsParams{
+		ParentID: seriesID, Recursive: true, IncludeItemTypes: []string{"Episode"}, Limit: 50,
+	})
+	if err != nil || len(coldEpisodes["Items"].([]map[string]any)) != 3 {
+		t.Fatalf("cold-cache multipart series lookup failed: %#v err=%v", coldEpisodes, err)
+	}
+	artwork, err := svc.ImageURL(t.Context(), seriesID, "Primary")
+	if err != nil || artwork != "https://image.example/work-a.jpg" {
+		t.Fatalf("cold-cache multipart series artwork failed: %q err=%v", artwork, err)
+	}
+	directPart, err := svc.Item(t.Context(), "part-2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directPart["Type"] != "Episode" || directPart["IndexNumber"] != 2 || directPart["SeriesId"] != seriesID {
+		t.Fatalf("direct multipart item lost its virtual episode identity: %#v", directPart)
+	}
+	counts, err := svc.ItemCounts(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["MovieCount"] != int64(0) || counts["SeriesCount"] != 1 || counts["EpisodeCount"] != int64(3) {
+		t.Fatalf("multipart item counts do not match the virtual hierarchy: %#v", counts)
 	}
 
 	additional, err := svc.AdditionalParts(t.Context(), "part-1", "")

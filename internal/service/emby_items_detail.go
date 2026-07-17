@@ -58,6 +58,10 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 	if !UserDefaultMediaVisibility(ctx, e.repo, userID).Allows(m) {
 		return nil, nil
 	}
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		view := e.multipartEpisodeForMedia(ctx, *m)
+		m = &view
+	}
 	fav := false
 	pos := int64(0)
 	watchedAt := time.Time{}
@@ -325,7 +329,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"UserData":     userData,
 		"MediaSources": e.mediaSourcesForItem(ctx, m, true, false),
 	}
-	if partCount > 1 {
+	if itemType == "Movie" && partCount > 1 {
 		item["PartCount"] = partCount
 	}
 	if ratio, ok := e.primaryImageAspectRatio(ctx, m, primaryArtwork); ok {

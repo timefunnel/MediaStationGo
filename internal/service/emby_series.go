@@ -59,6 +59,11 @@ func (e *EmbyService) findSeriesGroup(ctx context.Context, id, userID string) (e
 			return group, true, nil
 		}
 	}
+	if strings.HasPrefix(id, embyVirtualSeriesPrefix) {
+		if group, ok, err := e.findMultipartSeriesGroup(ctx, id, userID); err != nil || ok {
+			return group, ok, err
+		}
+	}
 	if !strings.HasPrefix(id, embyVirtualSeriesPrefix) {
 		if series, err := e.repo.Series.FindByID(ctx, id); err != nil {
 			return embySeriesGroup{}, false, err
@@ -105,6 +110,9 @@ func (e *EmbyService) findSeasonGroup(ctx context.Context, id, userID string) (e
 				return season, true, nil
 			}
 		}
+	}
+	if season, ok, err := e.findMultipartSeasonGroup(ctx, id, userID); err != nil || ok {
+		return season, ok, err
 	}
 	return embySeasonGroup{}, false, nil
 }
