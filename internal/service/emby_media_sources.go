@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -201,7 +202,7 @@ func nextMediaStreamIndex(streams []map[string]any) int {
 
 func embyExternalSubtitleStream(mediaID string, streamIndex, trackIndex int, track SubtitleTrack) map[string]any {
 	label := strings.TrimSpace(firstNonEmpty(track.Label, track.Lang, "Subtitle"))
-	lang := strings.TrimSpace(firstNonEmpty(track.Lang, "und"))
+	lang := embySubtitleLanguage(track.Lang)
 	localizedDefault := ""
 	ext := subtitleDeliveryExtension(track)
 	codec := subtitleCodecForExtension(ext)
@@ -209,27 +210,88 @@ func embyExternalSubtitleStream(mediaID string, streamIndex, trackIndex int, tra
 		localizedDefault = "Default"
 	}
 	return map[string]any{
-		"Index":                  streamIndex,
-		"Type":                   "Subtitle",
-		"Codec":                  codec,
-		"Language":               lang,
-		"DisplayTitle":           embySubtitleDisplayTitle(label, subtitleCodecDisplayLabel(codec)),
-		"Title":                  label,
-		"IsExternal":             true,
-		"IsExternalUrl":          false,
-		"IsInterlaced":           false,
-		"IsForced":               false,
-		"IsDefault":              trackIndex == 0,
-		"IsTextSubtitleStream":   true,
-		"SupportsExternalStream": true,
-		"DeliveryMethod":         "External",
-		"DeliveryUrl":            embySubtitleDeliveryURL(mediaID, streamIndex, trackIndex, ext),
-		"Path":                   track.Path,
-		"Protocol":               "File",
-		"LocalizedDefault":       localizedDefault,
-		"LocalizedForced":        "",
-		"LocalizedExternal":      "External",
+		"Index":                           streamIndex,
+		"Type":                            "Subtitle",
+		"Codec":                           codec,
+		"Language":                        lang,
+		"DisplayLanguage":                 embySubtitleDisplayLanguage(lang),
+		"DisplayTitle":                    embySubtitleDisplayTitle(label, subtitleCodecDisplayLabel(codec)),
+		"Title":                           label,
+		"TimeBase":                        "1/1000",
+		"IsExternal":                      true,
+		"IsExternalUrl":                   false,
+		"IsInterlaced":                    false,
+		"IsForced":                        false,
+		"IsDefault":                       trackIndex == 0,
+		"IsHearingImpaired":               false,
+		"IsTextSubtitleStream":            true,
+		"SupportsExternalStream":          true,
+		"DeliveryMethod":                  "External",
+		"DeliveryUrl":                     embySubtitleDeliveryURL(mediaID, streamIndex, ext),
+		"Path":                            embySubtitleVirtualPath(mediaID, trackIndex, ext, track),
+		"Protocol":                        "File",
+		"ExtendedVideoType":               "None",
+		"ExtendedVideoSubType":            "None",
+		"ExtendedVideoSubTypeDescription": "None",
+		"AttachmentSize":                  0,
+		"LocalizedDefault":                localizedDefault,
+		"LocalizedForced":                 "",
+		"LocalizedExternal":               "External",
 	}
+}
+
+func embySubtitleLanguage(lang string) string {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(lang), "_", "-"))
+	switch normalized {
+	case "sc", "chs", "zh-cn", "zh-hans", "zh-sg":
+		return "zh-CN"
+	case "tc", "cht", "zh-tw", "zh-hant", "zh-hk":
+		return "zh-TW"
+	case "jp", "jpn", "ja":
+		return "ja"
+	case "eng", "en":
+		return "en"
+	case "":
+		return "und"
+	default:
+		return strings.TrimSpace(lang)
+	}
+}
+
+func embySubtitleDisplayLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh-cn", "zh-hans":
+		return "Chinese Simplified"
+	case "zh-tw", "zh-hant", "zh-hk":
+		return "Chinese Traditional"
+	case "ja", "jpn":
+		return "Japanese"
+	case "en", "eng":
+		return "English"
+	case "und", "":
+		return "Unknown"
+	default:
+		return strings.TrimSpace(lang)
+	}
+}
+
+func embySubtitleVirtualPath(mediaID string, trackIndex int, ext string, track SubtitleTrack) string {
+	filename := ""
+	if _, localFilename, ok := parseLocalSubtitlePath(track.Path); ok {
+		filename = strings.TrimSpace(localFilename)
+	}
+	if filename == "" {
+		if parsed, err := url.Parse(strings.TrimSpace(track.Path)); err == nil {
+			filename = strings.TrimSpace(parsed.Query().Get("name"))
+			if filename == "" && parsed.Scheme == "" {
+				filename = pathpkg.Base(parsed.Path)
+			}
+		}
+	}
+	if filename == "" || filename == "." || filename == "/" {
+		filename = fmt.Sprintf("subtitle-%d%s", trackIndex+1, ext)
+	}
+	return pathpkg.Join("/subtitles", strings.TrimSpace(mediaID), pathpkg.Base(filename))
 }
 
 func subtitleDeliveryExtension(track SubtitleTrack) string {
@@ -309,14 +371,12 @@ func embySubtitleDisplayTitle(label, codecLabel string) string {
 	return label + " - " + codecLabel + " - External"
 }
 
-func embySubtitleDeliveryURL(mediaID string, streamIndex, trackIndex int, ext string) string {
+func embySubtitleDeliveryURL(mediaID string, streamIndex int, ext string) string {
 	if _, ok := SubtitleContentType(ext); !ok {
 		ext = ".vtt"
 	}
-	q := url.Values{}
-	q.Set("mp_track", fmt.Sprintf("%d", trackIndex))
 	mediaID = url.PathEscape(strings.TrimSpace(mediaID))
-	return fmt.Sprintf("/emby/Videos/%s/%s/Subtitles/%d/Stream%s?%s", mediaID, mediaID, streamIndex, ext, q.Encode())
+	return fmt.Sprintf("/emby/Videos/%s/%s/Subtitles/%d/Stream%s", mediaID, mediaID, streamIndex, ext)
 }
 
 func preferMediaVersion(candidate, current model.Media) bool {

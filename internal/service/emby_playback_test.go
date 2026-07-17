@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,8 +113,14 @@ func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
 	if subtitle == nil {
 		t.Fatalf("expected subtitle stream, got %#v", streams)
 	}
-	if subtitle["Codec"] != "srt" || subtitle["DeliveryUrl"] != "/emby/Videos/media-sub/media-sub/Subtitles/2/Stream.srt?mp_track=0" {
+	if subtitle["Codec"] != "srt" || subtitle["DeliveryUrl"] != "/emby/Videos/media-sub/media-sub/Subtitles/2/Stream.srt" {
 		t.Fatalf("unexpected subtitle stream: %#v", subtitle)
+	}
+	if path, _ := subtitle["Path"].(string); path != "/subtitles/media-sub/Movie.zh.srt" {
+		t.Fatalf("external subtitle Path should be a standard virtual file path: %#v", subtitle)
+	}
+	if subtitle["TimeBase"] != "1/1000" || subtitle["SupportsExternalStream"] != true {
+		t.Fatalf("external subtitle should expose standard Emby fields: %#v", subtitle)
 	}
 	if subtitle["DisplayTitle"] != "zh - SRT - External" {
 		t.Fatalf("unexpected subtitle display title: %#v", subtitle)
@@ -139,6 +146,24 @@ func TestEmbyPlaybackInfoExposesExternalSubtitles(t *testing.T) {
 	}
 	if embeddedSubtitle["Codec"] != "srt" || embeddedSubtitle["DeliveryUrl"] != subtitle["DeliveryUrl"] {
 		t.Fatalf("item detail subtitle should match playback info: item=%#v playback=%#v", embeddedSubtitle, subtitle)
+	}
+}
+
+func TestEmbyExternalSubtitleNormalizesCachedChineseTrack(t *testing.T) {
+	stream := embyExternalSubtitleStream("media-sub", 2, 0, SubtitleTrack{
+		Lang:  "zh-Hans",
+		Label: "简体中文",
+		Path:  "local-subtitle://media-sub/subtitlecat-example.srt",
+		Codec: "srt",
+	})
+	if stream["Language"] != "zh-CN" || stream["DisplayLanguage"] != "Chinese Simplified" {
+		t.Fatalf("unexpected normalized language fields: %#v", stream)
+	}
+	if stream["Path"] != "/subtitles/media-sub/subtitlecat-example.srt" {
+		t.Fatalf("unexpected virtual subtitle path: %#v", stream)
+	}
+	if delivery, _ := stream["DeliveryUrl"].(string); strings.Contains(delivery, "mp_track") {
+		t.Fatalf("standard Emby subtitle URL must not require mp_track: %#v", stream)
 	}
 }
 

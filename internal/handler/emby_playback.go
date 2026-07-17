@@ -226,17 +226,68 @@ func embySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
 
 func embyLegacySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		trackIndex, err := strconv.Atoi(strings.TrimSpace(c.Query("mp_track")))
-		if err != nil {
-			streamIndex, streamErr := strconv.Atoi(strings.TrimSpace(c.Param("stream")))
-			if streamErr != nil {
+		if rawTrackIndex := strings.TrimSpace(c.Query("mp_track")); rawTrackIndex != "" {
+			trackIndex, err := strconv.Atoi(rawTrackIndex)
+			if err != nil {
 				c.Status(http.StatusNotFound)
 				return
 			}
-			trackIndex = maxInt(0, streamIndex-1)
+			serveEmbySubtitleTrack(svc, c, c.Param("seg"), trackIndex, c.Param("format"))
+			return
 		}
-		serveEmbySubtitleTrack(svc, c, c.Param("id"), trackIndex, c.Param("format"))
+		streamIndex, err := strconv.Atoi(strings.TrimSpace(c.Param("stream")))
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		serveEmbyStandardSubtitleStream(svc, c, c.Param("id"), c.Param("seg"), streamIndex, c.Param("format"))
 	}
+}
+
+func serveEmbyStandardSubtitleStream(svc *service.Container, c *gin.Context, itemID, sourceID string, streamIndex int, format string) {
+	uid := embyUserID(c)
+	item, err := svc.Emby.Item(c.Request.Context(), itemID, uid)
+	if err != nil || item == nil || svc.Subtitle == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	trackIndex, ok := embyExternalSubtitleTrackIndex(item, sourceID, streamIndex)
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	serveEmbySubtitleTrack(svc, c, sourceID, trackIndex, format)
+}
+
+func embyExternalSubtitleTrackIndex(item map[string]any, sourceID string, streamIndex int) (int, bool) {
+	sources, ok := item["MediaSources"].([]map[string]any)
+	if !ok {
+		return 0, false
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	for _, source := range sources {
+		id, _ := source["Id"].(string)
+		if strings.TrimSpace(id) != sourceID {
+			continue
+		}
+		streams, ok := source["MediaStreams"].([]map[string]any)
+		if !ok {
+			return 0, false
+		}
+		trackIndex := 0
+		for _, stream := range streams {
+			if stream["Type"] != "Subtitle" || stream["IsExternal"] != true {
+				continue
+			}
+			index, ok := stream["Index"].(int)
+			if ok && index == streamIndex {
+				return trackIndex, true
+			}
+			trackIndex++
+		}
+		return 0, false
+	}
+	return 0, false
 }
 
 func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID string, trackIndex int, format string) {
@@ -269,13 +320,6 @@ func serveEmbySubtitleTrack(svc *service.Container, c *gin.Context, mediaID stri
 	if err := svc.Subtitle.ServeAs(c.Request.Context(), mediaID, tracks[trackIndex].Path, format, c.Writer); err != nil {
 		c.Status(http.StatusNotFound)
 	}
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func embyPlaybackRedirectToken(c *gin.Context, svc *service.Container) string {

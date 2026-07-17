@@ -195,6 +195,9 @@ func TestEmbyPlaybackInfoSubtitleDeliveryURLServesNativeSRT(t *testing.T) {
 	if deliveryURL == "" || !strings.Contains(deliveryURL, "api_key=") {
 		t.Fatalf("subtitle DeliveryUrl should carry api_key: %#v", streams)
 	}
+	if strings.Contains(deliveryURL, "mp_track=") {
+		t.Fatalf("subtitle DeliveryUrl should use the standard stream index route: %q", deliveryURL)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, deliveryURL, nil)
 	w = httptest.NewRecorder()
@@ -210,7 +213,7 @@ func TestEmbyPlaybackInfoSubtitleDeliveryURLServesNativeSRT(t *testing.T) {
 	}
 }
 
-func TestEmbyLegacyVideoSubtitleRouteServesVTT(t *testing.T) {
+func TestEmbyStandardVideoSubtitleRoutesServeVTT(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Movie.zh.srt"), []byte("1\n00:00:01,000 --> 00:00:02,000\nhello\n"), 0o644); err != nil {
@@ -260,19 +263,55 @@ func TestEmbyLegacyVideoSubtitleRouteServesVTT(t *testing.T) {
 		Subtitle: subtitle,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/emby/Videos/media-sub/media-sub/Subtitles/1/Stream.vtt?mp_track=0", nil)
-	req.Header.Set("X-Emby-Token", signedTestToken(t, secret))
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	token := signedTestToken(t, secret)
+	for _, path := range []string{
+		"/emby/Videos/media-sub/media-sub/Subtitles/1/Stream.vtt",
+		"/emby/Videos/media-sub/media-sub/Subtitles/1/0/Stream.vtt",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Emby-Token", token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("unexpected legacy subtitle status: %d body=%s", w.Code, w.Body.String())
+		if w.Code != http.StatusOK {
+			t.Fatalf("unexpected standard subtitle status for %s: %d body=%s", path, w.Code, w.Body.String())
+		}
+		if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/vtt") {
+			t.Fatalf("standard subtitle content type for %s = %q", path, contentType)
+		}
+		if body := w.Body.String(); !strings.Contains(body, "WEBVTT") || !strings.Contains(body, "hello") {
+			t.Fatalf("unexpected standard subtitle body for %s: %q", path, body)
+		}
 	}
-	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/vtt") {
-		t.Fatalf("legacy subtitle content type = %q", contentType)
+}
+
+func TestEmbyExternalSubtitleTrackIndexUsesRequestedMediaSource(t *testing.T) {
+	item := map[string]any{
+		"MediaSources": []map[string]any{
+			{
+				"Id": "source-a",
+				"MediaStreams": []map[string]any{
+					{"Index": 0, "Type": "Video"},
+					{"Index": 1, "Type": "Subtitle", "IsExternal": true},
+				},
+			},
+			{
+				"Id": "source-b",
+				"MediaStreams": []map[string]any{
+					{"Index": 0, "Type": "Video"},
+					{"Index": 1, "Type": "Audio"},
+					{"Index": 2, "Type": "Subtitle", "IsExternal": true},
+					{"Index": 3, "Type": "Subtitle", "IsExternal": true},
+				},
+			},
+		},
 	}
-	if body := w.Body.String(); !strings.Contains(body, "WEBVTT") || !strings.Contains(body, "hello") {
-		t.Fatalf("unexpected legacy subtitle body: %q", body)
+	trackIndex, ok := embyExternalSubtitleTrackIndex(item, "source-b", 3)
+	if !ok || trackIndex != 1 {
+		t.Fatalf("unexpected source-specific subtitle mapping: index=%d ok=%v", trackIndex, ok)
+	}
+	if _, ok := embyExternalSubtitleTrackIndex(item, "source-a", 3); ok {
+		t.Fatal("stream index from another media source must not be accepted")
 	}
 }
 

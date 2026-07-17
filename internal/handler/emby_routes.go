@@ -221,7 +221,10 @@ func registerEmbyVideoStreamRoutes(auth *gin.RouterGroup, svc *service.Container
 }
 
 func registerEmbyVideoSubtitleRoutes(auth *gin.RouterGroup, svc *service.Container, basePath string) {
-	for _, path := range []string{"/:id/:seg/Subtitles/:stream/Stream.:format"} {
+	for _, path := range []string{
+		"/:id/:seg/Subtitles/:stream/Stream.:format",
+		"/:id/:seg/Subtitles/:stream/:start/Stream.:format",
+	} {
 		fullPath := basePath + path
 		auth.GET(fullPath, embyLegacySubtitleStreamHandler(svc))
 		auth.HEAD(fullPath, embyLegacySubtitleStreamHandler(svc))
