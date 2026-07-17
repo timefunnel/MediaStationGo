@@ -34,6 +34,7 @@ type Media struct {
 	PartGroupKey             string  `gorm:"index;size:64" json:"part_group_key,omitempty"`
 	PartGroupTitle           string  `gorm:"size:255" json:"part_group_title,omitempty"`
 	PartIndex                int     `json:"part_index,omitempty"`
+	VersionGroupKey          string  `gorm:"index;size:64" json:"version_group_key,omitempty"`
 	TitleCleanupVersion      int     `json:"title_cleanup_version,omitempty"`
 	Path                     string  `gorm:"uniqueIndex;size:1024;not null" json:"path"`
 	RelativePath             string  `gorm:"size:1024" json:"relative_path,omitempty"`
@@ -92,6 +93,7 @@ type Media struct {
 	DisplayLibraryName string `gorm:"-" json:"display_library_name,omitempty"`
 	DisplayLibraryPath string `gorm:"-" json:"display_library_path,omitempty"`
 	DisplayTitle       string `gorm:"-" json:"display_title,omitempty"`
+	PartCount          int    `gorm:"-" json:"part_count,omitempty"`
 
 	// FileHash is a sparse-sample MD5 used for duplicate detection.
 	// Computed on-demand by the duplicate finder; format: "<hex>-<size>".

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,32 +15,31 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 )
 
-func TestCleanMediaTitlesValidatesStructuredResponse(t *testing.T) {
+func TestCleanMediaTitlesRunsNormalizationBeforeRelationshipClassification(t *testing.T) {
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
-		}
-		if stream, ok := request["stream"].(bool); !ok || stream {
-			t.Fatalf("stream = %#v, want false", request["stream"])
-		}
-		if temperature, ok := request["temperature"].(float64); !ok || temperature != 0 {
-			t.Fatalf("temperature = %#v, want 0", request["temperature"])
-		}
+		system, user := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
-			"content": "```json\n{\"items\":[{\"media_id\":\"a\",\"title\":\"作品 A\",\"relation\":\"version\",\"group_key\":\"work-a\",\"year\":2025,\"confidence\":0.96},{\"media_id\":\"b\",\"title\":\"作品 A\",\"relation\":\"version\",\"group_key\":\"work-a\",\"year\":2025,\"confidence\":0.91}]}\n```",
-		}}}})
-		_, _ = w.Write(body)
+		switch {
+		case strings.Contains(system, "标题标准化器"):
+			calls.Add(1)
+			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":2025,"confidence":0.96,"reason":"去除画质"},{"media_id":"b","title":"作品 A","year":2025,"confidence":0.91,"reason":"去除编码"}]}`)
+		case strings.Contains(system, "关系聚合器"):
+			if calls.Load() != 1 {
+				t.Fatalf("relationship stage started before normalization barrier")
+			}
+			if !strings.Contains(user, `"standardized_title":"作品 A"`) {
+				t.Fatalf("relationship input does not use normalized titles: %s", user)
+			}
+			calls.Add(1)
+			writeAIContent(t, w, `{"items":[{"media_id":"a","relation":"version","group_key":"work-a","confidence":0.94,"reason":"同作品不同画质"},{"media_id":"b","relation":"version","group_key":"work-a","confidence":0.93,"reason":"同作品不同画质"}]}`)
+		default:
+			t.Fatalf("unexpected system prompt: %s", system)
+		}
 	}))
 	defer server.Close()
 
-	ai := NewAIService(&config.Config{AI: config.AIConfig{
-		Enabled: true,
-		APIBase: server.URL,
-		APIKey:  "test-key",
-		Model:   "test-model",
-	}}, zap.NewNop(), nil)
+	ai := newTestTitleCleanupAI(server.URL)
 	groups := []MediaTitleCleanupGroup{{
 		SourceDirectory: "作品 A",
 		Items: []MediaTitleCleanupSource{
@@ -50,112 +51,186 @@ func TestCleanMediaTitlesValidatesStructuredResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Title != "作品 A" || items[1].Relation != MediaTitleRelationVersion {
-		t.Fatalf("suggestions = %#v", items)
+	if calls.Load() != 2 || len(items) != 2 {
+		t.Fatalf("calls=%d items=%#v", calls.Load(), items)
 	}
-	if items[0].Filename != "A.1080p.mkv" || items[1].SourceDirectory != "作品 A" {
-		t.Fatalf("source context missing: %#v", items)
-	}
-}
-
-func TestValidateMediaTitleCleanupSuggestionsRejectsAccidentalMerge(t *testing.T) {
-	groups := []MediaTitleCleanupGroup{{Items: []MediaTitleCleanupSource{{MediaID: "a"}, {MediaID: "b"}}}}
-	_, err := validateMediaTitleCleanupSuggestions(groups, []MediaTitleCleanupSuggestion{
-		{MediaID: "a", Title: "同名", Relation: MediaTitleRelationStandalone, Confidence: 0.7},
-		{MediaID: "b", Title: "同名", Relation: MediaTitleRelationPart, Confidence: 0.7},
-	})
-	if err == nil {
-		t.Fatal("duplicate non-version titles should be rejected")
+	if items[0].Title != "作品 A" || items[0].Relation != MediaTitleRelationVersion || items[0].Confidence != 0.94 {
+		t.Fatalf("unexpected suggestion: %#v", items[0])
 	}
 }
 
-func TestCleanMediaTitlesRunsDirectoryGroupsConcurrently(t *testing.T) {
-	var active atomic.Int32
-	var maxActive atomic.Int32
+func TestCleanMediaTitlesCanJoinExistingPartGroup(t *testing.T) {
+	const existingKey = "c01d2e3f4a5b6c7d8e9f001122334455"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
-		}
-		var payload struct {
-			Groups []MediaTitleCleanupGroup `json:"groups"`
-		}
-		if len(request.Messages) < 2 || json.Unmarshal([]byte(request.Messages[1].Content), &payload) != nil || len(payload.Groups) != 1 {
-			t.Fatalf("unexpected request: %#v", request)
-		}
-		current := active.Add(1)
-		for current > maxActive.Load() && !maxActive.CompareAndSwap(maxActive.Load(), current) {
-		}
-		time.Sleep(80 * time.Millisecond)
-		active.Add(-1)
-		id := payload.Groups[0].Items[0].MediaID
-		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
-			"content": `{"items":[{"media_id":"` + id + `","title":"作品 ` + id + `","relation":"standalone","confidence":0.9}]}`,
-		}}}})
+		system, user := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"part-3","title":"作品 A 第 3 段","year":0,"confidence":0.92,"reason":"目录与序号"}]}`)
+			return
+		}
+		if !strings.Contains(user, existingKey) {
+			t.Fatalf("existing group is missing from relationship input: %s", user)
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"part-3","relation":"part","group_key":"`+existingKey+`","group_title":"作品 A","part_index":3,"confidence":0.9,"reason":"续入现有分段"}]}`)
 	}))
 	defer server.Close()
 
-	ai := NewAIService(&config.Config{AI: config.AIConfig{
-		Enabled: true, APIBase: server.URL, APIKey: "test", Model: "test",
-	}}, zap.NewNop(), nil)
+	ai := newTestTitleCleanupAI(server.URL)
+	groups := []MediaTitleCleanupGroup{{
+		SourceDirectory: "作品 A",
+		Items:           []MediaTitleCleanupSource{{MediaID: "part-3", CurrentTitle: "003", SourceDirectory: "作品 A", Filename: "003.mp4"}},
+		ExistingGroups: []MediaTitleCleanupExistingGroup{{
+			Relation: MediaTitleRelationPart, GroupKey: existingKey, GroupTitle: "作品 A",
+			Items: []MediaTitleCleanupExistingItem{
+				{MediaID: "part-1", Title: "作品 A 第 1 段", PartIndex: 1},
+				{MediaID: "part-2", Title: "作品 A 第 2 段", PartIndex: 2},
+			},
+		}},
+	}}
+	items, err := ai.CleanMediaTitles(t.Context(), groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ExistingGroupKey != existingKey || items[0].PartIndex != 3 {
+		t.Fatalf("existing group was not reused: %#v", items)
+	}
+}
+
+func TestCleanMediaTitlesKeepsSameTitleStandaloneItemsSeparate(t *testing.T) {
+	groups := []MediaTitleCleanupGroup{{Items: []MediaTitleCleanupSource{{MediaID: "a"}, {MediaID: "b"}}}}
+	items, err := validateMediaTitleCleanupSuggestions(groups, []MediaTitleCleanupSuggestion{
+		{MediaID: "a", Title: "同名", Relation: MediaTitleRelationStandalone, Confidence: 0.7},
+		{MediaID: "b", Title: "同名", Relation: MediaTitleRelationStandalone, Confidence: 0.7},
+	})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("standalone items must remain separate: items=%#v err=%v", items, err)
+	}
+}
+
+func TestCleanMediaTitlesRunsEachStageWithBoundedConcurrency(t *testing.T) {
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	var relationshipCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, user := decodeAIRequestMessages(t, r)
+		current := active.Add(1)
+		for {
+			previous := maxActive.Load()
+			if current <= previous || maxActive.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		time.Sleep(60 * time.Millisecond)
+		active.Add(-1)
+		id := cleanupRequestMediaID(t, user)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"`+id+`","title":"作品 `+id+`","year":0,"confidence":0.9,"reason":"清洗"}]}`)
+			return
+		}
+		relationshipCalls.Add(1)
+		writeAIContent(t, w, `{"items":[{"media_id":"`+id+`","relation":"standalone","confidence":0.9,"reason":"独立"}]}`)
+	}))
+	defer server.Close()
+
+	ai := newTestTitleCleanupAI(server.URL)
 	groups := make([]MediaTitleCleanupGroup, 3)
 	for i, id := range []string{"a", "b", "c"} {
 		groups[i] = MediaTitleCleanupGroup{SourceDirectory: id, Items: []MediaTitleCleanupSource{{MediaID: id, Filename: id + ".mp4"}}}
 	}
-	progress := 0
-	items, err := ai.CleanMediaTitlesWithProgress(t.Context(), groups, func(done, total int) {
-		if total != 3 || done <= progress {
-			t.Fatalf("progress = %d/%d after %d", done, total, progress)
+	var mu sync.Mutex
+	progress := map[string]int{}
+	items, err := ai.CleanMediaTitlesWithProgress(t.Context(), groups, func(stage string, done, total int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if done == 0 {
+			progress[stage] = 0
+			return
 		}
-		progress = done
+		if total != 3 || done <= progress[stage] {
+			t.Fatalf("progress stage=%s value=%d/%d previous=%d", stage, done, total, progress[stage])
+		}
+		progress[stage] = done
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || progress != 3 || maxActive.Load() < 2 {
-		t.Fatalf("items=%d progress=%d max_active=%d", len(items), progress, maxActive.Load())
+	if len(items) != 3 || progress[mediaTitleCleanupStageCleaning] != 3 || progress[mediaTitleCleanupStageGrouping] != 3 {
+		t.Fatalf("items=%d progress=%#v", len(items), progress)
+	}
+	if relationshipCalls.Load() != 3 || maxActive.Load() < 2 || maxActive.Load() > 3 {
+		t.Fatalf("relationship_calls=%d max_active=%d", relationshipCalls.Load(), maxActive.Load())
 	}
 }
 
-func TestCleanMediaTitlesRejectsDuplicateTitlesAcrossConcurrentGroups(t *testing.T) {
+func TestCleanMediaTitlesRejectsUnknownStageFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
-		}
-		var payload struct {
-			Groups []MediaTitleCleanupGroup `json:"groups"`
-		}
-		if len(request.Messages) < 2 || json.Unmarshal([]byte(request.Messages[1].Content), &payload) != nil {
-			t.Fatal("invalid cleanup request")
-		}
-		id := payload.Groups[0].Items[0].MediaID
-		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
-			"content": `{"items":[{"media_id":"` + id + `","title":"同名作品","relation":"standalone","confidence":0.9}]}`,
-		}}}})
+		system, _ := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"a","title":"作品 A","year":0,"confidence":0.9,"relation":"part"}]}`)
+			return
+		}
+		t.Fatal("relationship stage must not run after invalid normalization output")
 	}))
 	defer server.Close()
 
-	ai := NewAIService(&config.Config{AI: config.AIConfig{
-		Enabled: true, APIBase: server.URL, APIKey: "test", Model: "test",
+	ai := newTestTitleCleanupAI(server.URL)
+	_, err := ai.CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+		Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "a.mp4"}},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict unknown-field error, got %v", err)
+	}
+}
+
+func newTestTitleCleanupAI(apiBase string) *AIService {
+	return NewAIService(&config.Config{AI: config.AIConfig{
+		Enabled: true, APIBase: apiBase, APIKey: "test", Model: "test",
 	}}, zap.NewNop(), nil)
-	groups := []MediaTitleCleanupGroup{
-		{SourceDirectory: "A", Items: []MediaTitleCleanupSource{{MediaID: "a", Filename: "a.mp4"}}},
-		{SourceDirectory: "B", Items: []MediaTitleCleanupSource{{MediaID: "b", Filename: "b.mp4"}}},
+}
+
+func decodeAIRequestMessages(t *testing.T, r *http.Request) (string, string) {
+	t.Helper()
+	var request struct {
+		Stream      bool    `json:"stream"`
+		Temperature float64 `json:"temperature"`
+		Messages    []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
 	}
-	if _, err := ai.CleanMediaTitlesWithProgress(t.Context(), groups, nil); err == nil {
-		t.Fatal("cross-directory duplicate titles should fail global validation")
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		t.Fatal(err)
 	}
+	if request.Stream || request.Temperature != 0 || len(request.Messages) < 2 {
+		t.Fatalf("unexpected AI request: %#v", request)
+	}
+	return request.Messages[0].Content, request.Messages[1].Content
+}
+
+func writeAIContent(t *testing.T, w http.ResponseWriter, content string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write(body)
+}
+
+func cleanupRequestMediaID(t *testing.T, user string) string {
+	t.Helper()
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(user), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"items", "candidates"} {
+		var items []struct {
+			MediaID string `json:"media_id"`
+		}
+		if raw, ok := payload[key]; ok && json.Unmarshal(raw, &items) == nil && len(items) > 0 {
+			return items[0].MediaID
+		}
+	}
+	t.Fatalf("media id not found in request: %s", user)
+	return ""
 }

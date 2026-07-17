@@ -60,6 +60,7 @@ func registerLowercaseEmbyPlaybackRoutes(auth *gin.RouterGroup, svc *service.Con
 	auth.POST("/items/:id/playbackinfo", embyPlaybackInfoHandler(svc))
 	auth.GET("/users/:userId/items/:id/playbackinfo", embyPlaybackInfoHandler(svc))
 	auth.POST("/users/:userId/items/:id/playbackinfo", embyPlaybackInfoHandler(svc))
+	auth.GET("/videos/:id/additionalparts", embyAdditionalPartsHandler(svc))
 
 	registerEmbyVideoStreamRoutes(auth, svc, "/videos")
 	registerEmbyVideoSubtitleRoutes(auth, svc, "/videos")

@@ -221,3 +221,70 @@ func TestEmbyMovieLibraryGroupsEpisodicContentIntoSeries(t *testing.T) {
 		t.Fatalf("series drill-down should list both episodes, got %#v", drillItems)
 	}
 }
+
+func TestEmbyMovieLibraryExposesMultipartVideoThroughAdditionalParts(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{Base: model.Base{ID: "part-3"}, LibraryID: lib.ID, Title: "作品 A 第 3 段", Path: "/media/other/作品 A/003.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 3, Container: "mp4"},
+		{Base: model.Base{ID: "part-1"}, LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 1, Container: "mp4"},
+		{Base: model.Base{ID: "part-2"}, LibraryID: lib.ID, Title: "作品 A 第 2 段", Path: "/media/other/作品 A/002.mp4", PartGroupKey: "work-a", PartGroupTitle: "作品 A", PartIndex: 2, Container: "mp4"},
+	}
+	if err := svc.repo.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := root["Items"].([]map[string]any)
+	if len(items) != 1 || items[0]["Id"] != "part-1" || items[0]["Name"] != "作品 A" || items[0]["PartCount"] != 3 {
+		t.Fatalf("multipart work was not collapsed to its first part: %#v", items)
+	}
+	sources := items[0]["MediaSources"].([]map[string]any)
+	if len(sources) != 1 || sources[0]["Id"] != "part-1" {
+		t.Fatalf("parts must not be exposed as selectable versions: %#v", sources)
+	}
+	recursive, err := svc.Items(t.Context(), ItemsParams{
+		ParentID: lib.ID, Recursive: true, IncludeItemTypes: []string{"Movie"}, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recursive["TotalRecordCount"] != int64(1) || len(recursive["Items"].([]map[string]any)) != 1 {
+		t.Fatalf("recursive movie query counted physical parts: %#v", recursive)
+	}
+
+	additional, err := svc.AdditionalParts(t.Context(), "part-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	partItems := additional["Items"].([]map[string]any)
+	if len(partItems) != 2 || partItems[0]["Id"] != "part-2" || partItems[1]["Id"] != "part-3" {
+		t.Fatalf("additional parts are not ordered by part_index: %#v", partItems)
+	}
+	for index, item := range partItems {
+		partSources := item["MediaSources"].([]map[string]any)
+		wantID := []string{"part-2", "part-3"}[index]
+		if len(partSources) != 1 || partSources[0]["Id"] != wantID {
+			t.Fatalf("additional part %d leaked another source: %#v", index, partSources)
+		}
+	}
+
+	latest, err := svc.LatestItems(t.Context(), "", lib.ID, 10)
+	if err != nil || len(latest) != 1 || latest[0]["Id"] != "part-1" {
+		t.Fatalf("latest items leaked physical parts: %#v err=%v", latest, err)
+	}
+	playback, err := svc.PlaybackInfo(t.Context(), "part-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	playSources := playback["MediaSources"].([]map[string]any)
+	if len(playSources) != 1 || playSources[0]["Id"] != "part-1" {
+		t.Fatalf("playback info treated parts as versions: %#v", playSources)
+	}
+}

@@ -11,23 +11,32 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-// movieLibraryHasEpisodicContent 报告电影类型库里是否混入了「剧集结构」内容
-// (有季集号且路径形如剧集,例如 .../国产剧/某剧/Season 01/某剧 - S01E01.mkv)。
-// 用于决定是否需要走 movieLibraryItems 把这些内容聚成 Series 卡片。普通电影库
-// 没有这类行时返回 false,继续走常规 mediaItems。
+// movieLibraryHasEpisodicContent reports whether a movie-like library needs
+// logical grouping for episodic rows or multipart videos.
 func (e *EmbyService) movieLibraryHasEpisodicContent(ctx context.Context, libraryID string) (bool, error) {
 	clause, args := embyLikelyEpisodicPathSQL()
 	if clause == "" {
-		return false, nil
+		clause = "1 = 0"
 	}
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("library_id IN ?", e.mergedLibraryIDs(ctx, libraryID)).
-		Where("(season_num > 0 OR episode_num > 0) AND ("+clause+")", args...)
+		Where("COALESCE(part_group_key, '') <> '' OR ((season_num > 0 OR episode_num > 0) AND ("+clause+"))", args...)
 	var count int64
 	if err := q.Limit(1).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (e *EmbyService) libraryHasMultipartContent(ctx context.Context, libraryID string) bool {
+	if strings.TrimSpace(libraryID) == "" {
+		return false
+	}
+	var count int64
+	err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
+		Where("library_id IN ? AND COALESCE(part_group_key, '') <> ''", e.mergedLibraryIDs(ctx, libraryID)).
+		Limit(1).Count(&count).Error
+	return err == nil && count > 0
 }
 
 // movieLibraryItems 处理电影类型库的常规浏览,返回「真正的电影(Movie)」与
@@ -36,6 +45,8 @@ func (e *EmbyService) movieLibraryHasEpisodicContent(ctx context.Context, librar
 // Series,从根本上消除「电影库里整部剧被拆成单集」的现象。
 func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
 	libIDs := e.mergedLibraryIDs(ctx, p.ParentID)
+	includeSeries := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Series")
+	includeMovies := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Movie")
 	apply := func(q *gorm.DB) *gorm.DB {
 		q = e.applyUserMediaVisibility(ctx, q, p.UserID)
 		q = q.Where("library_id IN ?", libIDs)
@@ -52,7 +63,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	// 剧集结构内容 -> Series 卡片。
 	clause, args := embyLikelyEpisodicPathSQL()
 	var episodicRows []model.Media
-	if clause != "" {
+	if includeSeries && clause != "" {
 		epQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
 		if epQ == nil {
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
@@ -66,15 +77,17 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	seriesGroups := e.seriesGroupsFromMedia(episodicRows)
 
 	// 真正的电影 -> Movie 项(剔除剧集结构行)。
-	movieQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
-	if movieQ == nil {
-		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
-	}
-	movieQ = filterLikelyEpisodicPathsFromMovieQuery(movieQ).
-		Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit)
 	var movieRows []model.Media
-	if err := movieQ.Find(&movieRows).Error; err != nil {
-		return nil, err
+	if includeMovies {
+		movieQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
+		if movieQ == nil {
+			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
+		}
+		movieQ = filterLikelyEpisodicPathsFromMovieQuery(movieQ).
+			Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit)
+		if err := movieQ.Find(&movieRows).Error; err != nil {
+			return nil, err
+		}
 	}
 	movieItems, err := e.payloadsForMedia(ctx, movieRows, p.UserID)
 	if err != nil {

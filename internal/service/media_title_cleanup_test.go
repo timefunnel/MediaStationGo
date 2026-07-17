@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,8 +34,13 @@ func TestPreviewAndApplyMediaTitleCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, _ := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"media_id\":\"` + rows[0].ID + `\",\"title\":\"作品 A 第一段\",\"relation\":\"part\",\"group_key\":\"work-a\",\"group_title\":\"作品 A\",\"part_index\":1,\"confidence\":0.92},{\"media_id\":\"` + rows[1].ID + `\",\"title\":\"作品 A 第二段\",\"relation\":\"part\",\"group_key\":\"work-a\",\"group_title\":\"作品 A\",\"part_index\":2,\"confidence\":0.88}]}"}}]}`))
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"`+rows[0].ID+`","title":"作品 A 第一段","year":0,"confidence":0.92,"reason":"第一段"},{"media_id":"`+rows[1].ID+`","title":"作品 A 第二段","year":0,"confidence":0.88,"reason":"第二段"}]}`)
+			return
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"`+rows[0].ID+`","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":1,"confidence":0.92,"reason":"连续分段"},{"media_id":"`+rows[1].ID+`","relation":"part","group_key":"work-a","group_title":"作品 A","part_index":2,"confidence":0.88,"reason":"连续分段"}]}`)
 	}))
 	defer server.Close()
 	ai := NewAIService(&config.Config{AI: config.AIConfig{
@@ -97,8 +103,13 @@ func TestMediaTitleCleanupJobReturnsProgressAndPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, _ := decodeAIRequestMessages(t, r)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"media_id\":\"` + row.ID + `\",\"title\":\"作品 C\",\"relation\":\"standalone\",\"confidence\":0.91}]}"}}]}`))
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"`+row.ID+`","title":"作品 C","year":0,"confidence":0.91,"reason":"目录名"}]}`)
+			return
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"`+row.ID+`","relation":"standalone","confidence":0.91,"reason":"单文件"}]}`)
 	}))
 	defer server.Close()
 	ai := NewAIService(&config.Config{AI: config.AIConfig{
@@ -128,6 +139,60 @@ func TestMediaTitleCleanupJobReturnsProgressAndPreview(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job did not finish: %#v", job)
+}
+
+func TestMediaTitleCleanupReusesExistingPartGroupForNewFile(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", TitleMode: LibraryTitleModeFilename, Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	const existingKey = "00112233445566778899aabbccddeeff"
+	rows := []model.Media{
+		{LibraryID: lib.ID, Title: "作品 A 第 1 段", Path: "/media/other/作品 A/001.mp4", ScrapeStatus: MediaScrapeStatusTitleCleaned, TitleCleanupVersion: currentMediaTitleCleanupVersion, PartGroupKey: existingKey, PartGroupTitle: "作品 A", PartIndex: 1},
+		{LibraryID: lib.ID, Title: "作品 A 第 2 段", Path: "/media/other/作品 A/002.mp4", ScrapeStatus: MediaScrapeStatusTitleCleaned, TitleCleanupVersion: currentMediaTitleCleanupVersion, PartGroupKey: existingKey, PartGroupTitle: "作品 A", PartIndex: 2},
+		{LibraryID: lib.ID, Title: "003", Path: "/media/other/作品 A/003.mp4", ScrapeStatus: "pending"},
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, user := decodeAIRequestMessages(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(system, "标题标准化器") {
+			writeAIContent(t, w, `{"items":[{"media_id":"`+rows[2].ID+`","title":"作品 A 第 3 段","year":0,"confidence":0.94,"reason":"目录和序号"}]}`)
+			return
+		}
+		if !strings.Contains(user, existingKey) {
+			t.Fatalf("existing part group missing from relationship request: %s", user)
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"`+rows[2].ID+`","relation":"part","group_key":"`+existingKey+`","group_title":"作品 A","part_index":3,"confidence":0.93,"reason":"续入已有分段"}]}`)
+	}))
+	defer server.Close()
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos).SetAI(newTestTitleCleanupAI(server.URL))
+
+	preview, err := svc.PreviewTitleCleanup(t.Context(), lib.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Suggestions) != 1 || preview.Suggestions[0].ExistingGroupKey != existingKey {
+		t.Fatalf("preview did not reuse group: %#v", preview.Suggestions)
+	}
+	if _, err := svc.ApplyTitleCleanup(t.Context(), lib.ID, MediaTitleCleanupApplyRequest{Items: preview.Suggestions}); err != nil {
+		t.Fatal(err)
+	}
+	var stored model.Media
+	if err := repos.DB.First(&stored, "id = ?", rows[2].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.PartGroupKey != existingKey || stored.PartIndex != 3 {
+		t.Fatalf("new part was not appended to existing group: %#v", stored)
+	}
+	grouped := groupMediaVersions(rowsFromDB(t, repos, []string{rows[0].ID, rows[1].ID, rows[2].ID}))
+	if len(grouped) != 1 || len(grouped[0].Parts) != 3 {
+		t.Fatalf("expected one three-part work, got %#v", grouped)
+	}
 }
 
 func rowsFromDB(t *testing.T, repos *repository.Container, ids []string) []model.Media {

@@ -10,6 +10,7 @@ export interface MediaTitleCleanupSuggestion {
   title: string
   relation: MediaTitleRelation
   group_key?: string
+  existing_group_key?: string
   group_title?: string
   part_index?: number
   year?: number
@@ -29,7 +30,7 @@ export interface MediaTitleCleanupJob {
   id: string
   library_id: string
   status: 'queued' | 'running' | 'completed' | 'failed'
-  stage: string
+  stage: 'queued' | 'preparing' | 'cleaning' | 'grouping' | 'validating' | 'completed' | 'failed'
   message: string
   progress: number
   completed_groups: number

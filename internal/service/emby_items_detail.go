@@ -200,10 +200,21 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string) (map[strin
 		byID[medias[i].ID] = &medias[i]
 	}
 	visibleIDs := make([]string, 0, len(ids))
+	seenLogicalItems := make(map[string]struct{})
 	for _, id := range ids {
-		if _, ok := byID[id]; ok {
-			visibleIDs = append(visibleIDs, id)
+		media, ok := byID[id]
+		if !ok {
+			continue
 		}
+		logicalKey := id
+		if key := mediaPartGroupKey(*media); key != "" {
+			logicalKey = key
+		}
+		if _, duplicate := seenLogicalItems[logicalKey]; duplicate {
+			continue
+		}
+		seenLogicalItems[logicalKey] = struct{}{}
+		visibleIDs = append(visibleIDs, id)
 	}
 	pageIDs := pageSlice(visibleIDs, 0, limit)
 	items := make([]map[string]any, 0, len(pageIDs))
@@ -221,6 +232,14 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 	seriesID := m.SeriesID
 	seriesName := ""
 	seasonID := ""
+	partCount := 0
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		name = firstNonEmpty(m.PartGroupTitle, m.Title)
+		partCount = m.PartCount
+		if partCount <= 0 {
+			partCount = e.mediaPartCount(ctx, m)
+		}
+	}
 	if e.mediaShouldBeEpisode(ctx, m) {
 		itemType = "Episode"
 		seriesID = e.seriesIDForMedia(m)
@@ -288,7 +307,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"Height":            m.Height,
 		"DateCreated":       m.CreatedAt,
 		"DateModified":      modifiedAt,
-		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path, m.Actors, embyPeopleImageSignature(people)),
+		"Etag":              embyItemETag(m.ID, modifiedAt, name, m.OriginalName, primaryArtwork, backdropArtwork, m.Path, m.Actors, embyPeopleImageSignature(people), m.PartGroupKey, fmt.Sprintf("%d", partCount)),
 		"Path":              m.Path,
 		"ParentId":          parentID,
 		"SeasonId":          seasonID,
@@ -305,6 +324,9 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		},
 		"UserData":     userData,
 		"MediaSources": e.mediaSourcesForItem(ctx, m, true, false),
+	}
+	if partCount > 1 {
+		item["PartCount"] = partCount
 	}
 	if ratio, ok := e.primaryImageAspectRatio(ctx, m, primaryArtwork); ok {
 		item["PrimaryImageAspectRatio"] = ratio

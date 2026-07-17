@@ -104,6 +104,29 @@ func embyItemByIDHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func embyAdditionalPartsHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uid := c.Param("userId")
+		if uid == "" {
+			uid = firstQueryValue(c, "UserId", "userId", "userid")
+		}
+		if uid == "" {
+			uid = embyUserID(c)
+		}
+		out, err := svc.Emby.AdditionalParts(c.Request.Context(), c.Param("id"), uid)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if out == nil {
+			embyError(c, http.StatusNotFound, "item not found")
+			return
+		}
+		embyAttachRequestTokenToMediaSources(c, out)
+		c.JSON(http.StatusOK, out)
+	}
+}
+
 func embyUserItemByIDHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		switch strings.ToLower(c.Param("id")) {

@@ -16,8 +16,6 @@ const (
 	MediaTitleCleanupJobRunning   = "running"
 	MediaTitleCleanupJobCompleted = "completed"
 	MediaTitleCleanupJobFailed    = "failed"
-
-	mediaTitleCleanupJobTimeout = 2 * time.Minute
 )
 
 var ErrMediaTitleCleanupJobNotFound = errors.New("AI 标题清洗任务不存在")
@@ -87,7 +85,7 @@ func (s *MediaService) GetTitleCleanupJob(libraryID, jobID string) (*MediaTitleC
 }
 
 func (s *MediaService) runTitleCleanupJob(parent context.Context, jobID string, groupLimit int) {
-	ctx, cancel := context.WithTimeout(parent, mediaTitleCleanupJobTimeout)
+	ctx, cancel := context.WithTimeout(parent, titleCleanupJobTimeout(groupLimit))
 	defer cancel()
 
 	job, err := s.getTitleCleanupJobByID(jobID)
@@ -109,11 +107,19 @@ func (s *MediaService) runTitleCleanupJob(parent context.Context, jobID string, 
 	})
 
 	preview, runErr := s.previewTitleCleanup(ctx, job.LibraryID, groupLimit, func(progress mediaTitleCleanupProgress) {
-		percent := 10
-		if progress.TotalGroups > 0 {
-			percent = 10 + progress.CompletedGroups*80/progress.TotalGroups
-		}
-		if progress.Stage == "validating" {
+		percent := 5
+		switch progress.Stage {
+		case mediaTitleCleanupStageCleaning:
+			percent = 10
+			if progress.TotalGroups > 0 {
+				percent = 10 + progress.CompletedGroups*35/progress.TotalGroups
+			}
+		case mediaTitleCleanupStageGrouping:
+			percent = 50
+			if progress.TotalGroups > 0 {
+				percent = 50 + progress.CompletedGroups*40/progress.TotalGroups
+			}
+		case "validating":
 			percent = 95
 		}
 		s.updateTitleCleanupJob(jobID, func(current *MediaTitleCleanupJob) {
@@ -148,6 +154,21 @@ func (s *MediaService) runTitleCleanupJob(parent context.Context, jobID string, 
 			Metrics: map[string]int64{"progress": 100, "suggestions": int64(len(preview.Suggestions))},
 		})
 	}
+}
+
+func titleCleanupJobTimeout(groupLimit int) time.Duration {
+	if groupLimit <= 0 {
+		groupLimit = 5
+	}
+	if groupLimit > 30 {
+		groupLimit = 30
+	}
+	waves := (groupLimit + 2) / 3
+	timeout := time.Duration(2*waves)*90*time.Second + 30*time.Second
+	if timeout < 2*time.Minute {
+		return 2 * time.Minute
+	}
+	return timeout
 }
 
 func (s *MediaService) getTitleCleanupJobByID(jobID string) (*MediaTitleCleanupJob, error) {

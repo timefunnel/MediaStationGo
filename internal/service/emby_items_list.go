@@ -104,19 +104,28 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 
 	fetchLimit := p.Limit
 	fetchOffset := p.StartIndex
-	if fetchLimit > 0 && e.shouldCollapseMediaVersions(ctx, p) {
+	collapseVersions := e.shouldCollapseMediaVersions(ctx, p)
+	collapseAllMultipart := p.ParentID != "" && e.libraryHasMultipartContent(ctx, p.ParentID)
+	if fetchLimit > 0 && collapseVersions {
 		// Duplicates across merged local/cloud libraries collapse into one Emby
 		// item with multiple MediaSources. Fetch a wider window so duplicates do
 		// not consume the whole requested page.
 		fetchOffset = 0
-		fetchLimit = p.StartIndex + maxInt(p.Limit*4, p.Limit)
+		if collapseAllMultipart {
+			fetchLimit = embySeriesGroupingLimit
+		} else {
+			fetchLimit = p.StartIndex + maxInt(p.Limit*4, p.Limit)
+		}
 	}
 	var rows []model.Media
 	if err := q.Order(order).Offset(fetchOffset).Limit(fetchLimit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	if e.shouldCollapseMediaVersions(ctx, p) {
+	if collapseVersions {
 		rows = e.collapseMediaVersionRows(ctx, rows)
+		if collapseAllMultipart {
+			total = int64(len(rows))
+		}
 		rows = pageSlice(rows, p.StartIndex, p.Limit)
 	}
 	items, err := e.payloadsForMedia(ctx, rows, p.UserID)
@@ -219,6 +228,22 @@ func (e *EmbyService) collapseMediaVersionRows(ctx context.Context, rows []model
 	out := make([]model.Media, 0, len(rows))
 	indexByKey := make(map[string]int, len(rows))
 	for _, row := range rows {
+		if partKey := mediaPartGroupKey(row); partKey != "" {
+			if idx, ok := indexByKey[partKey]; ok {
+				partCount := out[idx].PartCount + 1
+				if betterMediaPart(row, out[idx]) {
+					row.PartCount = partCount
+					out[idx] = row
+				} else {
+					out[idx].PartCount = partCount
+				}
+				continue
+			}
+			row.PartCount = 1
+			indexByKey[partKey] = len(out)
+			out = append(out, row)
+			continue
+		}
 		key := e.mediaVersionKey(ctx, &row)
 		if key == "" {
 			out = append(out, row)

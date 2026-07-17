@@ -247,7 +247,10 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 	// 单集卡片」。方案 B: 把它们按整剧聚成 Series 卡片,与真正的电影(Movie)并列
 	// 展示在同一电影库视图。仅在该电影库确实含此类内容时才走此分支,普通电影库
 	// 仍走 mediaItems(保留其缓存 / 版本合并逻辑)。
-	if p.ParentID != "" && !p.Recursive && len(p.IncludeItemTypes) == 0 {
+	movieOnly := containsItemType(p.IncludeItemTypes, "Movie") &&
+		!containsItemType(p.IncludeItemTypes, "Series") &&
+		!containsItemType(p.IncludeItemTypes, "Episode")
+	if p.ParentID != "" && !p.Recursive && (len(p.IncludeItemTypes) == 0 || movieOnly) {
 		if episodic, err := e.libraryIsEpisodic(ctx, p.ParentID); err == nil && !episodic {
 			if has, err := e.movieLibraryHasEpisodicContent(ctx, p.ParentID); err == nil && has {
 				return e.movieLibraryItems(ctx, p)

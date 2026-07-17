@@ -187,7 +187,11 @@ export function AITitleCleanupDialog({
                 />
               </div>
               <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>{job?.total_groups ? `目录 ${job.completed_groups}/${job.total_groups}` : '正在统计本批目录'}</span>
+                <span>
+                  {job?.total_groups
+                    ? `${cleanupStageLabel(job.stage)} ${job.completed_groups}/${job.total_groups}`
+                    : '正在统计本批目录'}
+                </span>
                 <span>{job?.progress ?? 1}%</span>
               </div>
             </div>
@@ -282,7 +286,8 @@ function defaultSelectedItems(items: MediaTitleCleanupSuggestion[]): Set<string>
     }
   })
   relationGroups.forEach((group) => {
-    if (group.length >= 2 && group.every((item) => item.confidence >= defaultConfidence)) {
+    const joinsExistingGroup = group.some((item) => Boolean(item.existing_group_key))
+    if ((group.length >= 2 || joinsExistingGroup) && group.every((item) => item.confidence >= defaultConfidence)) {
       group.forEach((item) => selected.add(item.media_id))
     }
   })
@@ -300,6 +305,19 @@ function relationLabel(relation: MediaTitleCleanupSuggestion['relation']): strin
   if (relation === 'version') return '真实版本'
   if (relation === 'part') return '分段 / 短片'
   return '独立作品'
+}
+
+function cleanupStageLabel(stage: MediaTitleCleanupJob['stage']): string {
+  switch (stage) {
+    case 'cleaning':
+      return '标题清洗'
+    case 'grouping':
+      return '关系聚合'
+    case 'validating':
+      return '最终校验'
+    default:
+      return '目录'
+  }
 }
 
 function cleanupError(error: unknown, fallback: string): string {

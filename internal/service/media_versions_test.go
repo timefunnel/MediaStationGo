@@ -80,6 +80,28 @@ func TestGroupMediaVersionsMergesMovieEncodingVariants(t *testing.T) {
 	}
 }
 
+func TestGroupMediaVersionsRequiresExplicitKeyAfterAITitleCleanup(t *testing.T) {
+	first := model.Media{
+		Base: model.Base{ID: "cleaned-a"}, LibraryID: "other", Title: "同名作品",
+		Path: "/media/other/a.mp4", ScrapeStatus: MediaScrapeStatusTitleCleaned,
+		TitleCleanupVersion: currentMediaTitleCleanupVersion,
+	}
+	second := model.Media{
+		Base: model.Base{ID: "cleaned-b"}, LibraryID: "other", Title: "同名作品",
+		Path: "/media/other/b.mp4", ScrapeStatus: MediaScrapeStatusTitleCleaned,
+		TitleCleanupVersion: currentMediaTitleCleanupVersion,
+	}
+	if grouped := groupMediaVersions([]model.Media{first, second}); len(grouped) != 2 {
+		t.Fatalf("standalone cleaned items must not merge by title: %#v", grouped)
+	}
+	first.VersionGroupKey = "explicit-version-group"
+	second.VersionGroupKey = "explicit-version-group"
+	grouped := groupMediaVersions([]model.Media{first, second})
+	if len(grouped) != 1 || len(grouped[0].Versions) != 2 {
+		t.Fatalf("explicitly grouped versions should merge: %#v", grouped)
+	}
+}
+
 func TestGroupMediaVersionsCleansCodecPunctuation(t *testing.T) {
 	web := model.Media{
 		LibraryID:    "movies",

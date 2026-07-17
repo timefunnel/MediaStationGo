@@ -161,6 +161,12 @@ func mediaVersionGroupKey(m model.Media) string {
 	case strings.TrimSpace(m.TheTVDBID) != "":
 		return "thetvdb:" + strings.ToLower(strings.TrimSpace(m.TheTVDBID))
 	}
+	if m.TitleCleanupVersion >= mediaTitleExplicitGroupingVersion {
+		if key := strings.TrimSpace(m.VersionGroupKey); key != "" {
+			return "cleanup-version:" + strings.ToLower(strings.TrimSpace(m.LibraryID)) + ":" + strings.ToLower(key)
+		}
+		return ""
+	}
 	title := firstNonEmpty(m.OriginalName, m.Title)
 	titleYear := 0
 	if title == "" {

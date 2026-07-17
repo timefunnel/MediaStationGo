@@ -28,6 +28,9 @@ func (e *EmbyService) mediaVersionSiblings(ctx context.Context, m *model.Media) 
 	if e == nil || e.repo == nil || e.repo.DB == nil || m == nil || strings.TrimSpace(m.ID) == "" {
 		return nil
 	}
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		return []model.Media{*m}
+	}
 	libraryIDs := e.mergedLibraryIDs(ctx, m.LibraryID)
 	if len(libraryIDs) == 0 {
 		libraryIDs = []string{m.LibraryID}
@@ -35,7 +38,11 @@ func (e *EmbyService) mediaVersionSiblings(ctx context.Context, m *model.Media) 
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("library_id IN ?", libraryIDs).
 		Where("season_num = ? AND episode_num = ?", m.SeasonNum, m.EpisodeNum)
-	if m.TMDbID > 0 {
+	if strings.TrimSpace(m.VersionGroupKey) != "" {
+		q = q.Where("version_group_key = ?", m.VersionGroupKey)
+	} else if m.TitleCleanupVersion >= mediaTitleExplicitGroupingVersion {
+		return []model.Media{*m}
+	} else if m.TMDbID > 0 {
 		q = q.Where("tm_db_id = ?", m.TMDbID)
 	} else if m.BangumiID > 0 {
 		q = q.Where("bangumi_id = ?", m.BangumiID)
@@ -92,6 +99,9 @@ func (e *EmbyService) mediaVersionKey(ctx context.Context, m *model.Media) strin
 	if e == nil || m == nil {
 		return ""
 	}
+	if strings.TrimSpace(m.PartGroupKey) != "" {
+		return "part-item:" + strings.TrimSpace(m.ID)
+	}
 	ids := e.mergedLibraryIDs(ctx, m.LibraryID)
 	sort.Strings(ids)
 	libraryGroup := strings.Join(ids, ",")
@@ -103,6 +113,12 @@ func (e *EmbyService) mediaVersionKey(ctx context.Context, m *model.Media) strin
 	}
 	if m.BangumiID > 0 {
 		return fmt.Sprintf("%s|bangumi:%d|s:%d|e:%d", libraryGroup, m.BangumiID, m.SeasonNum, m.EpisodeNum)
+	}
+	if m.TitleCleanupVersion >= mediaTitleExplicitGroupingVersion {
+		if key := strings.TrimSpace(m.VersionGroupKey); key != "" {
+			return fmt.Sprintf("%s|cleanup-version:%s", libraryGroup, strings.ToLower(key))
+		}
+		return ""
 	}
 	title := strings.ToLower(strings.TrimSpace(m.Title))
 	if title == "" {
