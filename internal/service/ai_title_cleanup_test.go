@@ -134,6 +134,54 @@ func TestCleanMediaTitlesRetriesInvalidPartIndexesWithValidationFeedback(t *test
 	}
 }
 
+func TestCleanMediaTitlePromptsPrioritizeChineseDescriptionsOverNumericSuffixes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		system, _ := decodeAIRequestMessages(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(system, "标题标准化器") {
+			for _, rule := range []string{
+				"标题优先提取有语义的中文描述",
+				"数字只是弱证据",
+				"孤立数字 + 空格 + 中文描述",
+				"“3月”、“12月新作”、“第3季”",
+				"不得输出“第111段”",
+				"不得用父目录影片标题覆盖它",
+			} {
+				if !strings.Contains(system, rule) {
+					t.Fatalf("normalization prompt missing rule %q", rule)
+				}
+			}
+			writeAIContent(t, w, `{"items":[{"media_id":"main","title":"玩偶姐姐 穿着可爱的黑色JK超诱惑黑丝","year":0,"confidence":0.9,"reason":"中文描述优先"},{"media_id":"ad","title":"私房猛药 提高硬度 延时不射","year":0,"confidence":0.8,"reason":"保留文件独立语义"}]}`)
+			return
+		}
+		for _, rule := range []string{
+			"按 candidates 的稳定顺序连续编为 1..N",
+			"不得因副本编号跳号而拆成 standalone",
+			"必须使用 standalone",
+		} {
+			if !strings.Contains(system, rule) {
+				t.Fatalf("relationship prompt missing rule %q", rule)
+			}
+		}
+		writeAIContent(t, w, `{"items":[{"media_id":"main","relation":"standalone","confidence":0.9,"reason":"主视频"},{"media_id":"ad","relation":"standalone","confidence":0.9,"reason":"独立广告"}]}`)
+	}))
+	defer server.Close()
+
+	items, err := newTestTitleCleanupAI(server.URL).CleanMediaTitles(t.Context(), []MediaTitleCleanupGroup{{
+		SourceDirectory: "玩偶姐姐hongkongdoll-111最新会员私信短片 穿着可爱的黑色JK超诱惑黑丝",
+		Items: []MediaTitleCleanupSource{
+			{MediaID: "main", Filename: "玩偶姐姐hongkongdoll-111.mp4"},
+			{MediaID: "ad", Filename: "私房猛药，提高硬度，延时不射.mp4"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || strings.Contains(items[0].Title, "111") || items[1].Relation != MediaTitleRelationStandalone {
+		t.Fatalf("unexpected suggestions: %#v", items)
+	}
+}
+
 func TestCleanMediaTitlesStopsAfterBoundedValidationRetry(t *testing.T) {
 	var relationCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
