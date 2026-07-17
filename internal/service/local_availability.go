@@ -132,17 +132,17 @@ func EnrichExternalMediaLibraryLinks(
 
 func bestLocalMediaLink(item ExternalMediaResult, rows []model.Media) *model.Media {
 	providerMatch := func(row model.Media) bool {
-		return (item.TMDbID > 0 && row.TMDbID == item.TMDbID) ||
+		return (item.TMDbID > 0 && row.TMDbID == item.TMDbID && tmdbMediaTypeMatches(item.MediaType, row)) ||
 			(item.BangumiID > 0 && row.BangumiID == item.BangumiID) ||
 			(strings.TrimSpace(item.DoubanID) != "" && strings.TrimSpace(row.DoubanID) == strings.TrimSpace(item.DoubanID))
 	}
 	for index := range rows {
-		if providerMatch(rows[index]) && (item.Year <= 0 || rows[index].Year <= 0 || rows[index].Year == item.Year) {
+		if providerMatch(rows[index]) && localMediaYearsMatch(item.Year, rows[index].Year) {
 			return &rows[index]
 		}
 	}
 	for index := range rows {
-		if providerMatch(rows[index]) {
+		if providerMatch(rows[index]) && (item.Year <= 0 || rows[index].Year <= 0) {
 			return &rows[index]
 		}
 	}
@@ -160,6 +160,30 @@ func bestLocalMediaLink(item ExternalMediaResult, rows []model.Media) *model.Med
 		}
 	}
 	return nil
+}
+
+func tmdbMediaTypeMatches(externalType string, row model.Media) bool {
+	externalSeries, known := externalMediaTypeIsSeries(externalType)
+	if !known {
+		return true
+	}
+	localSeries := strings.TrimSpace(row.SeriesID) != "" || row.SeasonNum > 0 || row.EpisodeNum > 0
+	return externalSeries == localSeries
+}
+
+func externalMediaTypeIsSeries(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "tv", "series", "episode", "anime", "variety", "show":
+		return true, true
+	case "movie", "film", "adult":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func localMediaYearsMatch(externalYear, localYear int) bool {
+	return externalYear <= 0 || localYear <= 0 || externalYear == localYear
 }
 
 func localMediaTitleKey(value string) string {
