@@ -155,16 +155,17 @@ export function RecycleBinPage() {
             </div>
           </div>
           {purgeProgress && (
-            <div className="mb-4 rounded-lg border border-red-100 bg-red-50/70 p-3" role="status" aria-live="polite">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-700">
+            <div className="mb-4 rounded-lg border border-[var(--app-brand-border)] bg-[var(--app-brand-soft)] p-3" role="status" aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-text)]">
                 <span className="min-w-0 truncate">正在彻底删除：{purgeProgress.currentTitle || '准备中'}</span>
-                <span className="shrink-0 tabular-nums">
-                  {purgeProgress.completed} / {purgeProgress.total} · 失败 {purgeProgress.failed}
+                <span className="flex shrink-0 items-center gap-2 tabular-nums text-[var(--app-muted)]">
+                  <span>已完成 {purgeProgress.completed} / {purgeProgress.total}</span>
+                  {purgeProgress.failed > 0 && <span className="text-red-500">失败 {purgeProgress.failed}</span>}
                 </span>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded bg-red-100">
+              <div className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--app-border)]">
                 <div
-                  className="h-full rounded bg-red-500 transition-[width] duration-200"
+                  className="h-full rounded bg-brand-500 transition-[width] duration-200"
                   style={{ width: `${purgeProgress.total > 0 ? Math.round((purgeProgress.completed / purgeProgress.total) * 100) : 0}%` }}
                 />
               </div>
