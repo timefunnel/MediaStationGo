@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleArrowUp, Heart, LoaderCircle, Play, RefreshCw } from 'lucide-react'
+import { ArrowLeft, BellPlus, Check, CircleArrowUp, Heart, LoaderCircle, Play, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
@@ -19,6 +19,10 @@ interface MediaDetailPlaybackActionsProps {
   onToggleFavourite: () => void
   onUpgrade: () => void
   upgradeOpening: boolean
+  canSubscribe: boolean
+  subscribing: boolean
+  subscribed: boolean
+  onSubscribe: () => void
 }
 
 interface MediaDetailMainContentProps extends MediaDetailPlaybackActionsProps {
@@ -99,6 +103,10 @@ export function MediaDetailPlaybackActions({
   onToggleFavourite,
   onUpgrade,
   upgradeOpening,
+  canSubscribe,
+  subscribing,
+  subscribed,
+  onSubscribe,
 }: MediaDetailPlaybackActionsProps) {
   return (
     <div className="flex flex-wrap gap-3">
@@ -127,6 +135,18 @@ export function MediaDetailPlaybackActions({
         <span>升级片源</span>
       </button>
 
+      {canSubscribe && (
+        <button
+          type="button"
+          onClick={onSubscribe}
+          disabled={subscribing || subscribed}
+          className="btn-outline gap-2 border-brand-500/30 text-[#c9954a] hover:border-brand-500 hover:bg-brand-50"
+        >
+          {subscribing ? <LoaderCircle size={15} className="animate-spin" /> : subscribed ? <Check size={15} /> : <BellPlus size={15} />}
+          <span>{subscribed ? '已订阅' : '订阅追更'}</span>
+        </button>
+      )}
+
       <button
         onClick={onToggleFavourite}
         className={
@@ -151,6 +171,10 @@ export function MediaDetailMainContent({
   onToggleFavourite,
   onUpgrade,
   upgradeOpening,
+  canSubscribe,
+  subscribing,
+  subscribed,
+  onSubscribe,
   onScrapeEpisodeArtworkChange,
   onSmartScrape,
   onManualScrape,
@@ -180,6 +204,10 @@ export function MediaDetailMainContent({
             onToggleFavourite={onToggleFavourite}
             onUpgrade={onUpgrade}
             upgradeOpening={upgradeOpening}
+            canSubscribe={canSubscribe}
+            subscribing={subscribing}
+            subscribed={subscribed}
+            onSubscribe={onSubscribe}
           />
           <MediaDetailVersions
             versions={versions}

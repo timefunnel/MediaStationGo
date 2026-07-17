@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/ShukeBta/MediaStationGo/internal/middleware"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
@@ -61,8 +62,8 @@ func registerAuthedSitesExtraRoutes(authed *gin.RouterGroup, svc *service.Contai
 }
 
 func registerAuthedSubscriptionExtraRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.PUT("/subscriptions/:id", requirePermission(svc, "can_manage_subscriptions"), updateSubscriptionHandler(svc))
-	authed.POST("/subscriptions/:id/search", requirePermission(svc, "can_manage_subscriptions"), searchSubscriptionHandler(svc))
+	authed.PUT("/subscriptions/:id", middleware.AdminRequired(), updateSubscriptionHandler(svc))
+	authed.POST("/subscriptions/:id/search", middleware.AdminRequired(), searchSubscriptionHandler(svc))
 }
 
 func registerAuthedPlaylistExtraRoutes(authed *gin.RouterGroup, svc *service.Container) {

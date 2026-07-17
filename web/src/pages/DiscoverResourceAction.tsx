@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { LoaderCircle } from 'lucide-react'
+import { BellPlus, Check, LoaderCircle } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 import type { DiscoverItem } from '../api/discover'
 import { libraryAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
+import { buildResourceImportFeedURL, buildSubscriptionAliases, subscriptionsAPI } from '../api/subscriptions'
+import { useAuthStore } from '../stores/auth'
 import type { Library } from '../types'
 import { discoverResourceSearchKeyword } from './discoverDetailModalModel'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
@@ -14,8 +17,12 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
   const [selectedLibraryID, setSelectedLibraryID] = useState('')
   const [tasks, setTasks] = useState<ResourceImportTask[]>([])
   const [taskID, setTaskID] = useState('')
+  const [subscriptionRootID, setSubscriptionRootID] = useState('')
+  const [subscribing, setSubscribing] = useState(false)
+  const [subscribed, setSubscribed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
 
   useEffect(() => {
     let cancelled = false
@@ -44,14 +51,55 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
   )
   const effectiveLibraryID = selectedLibraryID || preferredLibraryID
   const selectedLibrary = libraries.find((library) => library.id === effectiveLibraryID)
+  const enabledRoots = (selectedLibrary?.roots ?? []).filter((root) => root.enabled)
+  const effectiveSubscriptionRootID = subscriptionRootID || (enabledRoots.length === 1 ? enabledRoots[0].id : '')
+  const canSubscribe = isAdmin && ['tv', 'anime', 'variety'].includes((item.media_type || '').toLowerCase())
   const acceptTask = useCallback((task: ResourceImportTask) => {
     setTasks((current) => mergeResourceImportTasks(current, [task]))
   }, [])
 
   const selectLibrary = (libraryID: string) => {
     setSelectedLibraryID(libraryID)
+    const roots = (libraries.find((library) => library.id === libraryID)?.roots ?? []).filter((root) => root.enabled)
+    setSubscriptionRootID(roots.length === 1 ? roots[0].id : '')
+    setSubscribed(false)
     setTasks([])
     setTaskID('')
+  }
+
+  const createSubscription = async () => {
+    if (!selectedLibrary || !effectiveSubscriptionRootID || subscribing) return
+    setSubscribing(true)
+    try {
+      const aliases = buildSubscriptionAliases(item)
+      await subscriptionsAPI.create({
+        name: item.title,
+        feed_url: buildResourceImportFeedURL(aliases),
+        delivery_mode: 'resource_import',
+        library_id: selectedLibrary.id,
+        library_root_id: effectiveSubscriptionRootID,
+        resource_source: 'pansou',
+        max_imports_per_run: 2,
+        season_number: 1,
+        filter: item.subscribe_keyword || item.title,
+        original_name: item.original_name,
+        year: item.year,
+        media_type: item.media_type || selectedLibrary.type,
+        poster_url: item.poster_url,
+        backdrop_url: item.backdrop_url,
+        overview: item.overview,
+        total_episodes: item.total_episodes,
+        resolution: 'best',
+        enabled: true,
+      })
+      setSubscribed(true)
+      toast.success('已创建网盘追更订阅')
+    } catch (requestError) {
+      const message = (requestError as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || '创建订阅失败')
+    } finally {
+      setSubscribing(false)
+    }
   }
 
   return (
@@ -81,6 +129,32 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
               ))}
             </select>
           </label>
+          {canSubscribe && selectedLibrary && (
+            <div className="flex flex-wrap items-end gap-2">
+              {enabledRoots.length > 1 && (
+                <label className="min-w-56 flex-1 text-xs text-sand-500">
+                  追更入库目录
+                  <select
+                    className="input-base mt-1"
+                    value={effectiveSubscriptionRootID}
+                    onChange={(event) => setSubscriptionRootID(event.target.value)}
+                  >
+                    <option value="">选择目录</option>
+                    {enabledRoots.map((root) => <option key={root.id} value={root.id}>{root.name || root.path}</option>)}
+                  </select>
+                </label>
+              )}
+              <button
+                type="button"
+                className="btn-outline gap-2"
+                disabled={!effectiveSubscriptionRootID || subscribing || subscribed}
+                onClick={() => void createSubscription()}
+              >
+                {subscribing ? <LoaderCircle size={15} className="animate-spin" /> : subscribed ? <Check size={15} /> : <BellPlus size={15} />}
+                {subscribed ? '已订阅' : '订阅追更'}
+              </button>
+            </div>
+          )}
           {selectedLibrary && (
             <ResourceSearchDrawer
               key={selectedLibrary.id}

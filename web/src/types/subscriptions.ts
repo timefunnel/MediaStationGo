@@ -3,6 +3,12 @@ export interface Subscription {
   user_id: string
   name: string
   feed_url: string
+  delivery_mode: 'download' | 'resource_import'
+  library_id?: string
+  library_root_id?: string
+  resource_source?: string
+  max_imports_per_run?: number
+  season_number?: number
   filter: string
   media_type?: string
   media_category?: string

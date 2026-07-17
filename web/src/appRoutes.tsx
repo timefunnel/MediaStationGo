@@ -77,7 +77,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'media/:id', element: <MediaDetailPage /> },
   { path: 'play/:id', element: <PlayerPage /> },
   { path: 'downloads', element: <DownloadsPage /> },
-  { path: 'subscriptions', element: <SubscriptionsPage /> },
+  { path: 'subscriptions', element: <SubscriptionsPage />, adminOnly: true },
   { path: 'profile', element: <ProfilePage /> },
   { path: 'dlna', element: <DlnaPage /> },
   { path: 'history', element: <WatchHistoryPage /> },

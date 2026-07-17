@@ -20,6 +20,7 @@ type ResourceSearchSession struct {
 type ResourceImportJob struct {
 	Base
 	UserID          string     `gorm:"index;size:36;not null" json:"user_id"`
+	SubscriptionID  string     `gorm:"index;size:36" json:"subscription_id,omitempty"`
 	LibraryID       string     `gorm:"index;size:36;not null" json:"library_id"`
 	LibraryRootID   string     `gorm:"index;size:36;not null" json:"library_root_id"`
 	SearchSessionID string     `gorm:"index;size:36;not null" json:"search_session_id"`

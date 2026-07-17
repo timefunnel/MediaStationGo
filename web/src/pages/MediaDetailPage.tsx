@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 
 import { libraryAPI, mediaAPI } from '../api/library'
 import type { ResourceImportTask } from '../api/resourceImports'
+import { buildResourceImportFeedURL, buildSubscriptionAliases, subscriptionsAPI } from '../api/subscriptions'
 import { confirmAction } from '../components/confirmAction'
 import { useAuthStore } from '../stores/auth'
 import type { Library, MediaPart, MediaVersion } from '../types'
@@ -36,6 +37,8 @@ export function MediaDetailPage() {
   const [versionDeletingID, setVersionDeletingID] = useState('')
   const [parts, setParts] = useState<MediaPart[]>([])
   const [partsLoading, setPartsLoading] = useState(true)
+  const [subscribing, setSubscribing] = useState(false)
+  const [subscribed, setSubscribed] = useState(false)
 
   const loadVersions = useCallback(async () => {
     if (!id) return
@@ -129,6 +132,47 @@ export function MediaDetailPage() {
     }
   }, [detail, loadVersions, navigate, versionDeletingID])
 
+  const subscribeToUpdates = useCallback(async () => {
+    if (!detail.media || role !== 'admin' || subscribing) return
+    setSubscribing(true)
+    try {
+      const media = detail.media
+      const library = await libraryAPI.get(media.library_id)
+      const roots = (library.roots ?? []).filter((root) => root.enabled)
+      const rootID = roots.some((root) => root.id === media.library_root_id)
+        ? media.library_root_id ?? ''
+        : roots.length === 1 ? roots[0].id : ''
+      if (!rootID) throw new Error('当前作品缺少明确的入库目录')
+      const aliases = buildSubscriptionAliases({ title: media.title, original_name: media.original_name, year: media.year })
+      await subscriptionsAPI.create({
+        name: media.title,
+        feed_url: buildResourceImportFeedURL(aliases),
+        delivery_mode: 'resource_import',
+        library_id: library.id,
+        library_root_id: rootID,
+        resource_source: 'pansou',
+        max_imports_per_run: 2,
+        season_number: media.season_num || 1,
+        filter: media.original_name?.trim() || media.title,
+        original_name: media.original_name,
+        year: media.year,
+        media_type: library.type,
+        poster_url: media.poster_url,
+        backdrop_url: media.backdrop_url,
+        overview: media.overview,
+        resolution: 'best',
+        enabled: true,
+      })
+      setSubscribed(true)
+      toast.success('已创建网盘追更订阅')
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || (error instanceof Error ? error.message : '创建订阅失败'))
+    } finally {
+      setSubscribing(false)
+    }
+  }, [detail.media, role, subscribing])
+
   if (detail.loading) return <MediaDetailLoading />
   if (!detail.media) return <MediaDetailMissing />
   const media = detail.media
@@ -147,6 +191,10 @@ export function MediaDetailPage() {
         onToggleFavourite={detail.toggleFavourite}
         onUpgrade={() => void openUpgrade()}
         upgradeOpening={upgradeOpening}
+        canSubscribe={role === 'admin' && Boolean(media.series_id || media.season_num > 0)}
+        subscribing={subscribing}
+        subscribed={subscribed}
+        onSubscribe={() => void subscribeToUpdates()}
         onScrapeEpisodeArtworkChange={detail.setScrapeEpisodeArtwork}
         onSmartScrape={detail.rescrape}
         onManualScrape={() => detail.setManualScrapeOpen(true)}

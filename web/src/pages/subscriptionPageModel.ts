@@ -1,6 +1,16 @@
 import type { Subscription } from '../types'
 
 export function subscriptionRuleBadges(subscription: Subscription): string[] {
+  if (subscription.delivery_mode === 'resource_import') {
+    return [
+      `第 ${subscription.season_number || 1} 季`,
+      `每轮最多 ${subscription.max_imports_per_run || 2} 集`,
+      subscription.resolution && subscription.resolution !== 'best' ? subscription.resolution : '分辨率不限',
+      subscription.quality || '质量不限',
+      subscription.effects || '',
+      subscription.release_groups ? `发布组 ${subscription.release_groups}` : '',
+    ].filter(Boolean)
+  }
   const labels = [
     subscription.search_mode === 'imdb' ? `IMDB ${subscription.imdb_id || '未填'}` : '关键词搜索',
     subscription.resolution && subscription.resolution !== 'best' ? subscription.resolution : '分辨率不限',
@@ -43,9 +53,10 @@ export function subscriptionProgressLabel(subscription: Subscription): string {
   const total = subscription.total_episodes || 0
   if (total > 0) {
     const missing = subscription.missing_episodes?.length || 0
-    return missing > 0 ? `已下载 ${downloaded}/${total} 集，缺 ${missing} 集` : `已下载 ${downloaded}/${total} 集`
+    const prefix = subscription.delivery_mode === 'resource_import' ? '已入库' : '已下载'
+    return missing > 0 ? `${prefix} ${downloaded}/${total} 集，待补 ${missing} 集` : `${prefix} ${downloaded}/${total} 集`
   }
-  return `已下载 ${downloaded}/未知 集`
+  return `${subscription.delivery_mode === 'resource_import' ? '已入库' : '已下载'} ${downloaded}/未知 集`
 }
 
 function washPriorityLabel(priority?: string): string {

@@ -30,7 +30,7 @@ export function SubscriptionCard({ subscription, onEdit, onRunNow, onRemove }: S
           <div>
             <div className="mb-1 flex flex-wrap gap-1.5">
               <span className="rounded-full bg-primary-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-brand-500">
-                {subscription.source || 'RSS'}
+                {subscription.delivery_mode === 'resource_import' ? '网盘追更' : subscription.source || 'RSS'}
               </span>
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-sand-500">
                 {[subscription.media_type, subscription.media_category].filter(Boolean).join(' / ') || '自动分类'}
@@ -55,7 +55,7 @@ export function SubscriptionCard({ subscription, onEdit, onRunNow, onRemove }: S
           <div className="space-y-1.5 text-xs text-ink-100">
             <div className="flex items-center gap-1.5">
               <ShieldCheck size={13} className="text-brand-500" />
-              <span>订阅源已脱敏</span>
+              <span>{subscription.delivery_mode === 'resource_import' ? `PanSou · 第 ${subscription.season_number || 1} 季` : '订阅源已脱敏'}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <CalendarClock size={13} className="text-brand-500" />

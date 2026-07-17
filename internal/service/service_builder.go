@@ -55,6 +55,9 @@ func (b *serviceContainerBuilder) initResourceImport() {
 		return
 	}
 	b.c.ResourceImport = service
+	if b.c.Subscription != nil {
+		b.c.Subscription.SetResourceImport(service)
+	}
 }
 
 func (b *serviceContainerBuilder) recoverResourceImports() {

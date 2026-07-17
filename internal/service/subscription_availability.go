@@ -39,25 +39,61 @@ func (s *SubscriptionService) pendingDownloadAvailability(ctx context.Context, s
 	return s.finalizePendingAvailability(sub, out)
 }
 
-func (s *SubscriptionService) EnrichProgress(ctx context.Context, items []model.Subscription) {
+func (s *SubscriptionService) EnrichProgress(ctx context.Context, items []model.Subscription) error {
 	for i := range items {
+		if subscriptionUsesResourceImport(&items[i]) {
+			local, err := SubscriptionTargetLocalAvailability(ctx, s.repo, &items[i])
+			if err != nil {
+				return err
+			}
+			pending, err := s.pendingResourceImportAvailability(ctx, &items[i])
+			if err != nil {
+				return err
+			}
+			availability := mergeLocalAvailabilityForSeason(
+				subscriptionSeasonNumber(&items[i]),
+				local,
+				pending,
+			)
+			applySubscriptionAvailability(&items[i], availability)
+			continue
+		}
 		availability := mergeLocalAvailability(
 			SubscriptionLocalAvailability(ctx, s.repo, &items[i]),
 			s.pendingDownloadAvailability(ctx, &items[i]),
 		)
 		applySubscriptionAvailability(&items[i], availability)
 	}
+	return nil
 }
 
-func (s *SubscriptionService) EnrichManagementProgress(ctx context.Context, items []model.Subscription) {
+func (s *SubscriptionService) EnrichManagementProgress(ctx context.Context, items []model.Subscription) error {
 	rows := s.downloadTaskRowsForAvailability(ctx)
 	for i := range items {
+		if subscriptionUsesResourceImport(&items[i]) {
+			local, err := SubscriptionTargetLocalAvailability(ctx, s.repo, &items[i])
+			if err != nil {
+				return err
+			}
+			pending, err := s.pendingResourceImportAvailability(ctx, &items[i])
+			if err != nil {
+				return err
+			}
+			availability := mergeLocalAvailabilityForSeason(
+				subscriptionSeasonNumber(&items[i]),
+				local,
+				pending,
+			)
+			applySubscriptionAvailability(&items[i], availability)
+			continue
+		}
 		availability := mergeLocalAvailability(
 			SubscriptionLocalAvailability(ctx, s.repo, &items[i]),
 			s.pendingDownloadTaskAvailability(ctx, &items[i], rows, false),
 		)
 		applySubscriptionAvailability(&items[i], availability)
 	}
+	return nil
 }
 
 func applySubscriptionAvailability(sub *model.Subscription, availability LocalAvailability) {

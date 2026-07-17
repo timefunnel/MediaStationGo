@@ -2,9 +2,10 @@ import { FormEvent, useEffect, useState } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import { subscriptionsAPI } from '../api/subscriptions'
+import { libraryAPI } from '../api/library'
+import { buildResourceImportFeedURL, subscriptionsAPI, type SubscriptionCreateInput } from '../api/subscriptions'
 import { confirmAction } from '../components/confirmAction'
-import type { Subscription } from '../types'
+import type { Library, Subscription } from '../types'
 import { SubscriptionCard } from './SubscriptionCard'
 import { SubscriptionForm } from './SubscriptionForm'
 import { SubscriptionHistorySection } from './SubscriptionHistorySection'
@@ -13,6 +14,7 @@ import { defaultSubscriptionFormValues, type SubscriptionFormValues } from './su
 export function SubscriptionsPage() {
   const [items, setItems] = useState<Subscription[]>([])
   const [historyItems, setHistoryItems] = useState<Subscription[]>([])
+  const [libraries, setLibraries] = useState<Library[]>([])
   const [formValues, setFormValues] = useState<SubscriptionFormValues>(defaultSubscriptionFormValues)
   const [editingId, setEditingId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -54,14 +56,24 @@ export function SubscriptionsPage() {
 
   useEffect(() => {
     refresh().catch(() => undefined)
+    libraryAPI.list().then((rows) => setLibraries(rows.filter((library) => library.enabled))).catch(() => {
+      toast.error('媒体库加载失败')
+    })
   }, [])
 
   const onCreate = async (e: FormEvent) => {
     e.preventDefault()
     try {
-      const payload = {
+      const resourceMode = formValues.deliveryMode === 'resource_import'
+      const payload: SubscriptionCreateInput = {
         name: formValues.name,
-        feed_url: formValues.feed,
+        feed_url: resourceMode ? buildResourceImportFeedURL() : formValues.feed,
+        delivery_mode: formValues.deliveryMode,
+        library_id: resourceMode ? formValues.libraryID : undefined,
+        library_root_id: resourceMode ? formValues.libraryRootID : undefined,
+        resource_source: resourceMode ? 'pansou' : undefined,
+        max_imports_per_run: resourceMode ? numericRuleValue(formValues.maxImportsPerRun) : undefined,
+        season_number: resourceMode ? numericRuleValue(formValues.seasonNumber) : undefined,
         filter: formValues.filter,
         media_type: formValues.mediaType || undefined,
         media_category: formValues.mediaCategory || undefined,
@@ -81,6 +93,7 @@ export function SubscriptionsPage() {
         free_only: formValues.freeOnly,
         wash_enabled: formValues.washEnabled,
         wash_priority: formValues.washPriority,
+        total_episodes: resourceMode ? numericRuleValue(formValues.totalEpisodes) : undefined,
         priority: 50,
       }
       if (editingId) {
@@ -106,8 +119,14 @@ export function SubscriptionsPage() {
   const startEdit = (s: Subscription) => {
     setEditingId(s.id)
     setFormValues({
+      deliveryMode: s.delivery_mode || 'download',
       name: s.name,
       feed: s.feed_url,
+      libraryID: s.library_id || '',
+      libraryRootID: s.library_root_id || '',
+      maxImportsPerRun: String(s.max_imports_per_run || 2),
+      seasonNumber: String(s.season_number || 1),
+      totalEpisodes: stringRuleValue(s.total_episodes),
       filter: s.filter || '',
       mediaType: s.media_type || '',
       mediaCategory: s.media_category || '',
@@ -173,13 +192,14 @@ export function SubscriptionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-3xl font-bold text-ink-600">传统订阅</h1>
+      <h1 className="font-display text-3xl font-bold text-ink-600">订阅追更</h1>
       <p className="text-sm text-ink-50">
-        RSS / PT 站点订阅
+        默认通过网盘搜索自动补齐缺集；传统 RSS / PT 规则保留为高级模式。
       </p>
 
       <SubscriptionForm
         values={formValues}
+        libraries={libraries}
         editing={Boolean(editingId)}
         onSubmit={onCreate}
         onCancelEdit={resetForm}

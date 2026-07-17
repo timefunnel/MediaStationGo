@@ -25,17 +25,18 @@ import (
 
 // SubscriptionService runs the polling loop.
 type SubscriptionService struct {
-	cfg       *config.Config
-	log       *zap.Logger
-	repo      *repository.Container
-	downloads *DownloadService
-	site      *SiteService
-	scraper   *ScraperService
-	hub       *Hub
-	notify    *NotifyChannelService
-	mu        sync.Mutex
-	stop      chan struct{}
-	running   bool
+	cfg            *config.Config
+	log            *zap.Logger
+	repo           *repository.Container
+	downloads      *DownloadService
+	site           *SiteService
+	resourceImport *ResourceImportService
+	scraper        *ScraperService
+	hub            *Hub
+	notify         *NotifyChannelService
+	mu             sync.Mutex
+	stop           chan struct{}
+	running        bool
 }
 
 const (
@@ -62,6 +63,10 @@ func (s *SubscriptionService) SetScraper(scraper *ScraperService) {
 
 func (s *SubscriptionService) SetNotifyChannels(notify *NotifyChannelService) {
 	s.notify = notify
+}
+
+func (s *SubscriptionService) SetResourceImport(resourceImport *ResourceImportService) {
+	s.resourceImport = resourceImport
 }
 
 // Start runs the polling loop in the background.
@@ -94,10 +99,18 @@ func (s *SubscriptionService) Stop() {
 
 // Create persists a new subscription.
 func (s *SubscriptionService) Create(ctx context.Context, sub *model.Subscription) error {
-	if sub.Name == "" || sub.FeedURL == "" {
-		return errors.New("name and feed_url required")
+	if sub == nil || strings.TrimSpace(sub.Name) == "" {
+		return errors.New("订阅名称不能为空")
 	}
 	normalizeSubscriptionDefaults(sub)
+	if err := s.ValidateForSave(ctx, sub); err != nil {
+		return err
+	}
+	if duplicate, err := s.resourceImportSubscriptionDuplicate(ctx, sub, ""); err != nil {
+		return err
+	} else if duplicate {
+		return errors.New("相同作品、目标目录和季数的追更订阅已存在")
+	}
 	enabled := sub.Enabled
 	if err := s.repo.Subscription.Create(ctx, sub); err != nil {
 		return err
@@ -111,7 +124,66 @@ func (s *SubscriptionService) Create(ctx context.Context, sub *model.Subscriptio
 	return nil
 }
 
+func (s *SubscriptionService) Update(ctx context.Context, id string, updates map[string]any) error {
+	if s == nil || s.repo == nil || s.repo.DB == nil {
+		return errors.New("订阅服务不可用")
+	}
+	return s.repo.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var sub model.Subscription
+		if err := tx.Where("id = ?", strings.TrimSpace(id)).First(&sub).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&sub).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", sub.ID).First(&sub).Error; err != nil {
+			return err
+		}
+		normalizeSubscriptionDefaults(&sub)
+		if err := s.ValidateForSave(ctx, &sub); err != nil {
+			return err
+		}
+		if duplicate, err := s.resourceImportSubscriptionDuplicate(ctx, &sub, sub.ID); err != nil {
+			return err
+		} else if duplicate {
+			return errors.New("相同作品、目标目录和季数的追更订阅已存在")
+		}
+		return tx.Model(&sub).Updates(map[string]any{
+			"delivery_mode":       sub.DeliveryMode,
+			"feed_url":            sub.FeedURL,
+			"resource_source":     sub.ResourceSource,
+			"max_imports_per_run": sub.MaxImportsPerRun,
+			"season_number":       sub.SeasonNumber,
+			"media_type":          sub.MediaType,
+		}).Error
+	})
+}
+
 func normalizeSubscriptionDefaults(sub *model.Subscription) {
+	if sub == nil {
+		return
+	}
+	if strings.TrimSpace(sub.DeliveryMode) == "" {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(sub.FeedURL)), "resource-import://") {
+			sub.DeliveryMode = subscriptionDeliveryResourceImport
+		} else {
+			sub.DeliveryMode = subscriptionDeliveryDownload
+		}
+	}
+	if subscriptionUsesResourceImport(sub) {
+		if strings.TrimSpace(sub.ResourceSource) == "" {
+			sub.ResourceSource = "pansou"
+		}
+		if strings.TrimSpace(sub.FeedURL) == "" {
+			sub.FeedURL = "resource-import://pansou"
+		}
+		if sub.MaxImportsPerRun <= 0 {
+			sub.MaxImportsPerRun = 2
+		}
+		if sub.SeasonNumber <= 0 {
+			sub.SeasonNumber = 1
+		}
+	}
 	if strings.TrimSpace(sub.SearchMode) == "" {
 		sub.SearchMode = "keyword"
 	}

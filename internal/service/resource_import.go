@@ -140,6 +140,7 @@ type ResourceImportCreateInput struct {
 	SearchSessionID string `json:"search_session_id"`
 	CandidateIndex  int    `json:"candidate_index"`
 	RootID          string `json:"root_id"`
+	SubscriptionID  string `json:"subscription_id,omitempty"`
 	ForceDuplicate  bool   `json:"force_duplicate,omitempty"`
 	UpgradeMediaID  string `json:"upgrade_media_id,omitempty"`
 	KeepOldVersion  *bool  `json:"keep_old_version,omitempty"`
@@ -172,6 +173,7 @@ type ResourceImportTask struct {
 	ID              string     `json:"id"`
 	UserID          string     `json:"user_id,omitempty"`
 	CreatorUsername string     `json:"creator_username,omitempty"`
+	SubscriptionID  string     `json:"subscription_id,omitempty"`
 	LibraryID       string     `json:"library_id"`
 	LibraryName     string     `json:"library_name,omitempty"`
 	RootID          string     `json:"root_id"`
@@ -396,7 +398,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		}
 	}
 	idempotencyKey := resourceImportIdempotencyKey(
-		userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.ForceDuplicate, upgradeMediaID, keepOldVersion,
+		userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.SubscriptionID, in.ForceDuplicate, upgradeMediaID, keepOldVersion,
 	)
 	if existing, found, err := s.findJobByIdempotencyKey(ctx, idempotencyKey); err != nil {
 		return ResourceImportTask{}, err
@@ -438,7 +440,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		return ResourceImportTask{}, errors.New("media-pipeline import returned an invalid status or stage")
 	}
 	record := model.ResourceImportJob{
-		UserID: userID, LibraryID: library.ID, LibraryRootID: root.ID,
+		UserID: userID, SubscriptionID: strings.TrimSpace(in.SubscriptionID), LibraryID: library.ID, LibraryRootID: root.ID,
 		SearchSessionID: session.ID, CandidateIndex: in.CandidateIndex,
 		CandidateJSON: string(candidateJSON), CandidateTitle: candidate.Title,
 		CandidateSource: candidate.Source, CandidateSize: candidate.SizeBytes,
@@ -853,7 +855,7 @@ func (s *ResourceImportService) loadOwnedJob(ctx context.Context, requesterID st
 
 func (s *ResourceImportService) taskDTO(ctx context.Context, job model.ResourceImportJob, includeCreator bool) (ResourceImportTask, error) {
 	item := ResourceImportTask{
-		ID: job.ID, LibraryID: job.LibraryID, RootID: job.LibraryRootID,
+		ID: job.ID, SubscriptionID: job.SubscriptionID, LibraryID: job.LibraryID, RootID: job.LibraryRootID,
 		SearchSessionID: job.SearchSessionID, CandidateIndex: job.CandidateIndex,
 		CandidateTitle: job.CandidateTitle, Source: job.CandidateSource,
 		Status: job.Status, Stage: job.Stage, Progress: resourceImportProgress(job.Status, job.Stage),
@@ -1141,9 +1143,9 @@ func resourceRootOpenListPath(value string) (string, error) {
 	return openListPath, nil
 }
 
-func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, force bool, upgradeMediaID string, keepOldVersion bool) string {
+func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, subscriptionID string, force bool, upgradeMediaID string, keepOldVersion bool) string {
 	raw := strings.Join([]string{
-		userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strconv.FormatBool(force),
+		userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strings.TrimSpace(subscriptionID), strconv.FormatBool(force),
 		strings.TrimSpace(upgradeMediaID), strconv.FormatBool(keepOldVersion),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
