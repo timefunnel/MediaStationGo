@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowUp, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
@@ -212,6 +212,13 @@ export function DiscoverResults({
     }
   }
 
+  const jumpToTop = () => {
+    const firstRow = navigableKeys.map((key) => rowRefs.current[key]).find(Boolean)
+    const scrollContainer = firstRow?.closest('main')
+    if (!scrollContainer) return
+    scrollContainer.scrollTop = 0
+  }
+
   return (
     <div className={navigableKeys.length > 1 ? 'xl:grid xl:grid-cols-[220px_minmax(0,1fr)] xl:gap-8' : ''}>
       {navigableKeys.length > 1 && (
@@ -219,6 +226,7 @@ export function DiscoverResults({
           keys={navigableKeys}
           activeKey={activeKey}
           sectionLabel={sectionLabel}
+          onTop={jumpToTop}
           onSelect={jumpToSection}
         />
       )}
@@ -277,11 +285,13 @@ function DiscoverSectionRail({
   keys,
   activeKey,
   sectionLabel,
+  onTop,
   onSelect,
 }: {
   keys: string[]
   activeKey: string
   sectionLabel: SectionLabel
+  onTop: () => void
   onSelect: (key: string) => void
 }) {
   return (
@@ -294,7 +304,15 @@ function DiscoverSectionRail({
           <List size={14} />
           快速跳转
         </div>
-        <div className="mt-4 border-l border-gray-200 pl-0.5">
+        <button
+          type="button"
+          onClick={onTop}
+          className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-gray-500 transition hover:bg-gray-50 hover:text-brand-500"
+        >
+          <ArrowUp size={14} />
+          回到顶部
+        </button>
+        <div className="mt-2 border-l border-gray-200 pl-0.5">
           {keys.map((key) => {
             const active = key === activeKey
             return (

@@ -1,4 +1,4 @@
-import { Reorder, useDragControls } from 'framer-motion'
+import { Reorder } from 'framer-motion'
 import { Check, Flame, GripVertical, Layers3, ListOrdered, Save, X } from 'lucide-react'
 
 import type { DiscoverSection } from '../api/discover'
@@ -139,6 +139,7 @@ function DiscoverSelectedOrder({
       <Reorder.Group
         as="ol"
         axis="y"
+        layoutScroll
         values={selected}
         onReorder={onReorder}
         className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-gray-50"
@@ -172,15 +173,14 @@ function DiscoverSelectedOrderItem({
   disabled: boolean
   onMove: (direction: -1 | 1) => void
 }) {
-  const dragControls = useDragControls()
   return (
     <Reorder.Item
       as="li"
       value={section.key}
-      dragListener={false}
-      dragControls={dragControls}
+      dragListener={!disabled}
+      dragMomentum={false}
       whileDrag={{ scale: 1.01, boxShadow: '0 12px 28px rgba(15, 23, 42, 0.14)' }}
-      className="flex items-center gap-3 bg-gray-50 px-3 py-2.5"
+      className="flex cursor-grab touch-none items-center gap-3 bg-gray-50 px-3 py-2.5 active:cursor-grabbing"
     >
       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white text-xs font-semibold text-sand-500 shadow-sm">
         {index + 1}
@@ -192,7 +192,6 @@ function DiscoverSelectedOrderItem({
         title="上下拖动调整顺序"
         aria-label={`拖动排序 ${section.label}`}
         disabled={disabled}
-        onPointerDown={(event) => dragControls.start(event)}
         onKeyDown={(event) => {
           if (event.key === 'ArrowUp') {
             event.preventDefault()
