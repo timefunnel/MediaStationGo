@@ -72,14 +72,14 @@ func SearchDiscoverCatalog(
 		}})
 	}
 	if adult != nil {
-		tasks = append(tasks,
-			discoverCatalogSearchTask{key: "javdb_performer", run: func() ([]ExternalMediaResult, error) {
+		if normalizeAdultCode(query) == "" {
+			tasks = append(tasks, discoverCatalogSearchTask{key: "javdb_performer", run: func() ([]ExternalMediaResult, error) {
 				return adult.SearchPerformers(ctx, query)
-			}},
-			discoverCatalogSearchTask{key: "javdb_adult", run: func() ([]ExternalMediaResult, error) {
-				return adult.SearchMovies(ctx, query)
-			}},
-		)
+			}})
+		}
+		tasks = append(tasks, discoverCatalogSearchTask{key: "javdb_adult", run: func() ([]ExternalMediaResult, error) {
+			return adult.SearchMovies(ctx, query)
+		}})
 	}
 
 	results := make(chan discoverCatalogSearchTaskResult, len(tasks))

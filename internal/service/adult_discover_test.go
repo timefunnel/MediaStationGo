@@ -205,7 +205,7 @@ func TestAdultProviderSearchPerformersResolvesMovieDetails(t *testing.T) {
 	}
 }
 
-func TestAdultProviderSearchMoviesReturnsJavDBCards(t *testing.T) {
+func TestAdultProviderSearchMoviesKeepsOnlyExactAdultCode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "MIZD-534" || r.URL.Query().Get("f") != "all" {
 			http.NotFound(w, r)
@@ -213,7 +213,9 @@ func TestAdultProviderSearchMoviesReturnsJavDBCards(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`<a class="box" href="/v/mizd534" title="Sample title">
 <img src="https://c0.jdbstatic.com/covers/mi/mizd534.jpg">
-<strong>MIZD-534</strong><span>2026-08-01</span></a>`))
+<strong>MIZD-534</strong><span>2026-08-01</span></a>
+<a class="box" href="/v/unrelated" title="Unrelated title">
+<strong>MIAA-001</strong><span>2026-07-01</span></a>`))
 	}))
 	defer server.Close()
 	withAdultDefaultBases(t, []string{server.URL})
@@ -228,5 +230,43 @@ func TestAdultProviderSearchMoviesReturnsJavDBCards(t *testing.T) {
 	}
 	if items[0].ReleaseDate != "2026-08-01" || items[0].MediaType != "adult" {
 		t.Fatalf("release metadata = %#v", items[0])
+	}
+}
+
+func TestAdultProviderSearchMoviesReturnsEmptyWithoutExactAdultCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<a class="box" href="/v/unrelated" title="Unrelated title">
+<strong>MIAA-001</strong><span>2026-07-01</span></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.SearchMovies(t.Context(), "MIZD-534")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v, want empty exact-code result", items)
+	}
+}
+
+func TestAdultProviderSearchMoviesFiltersUnrelatedTitles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<a class="box" href="/v/match" title="Sample title extended">
+<strong>MIAA-001</strong></a>
+<a class="box" href="/v/unrelated" title="Different title">
+<strong>MIAA-002</strong></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.SearchMovies(t.Context(), "Sample title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ProviderID != "match" {
+		t.Fatalf("items = %#v", items)
 	}
 }

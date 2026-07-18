@@ -274,7 +274,7 @@ func (p *AdultProvider) SearchMovies(ctx context.Context, query string) ([]Exter
 			continue
 		}
 		completedSource = true
-		if items := parseJavDBMovieList(body, base); len(items) > 0 {
+		if items := filterAdultMovieSearchItems(parseJavDBMovieList(body, base), query); len(items) > 0 {
 			return limitAdultDiscoveryItems(items, 20), nil
 		}
 	}
@@ -686,6 +686,34 @@ func filterAdultPerformerItems(items []ExternalMediaResult, query string) []Exte
 		}
 	}
 	return out
+}
+
+func filterAdultMovieSearchItems(items []ExternalMediaResult, query string) []ExternalMediaResult {
+	out := make([]ExternalMediaResult, 0, len(items))
+	if code := normalizeAdultCode(query); code != "" {
+		for _, item := range items {
+			if normalizeAdultCode(item.OriginalName) == code || normalizeAdultCode(item.SubscribeKeyword) == code {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+
+	queryKey := normalizeAdultMovieSearchText(query)
+	if queryKey == "" {
+		return out
+	}
+	for _, item := range items {
+		if strings.Contains(normalizeAdultMovieSearchText(item.Title), queryKey) ||
+			strings.Contains(normalizeAdultMovieSearchText(item.OriginalName), queryKey) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func normalizeAdultMovieSearchText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(value)), " "))
 }
 
 func adultPerformerQueryMatches(name, query string) bool {
