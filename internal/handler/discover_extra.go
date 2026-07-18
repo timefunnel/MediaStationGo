@@ -41,7 +41,6 @@ var discoverSectionCatalog = []discoverSectionDef{
 	{Key: "douban_top_movie", Label: "豆瓣高分电影", Provider: "douban"},
 	{Key: "bangumi_calendar", Label: "Bangumi 每日放送", Provider: "bangumi"},
 	{Key: "adult_javdb_popular", Label: "JavDB 今日热门", Provider: "adult", Group: "adult"},
-	{Key: "adult_javbus_latest", Label: "JavBus 最近新作", Provider: "adult", Group: "adult"},
 	{Key: "adult_javdb_performers", Label: "JavDB 热门女优", Provider: "adult", Group: "adult"},
 	{Key: "adult_followed", Label: "关注女优新作", Provider: "adult", Group: "adult"},
 }
@@ -308,7 +307,7 @@ func discoverSectionProvider(key string) string {
 		}
 	}
 	switch key {
-	case "adult_javdb_popular", "adult_javbus_latest", "adult_javdb_performers", "adult_followed":
+	case "adult_javdb_popular", "adult_javdb_performers", "adult_followed":
 		return "adult"
 	case "trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
 		return "tmdb"
@@ -351,11 +350,6 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 			return []service.ExternalMediaResult{}, nil
 		}
 		return svc.Adult.DiscoverJavDBPopular(ctx)
-	case "adult_javbus_latest":
-		if svc.Adult == nil {
-			return []service.ExternalMediaResult{}, nil
-		}
-		return svc.Adult.DiscoverJavBusLatest(ctx, page)
 	case "adult_javdb_performers":
 		if svc.Adult == nil || page > 1 {
 			return []service.ExternalMediaResult{}, nil
@@ -393,8 +387,6 @@ func discoverSectionHasNext(key string, itemCount int) bool {
 		return itemCount >= 24
 	case "adult":
 		switch key {
-		case "adult_javbus_latest":
-			return itemCount >= 30
 		case "adult_followed":
 			return itemCount >= 40
 		default:

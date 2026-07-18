@@ -34,7 +34,6 @@ export const defaultSectionDefs: DiscoverSection[] = [
   { key: 'douban_hot_tv', label: '豆瓣热门剧集', provider: 'douban' },
   { key: 'bangumi_calendar', label: 'Bangumi 每日放送', provider: 'bangumi' },
 	{ key: 'adult_javdb_popular', label: 'JavDB 今日热门', provider: 'adult', group: 'adult' },
-	{ key: 'adult_javbus_latest', label: 'JavBus 最近新作', provider: 'adult', group: 'adult' },
 	{ key: 'adult_javdb_performers', label: 'JavDB 热门女优', provider: 'adult', group: 'adult' },
 	{ key: 'adult_followed', label: '关注女优新作', provider: 'adult', group: 'adult' },
 ]

@@ -60,24 +60,6 @@ func TestJavDBPortraitThumbnailURLRejectsUnrelatedURLs(t *testing.T) {
 	}
 }
 
-func TestParseJavBusMovieList(t *testing.T) {
-	body := `<div class="item"><a class="movie-box" href="https://www.javbus.example/ABF-363">
-<div class="photo-frame"><img src="/pics/thumb/abc.jpg" title="JavBus sample title"></div>
-<div class="photo-info"><span>JavBus sample title<br><date>ABF-363</date> / <date>2026-07-18</date></span></div>
-</a></div>`
-	items := parseJavBusMovieList(body, "https://www.javbus.example")
-	if len(items) != 1 {
-		t.Fatalf("items = %#v", items)
-	}
-	item := items[0]
-	if item.Source != "javbus" || item.OriginalName != "ABF-363" || item.Title != "JavBus sample title" {
-		t.Fatalf("unexpected item: %#v", item)
-	}
-	if item.PosterURL != "https://www.javbus.example/pics/thumb/abc.jpg" || item.ReleaseDate != "2026-07-18" {
-		t.Fatalf("unexpected artwork/date: %#v", item)
-	}
-}
-
 func TestParseJavDBPerformerList(t *testing.T) {
 	body := `<div id="actors" class="actors">
 <div class="box actor-box"><a href="/actors/BzpA" title="Actor Alias">

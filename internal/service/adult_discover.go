@@ -31,19 +31,6 @@ func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMed
 	return limitAdultDiscoveryItems(items, 30), err
 }
 
-func (p *AdultProvider) DiscoverJavBusLatest(ctx context.Context, page int) ([]ExternalMediaResult, error) {
-	if page < 1 {
-		page = 1
-	}
-	items, err := p.discoverAdultList(ctx, "javbus", func(base string) string {
-		if page == 1 {
-			return base + "/"
-		}
-		return fmt.Sprintf("%s/page/%d", base, page)
-	}, parseJavBusMovieList)
-	return limitAdultDiscoveryItems(items, 30), err
-}
-
 func (p *AdultProvider) DiscoverJavDBPerformers(ctx context.Context) ([]ExternalMediaResult, error) {
 	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
 		return base + "/rankings/actors?t=censored"
@@ -387,10 +374,6 @@ func parseJavDBMovieList(body, base string) []ExternalMediaResult {
 		items[i].PosterURL = javDBPortraitThumbnailURL(items[i].PosterURL)
 	}
 	return items
-}
-
-func parseJavBusMovieList(body, base string) []ExternalMediaResult {
-	return parseAdultMovieList(body, base, "javbus", "movie-box", "")
 }
 
 func parseAdultMovieList(body, base, source, className, hrefNeedle string) []ExternalMediaResult {
