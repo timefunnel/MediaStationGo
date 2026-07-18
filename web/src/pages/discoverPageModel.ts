@@ -9,12 +9,9 @@ export const defaultSections = [
   'bangumi_calendar',
 ]
 
-export const discoverStorageKey = 'mediastation.discover.sections'
 export const discoverRowsStorageKey = 'mediastation.discover.rows'
-const discoverStorageVersion = 3
 const discoverRowsStorageVersion = 2
 const discoverRowsCacheMaxAgeMs = 6 * 60 * 60 * 1000
-const legacyDefaultAdditions = ['tmdb_latest_movie', 'tmdb_latest_tv']
 
 interface CachedDiscoverRow {
   page: number
@@ -44,30 +41,6 @@ export const defaultSectionDefs: DiscoverSection[] = [
 
 export function discoverItemSource(item: DiscoverItem): string {
   return item.source || (item.bangumi_id ? 'bangumi' : item.douban_id ? 'douban' : 'tmdb')
-}
-
-export function readSavedSections(sections: DiscoverSection[]): string[] {
-  try {
-    const raw = window.localStorage.getItem(discoverStorageKey)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    const allowed = new Set(sections.map((section) => section.key))
-    if (Array.isArray(parsed)) {
-      return orderSelectedSections(addLegacyDefaults(parsed, allowed), sections)
-    }
-    if (!parsed || !Array.isArray(parsed.selected)) return []
-    const selected = sanitizeSectionKeys(parsed.selected, allowed)
-    if (parsed.version === discoverStorageVersion) {
-      return orderSelectedSections(selected, sections)
-    }
-    return orderSelectedSections(addLegacyDefaults(selected, allowed), sections)
-  } catch {
-    return []
-  }
-}
-
-export function serializeSavedSections(selected: string[]): string {
-  return JSON.stringify({ version: discoverStorageVersion, selected })
 }
 
 export function readCachedDiscoverRows(selected: string[]): {
@@ -147,20 +120,6 @@ function emptyDiscoverRowsCache(): CachedDiscoverRowsPayload {
     saved_at: Date.now(),
     rows: {},
   }
-}
-
-function sanitizeSectionKeys(keys: unknown[], allowed: Set<string>): string[] {
-  return keys.filter((key): key is string => typeof key === 'string' && allowed.has(key))
-}
-
-function addLegacyDefaults(keys: unknown[], allowed: Set<string>): string[] {
-  const out = sanitizeSectionKeys(keys, allowed)
-  for (const key of legacyDefaultAdditions) {
-    if (allowed.has(key) && !out.includes(key)) {
-      out.push(key)
-    }
-  }
-  return out
 }
 
 export function orderSelectedSections(keys: string[], sections: DiscoverSection[]): string[] {

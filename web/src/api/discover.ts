@@ -71,6 +71,11 @@ export interface DiscoverFeedResult {
   meta: Record<string, DiscoverFeedMeta>
 }
 
+export interface DiscoverPreference {
+  configured: boolean
+  selected_sections: string[]
+}
+
 // 后端在 TMDb 不可达 / API key 缺失时统一返回 { items: [], error: "..." }
 // 200 状态码——前端必须能区分这两种情况，不能简单用 items.length === 0
 // 推断"未配置 API key"。
@@ -92,6 +97,12 @@ export const discoverAPI = {
     })),
   sections: () =>
     api.get<{ sections: DiscoverSection[] }>('/discover/sections').then((r) => r.data.sections),
+  preference: () =>
+    api.get<DiscoverPreference>('/discover/preferences').then((r) => r.data),
+  savePreference: (selectedSections: string[]) =>
+    api
+      .put<DiscoverPreference>('/discover/preferences', { selected_sections: selectedSections })
+      .then((r) => r.data),
   feed: (sectionKeys: string[], page = 1): Promise<DiscoverFeedResult> =>
     api
       .get<Record<string, DiscoverItem[] | DiscoverFeedMeta | Record<string, DiscoverFeedMeta> | null>>('/discover/feed', {

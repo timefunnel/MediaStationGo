@@ -11,6 +11,7 @@ export function DiscoverHeader({
   selected,
   sectionsReady,
   loading,
+	selectionSaving,
 	adultSearchQuery,
 	adultSearchLoading,
   onRefresh,
@@ -22,6 +23,7 @@ export function DiscoverHeader({
   selected: string[]
   sectionsReady: boolean
   loading: boolean
+	selectionSaving: boolean
 	adultSearchQuery: string
 	adultSearchLoading: boolean
   onRefresh: () => void
@@ -52,7 +54,7 @@ export function DiscoverHeader({
         <button
           type="button"
           onClick={onRefresh}
-          disabled={!sectionsReady || selected.length === 0}
+          disabled={!sectionsReady || selectionSaving || selected.length === 0}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -66,6 +68,7 @@ export function DiscoverHeader({
 						section={section}
 						active={selected.includes(section.key)}
 						onToggle={onToggleSection}
+						disabled={selectionSaving}
 					/>
 				))}
 			</div>
@@ -83,6 +86,7 @@ export function DiscoverHeader({
 									section={section}
 									active={selected.includes(section.key)}
 									onToggle={onToggleSection}
+									disabled={selectionSaving}
 									adult
 								/>
 							))}
@@ -125,15 +129,18 @@ function DiscoverSectionToggle({
 	active,
 	onToggle,
 	adult = false,
+	disabled = false,
 }: {
 	section: DiscoverSection
 	active: boolean
 	onToggle: (key: string) => void
 	adult?: boolean
+	disabled?: boolean
 }) {
 	return (
 		<button
 			type="button"
+			disabled={disabled}
 			onClick={() => onToggle(section.key)}
 			className={
 				'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
@@ -143,7 +150,8 @@ function DiscoverSectionToggle({
 						: 'border-primary-400 bg-primary-400/15 text-brand-500'
 					: adult
 						? 'border-rose-200 bg-white text-rose-500 hover:border-rose-400 hover:text-rose-700'
-						: 'border-gray-200 bg-white text-gray-500 hover:border-primary-300 hover:text-ink-600')
+						: 'border-gray-200 bg-white text-gray-500 hover:border-primary-300 hover:text-ink-600') +
+				(disabled ? ' cursor-not-allowed opacity-50' : '')
 			}
 		>
 			{section.label}

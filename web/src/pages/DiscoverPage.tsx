@@ -7,11 +7,8 @@ import { DiscoverDetailModal } from './DiscoverDetailModal'
 import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './DiscoverPageSections'
 import {
   defaultSections,
-  discoverStorageKey,
   orderSelectedSections,
   readCachedDiscoverRows,
-  readSavedSections,
-  serializeSavedSections,
   writeCachedDiscoverRow,
 } from './discoverPageModel'
 
@@ -24,6 +21,8 @@ export function DiscoverPage() {
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [sectionsReady, setSectionsReady] = useState(false)
+  const [selectionSaving, setSelectionSaving] = useState(false)
+  const [selectionError, setSelectionError] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeItem, setActiveItem] = useState<DiscoverItem | null>(null)
   const [reloadSeq, setReloadSeq] = useState(0)
@@ -38,15 +37,18 @@ export function DiscoverPage() {
   useEffect(() => {
     let cancelled = false
     setSectionsReady(false)
-    discoverAPI
-      .sections()
-      .then((items) => {
+    Promise.all([discoverAPI.sections(), discoverAPI.preference()])
+      .then(async ([items, preference]) => {
         if (cancelled) return
-        setSections(items)
-        const saved = readSavedSections(items)
         const available = new Set(items.map((item) => item.key))
         const fallback = defaultSections.filter((key) => available.has(key))
-        const nextSelected = saved.length > 0 ? saved : fallback
+        const saved = preference.selected_sections.filter((key) => available.has(key))
+        const nextSelected = orderSelectedSections(preference.configured ? saved : fallback, items)
+        if (!preference.configured) {
+          await discoverAPI.savePreference(nextSelected)
+        }
+        if (cancelled) return
+        setSections(items)
         const cached = readCachedDiscoverRows(nextSelected)
         setSelected(nextSelected)
         setRowPages(Object.fromEntries(nextSelected.map((key) => [key, 1])))
@@ -54,10 +56,11 @@ export function DiscoverPage() {
         setRowCanNext(cached.rowCanNext)
         setSectionsReady(true)
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
         setSections([])
         setSelected([])
+        setSelectionError(discoverPreferenceErrorMessage(error))
         setSectionsReady(true)
       })
     return () => {
@@ -98,8 +101,6 @@ export function DiscoverPage() {
       }
       return next
     })
-    window.localStorage.setItem(discoverStorageKey, serializeSavedSections(selected))
-
     let pending = selected.length
     const markDone = () => {
       pending -= 1
@@ -157,14 +158,23 @@ export function DiscoverPage() {
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
 
-  const toggleSection = (key: string) => {
-    setSelected((current) => {
-      const next = current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key]
-      return orderSelectedSections(next, sections)
-    })
-    setRowPages((current) => ({ ...current, [key]: current[key] ?? 1 }))
+  const toggleSection = async (key: string) => {
+    if (selectionSaving) return
+    const next = orderSelectedSections(
+      selected.includes(key) ? selected.filter((item) => item !== key) : [...selected, key],
+      sections,
+    )
+    setSelectionSaving(true)
+    setSelectionError('')
+    try {
+      const saved = await discoverAPI.savePreference(next)
+      setSelected(orderSelectedSections(saved.selected_sections, sections))
+      setRowPages((current) => ({ ...current, [key]: current[key] ?? 1 }))
+    } catch (error) {
+      setSelectionError(discoverPreferenceErrorMessage(error))
+    } finally {
+      setSelectionSaving(false)
+    }
   }
 
   const changeDiscoverPage = (key: string, delta: number) => {
@@ -219,15 +229,22 @@ export function DiscoverPage() {
         selected={selected}
         sectionsReady={sectionsReady}
         loading={loading}
+		selectionSaving={selectionSaving}
 		adultSearchQuery={performerSearchQuery}
 		adultSearchLoading={performerSearchLoading}
         onRefresh={refreshDiscover}
-        onToggleSection={toggleSection}
+        onToggleSection={(key) => void toggleSection(key)}
 		onAdultSearchQueryChange={setPerformerSearchQuery}
 		onAdultSearch={() => void searchAdultPerformers()}
       />
 
       {!sectionsReady && <DiscoverSkeleton />}
+
+      {selectionError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {selectionError}
+        </div>
+      )}
 
 		{sectionsReady && performerSearchError && (
 			<div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -320,4 +337,9 @@ function discoverRequestErrorMessage(err: unknown): string {
     return '推荐源网络不可用，已跳过本次加载'
   }
   return '推荐源暂时不可用，已跳过本次加载'
+}
+
+function discoverPreferenceErrorMessage(error: unknown): string {
+  const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+  return message ? `发现模块设置保存失败：${message}` : '发现模块设置无法从数据库读取或保存，请稍后重试'
 }

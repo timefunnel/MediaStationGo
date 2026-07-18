@@ -17,6 +17,8 @@ func registerAuthedUISurfaceRoutes(authed *gin.RouterGroup, svc *service.Contain
 	authed.DELETE("/watch-history", historyDeleteHandler(svc))
 	authed.DELETE("/watch-history/:id", historyDeleteOneHandler(svc))
 
+	authed.GET("/discover/preferences", requirePermission(svc, "can_view_discover"), getDiscoverPreferenceHandler(svc))
+	authed.PUT("/discover/preferences", requirePermission(svc, "can_view_discover"), updateDiscoverPreferenceHandler(svc))
 	authed.GET("/discover/sections", requirePermission(svc, "can_view_discover"), discoverSectionsHandler(svc))
 	authed.GET("/discover/feed", requirePermission(svc, "can_view_discover"), discoverFeedHandler(svc))
 	authed.GET("/discover/adult/follows", requirePermission(svc, "can_view_discover"), listAdultPerformerFollowsHandler(svc))

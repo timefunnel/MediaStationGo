@@ -38,6 +38,8 @@ func TestAuthenticatedRouteSurfacesAreRegistered(t *testing.T) {
 		"GET /api/subscriptions",
 		"GET /api/sites/search",
 		"GET /api/watch-history",
+		"GET /api/discover/preferences",
+		"PUT /api/discover/preferences",
 		"GET /api/discover/feed",
 		"GET /api/playback/:id/info",
 		"GET /api/download/tasks",
