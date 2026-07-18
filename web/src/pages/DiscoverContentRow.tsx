@@ -123,7 +123,7 @@ export function ContentRow({
           </div>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
         {shouldRenderImages
           ? items.map((item, index) => (
               <DiscoverCard
@@ -153,7 +153,7 @@ export function DiscoverSkeleton() {
       {[1, 2, 3].map((section) => (
         <section key={section} className="space-y-4">
           <div className="h-8 w-48 animate-pulse rounded-xl bg-gray-100" />
-          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
             {Array.from({ length: 24 }, (_, index) => index).map((item) => (
               <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
             ))}
