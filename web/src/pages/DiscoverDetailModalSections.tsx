@@ -87,7 +87,7 @@ export function DiscoverArtworkPanel({
           <div className={`flex items-center justify-center text-sand-500 ${adultArtwork ? 'aspect-[3/2]' : 'aspect-[2/3]'}`}>无海报</div>
         )}
       </div>
-      {item.backdrop_url && (
+      {!adultArtwork && item.backdrop_url && (
         <img src={imageURL(item.backdrop_url)} alt="" className="h-24 w-full rounded-2xl object-cover" />
       )}
     </div>
