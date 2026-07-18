@@ -84,11 +84,11 @@ export function DiscoverDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-2 backdrop-blur-sm sm:p-4">
       <div
-        className={`flex h-[calc(100dvh-1rem)] w-full items-stretch justify-center gap-4 sm:h-[92vh] ${
+        className={`flex w-full items-start justify-center gap-4 ${
           resourceSidecarOpen ? 'max-w-[1680px]' : 'max-w-5xl'
         }`}
       >
-        <div className="flex min-w-0 flex-[3_1_0%] flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl lg:max-w-5xl">
+        <div className="flex max-h-[calc(100dvh-1rem)] min-w-0 flex-[3_1_0%] flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl sm:max-h-[92vh] lg:max-w-5xl">
           <div className="shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <DiscoverModalHeader item={resolvedItem} source={source} onClose={onClose} />
           </div>

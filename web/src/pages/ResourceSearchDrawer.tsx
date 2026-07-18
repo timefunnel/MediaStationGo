@@ -385,7 +385,7 @@ export function ResourceSearchDrawer({
   const panel = (
     <aside
       className={sidecar
-        ? 'flex h-full w-full flex-col overflow-hidden rounded-3xl border border-white/60 bg-[var(--app-bg)] shadow-2xl'
+        ? 'flex max-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden rounded-3xl border border-white/60 bg-[var(--app-bg)] shadow-2xl sm:max-h-[92vh]'
         : embedded
           ? `flex w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)] ${embeddedExpanded ? 'sm:h-[65vh] sm:min-h-[26rem] sm:max-h-[42rem]' : ''}`
           : 'absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl'}

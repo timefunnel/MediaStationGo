@@ -352,19 +352,22 @@ function DiscoverSectionRail({
         aria-label="发现模块快速跳转"
         className="sticky -top-2 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
       >
-        <div className="flex items-center gap-2 text-xs font-semibold text-sand-500">
-          <List size={14} />
-          快速跳转
+        <div className="flex items-center justify-between gap-2 text-xs font-semibold text-sand-500">
+          <div className="flex items-center gap-2">
+            <List size={14} />
+            快速跳转
+          </div>
+          <button
+            type="button"
+            aria-label="回到顶部"
+            title="回到顶部"
+            onClick={onTop}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-50 hover:text-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+          >
+            <ArrowUp size={15} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onTop}
-          className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-gray-500 transition hover:bg-gray-50 hover:text-brand-500"
-        >
-          <ArrowUp size={14} />
-          回到顶部
-        </button>
-        <div className="mt-2 border-l border-gray-200 pl-0.5">
+        <div className="mt-3 border-l border-gray-200 pl-0.5">
           {keys.map((key) => {
             const active = key === activeKey
             return (
