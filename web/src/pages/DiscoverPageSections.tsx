@@ -138,7 +138,7 @@ export function DiscoverResults({
   onPageChange: (key: string, delta: number) => void
   onSelect: (item: DiscoverItem) => void
 }) {
-  const sectionTopOffset = 96
+  const sectionTopOffset = 64
   const hasRowErrors = Object.keys(rowErrors).length > 0
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const navigableKeys = useMemo(
@@ -159,7 +159,9 @@ export function DiscoverResults({
 
     let frame = 0
     const updateActiveKey = () => {
-      const activationLine = scrollContainer.getBoundingClientRect().top + sectionTopOffset + 1
+      const rail = scrollContainer.querySelector<HTMLElement>('nav[aria-label="发现模块快速跳转"]')
+      const activationLine = (rail?.getBoundingClientRect().top
+        ?? scrollContainer.getBoundingClientRect().top + sectionTopOffset) + 1
       let nextKey = navigableKeys[0]
       for (const key of navigableKeys) {
         const row = rowRefs.current[key]
@@ -195,12 +197,19 @@ export function DiscoverResults({
     if (!row) return
     const scrollContainer = row.closest('main')
     if (!scrollContainer) return
+    const rail = scrollContainer.querySelector<HTMLElement>('nav[aria-label="发现模块快速跳转"]')
     const targetTop = scrollContainer.scrollTop
       + row.getBoundingClientRect().top
       - scrollContainer.getBoundingClientRect().top
       - sectionTopOffset
     setActiveKey(key)
     scrollContainer.scrollTop = Math.max(0, Math.round(targetTop))
+    if (rail) {
+      const correction = row.getBoundingClientRect().top - rail.getBoundingClientRect().top
+      if (Math.abs(correction) >= 1) {
+        scrollContainer.scrollTop = Math.max(0, Math.round(scrollContainer.scrollTop + correction))
+      }
+    }
   }
 
   return (
@@ -214,7 +223,7 @@ export function DiscoverResults({
         />
       )}
 
-      <div className="min-w-0 space-y-10">
+      <div className={`min-w-0 space-y-10 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
         {selected.map((key, rowIndex) => {
           const items = rows[key] ?? []
           if (items.length === 0) {
@@ -224,7 +233,7 @@ export function DiscoverResults({
                   key={key}
                   ref={(element) => { rowRefs.current[key] = element }}
                   id={discoverSectionID(key)}
-                  className="scroll-mt-24"
+                  className="scroll-mt-16"
                 >
                   <DiscoverRowSkeleton title={sectionLabel(key)} />
                 </div>
@@ -237,7 +246,7 @@ export function DiscoverResults({
               key={key}
               ref={(element) => { rowRefs.current[key] = element }}
               id={discoverSectionID(key)}
-              className="scroll-mt-24"
+              className="scroll-mt-16"
             >
               <ContentRow
                 title={sectionLabel(key)}
@@ -279,7 +288,7 @@ function DiscoverSectionRail({
     <aside className="hidden xl:block">
       <nav
         aria-label="发现模块快速跳转"
-        className="sticky top-24 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
+        className="sticky top-6 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
       >
         <div className="flex items-center gap-2 text-xs font-semibold text-sand-500">
           <List size={14} />
