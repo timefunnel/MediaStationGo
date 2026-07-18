@@ -161,6 +161,12 @@ export function DiscoverPage() {
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
 	const searchGroups = useMemo(() => groupDiscoverSearchItems(searchItems), [searchItems])
+	const showSearchArea = sectionsReady && (
+		searchLoading ||
+		searchGroups.length > 0 ||
+		Object.keys(searchErrors).length > 0 ||
+		(searchDone && searchItems.length === 0)
+	)
 
   const openSectionPicker = () => {
 		setSectionPickerDraft(selected)
@@ -248,7 +254,7 @@ export function DiscoverPage() {
 	}
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-4 py-6">
+    <div className="mx-auto w-full max-w-[1680px] space-y-10 px-4 py-6 md:px-6 md:py-8">
       <DiscoverHeader
         selectedCount={selected.length}
         sectionsReady={sectionsReady}
@@ -274,7 +280,7 @@ export function DiscoverPage() {
 			/>
 		)}
 
-      {!sectionsReady && <DiscoverSkeleton />}
+      {!sectionsReady && <div className="xl:ml-[252px]"><DiscoverSkeleton /></div>}
 
       {selectionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -282,38 +288,40 @@ export function DiscoverPage() {
         </div>
       )}
 
-		{sectionsReady && Object.keys(searchErrors).length > 0 && (
-			<div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-				<p className="font-semibold">以下搜索源未返回结果：</p>
-				{Object.entries(searchErrors).map(([source, message]) => <p key={source}>{message}</p>)}
-			</div>
-		)}
+		{showSearchArea && <div className="space-y-8 xl:ml-[252px]">
+			{sectionsReady && Object.keys(searchErrors).length > 0 && (
+				<div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+					<p className="font-semibold">以下搜索源未返回结果：</p>
+					{Object.entries(searchErrors).map(([source, message]) => <p key={source}>{message}</p>)}
+				</div>
+			)}
 
-		{sectionsReady && searchLoading && (
-			<div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-brand-500">
-				正在聚合搜索 TMDb、豆瓣、Bangumi{sections.some((section) => section.group === 'adult') ? ' 与 JavDB' : ''}…
-			</div>
-		)}
+			{sectionsReady && searchLoading && (
+				<div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-brand-500">
+					正在聚合搜索 TMDb、豆瓣、Bangumi{sections.some((section) => section.group === 'adult') ? ' 与 JavDB' : ''}…
+				</div>
+			)}
 
-		{sectionsReady && searchGroups.map((group, index) => (
-			<ContentRow
-				key={group.key}
-				title={`搜索结果 · ${group.label}`}
-				items={group.items}
-				priority={index === 0}
-				onSelect={setActiveItem}
-			/>
-		))}
+			{sectionsReady && searchGroups.map((group, index) => (
+				<ContentRow
+					key={group.key}
+					title={`搜索结果 · ${group.label}`}
+					items={group.items}
+					priority={index === 0}
+					onSelect={setActiveItem}
+				/>
+			))}
 
-		{sectionsReady && searchDone && !searchLoading && Object.keys(searchErrors).length === 0 && searchItems.length === 0 && (
-			<div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
-				没有找到匹配的电影、剧集、动漫、女优或成人作品
-			</div>
-		)}
+			{sectionsReady && searchDone && !searchLoading && Object.keys(searchErrors).length === 0 && searchItems.length === 0 && (
+				<div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+					没有找到匹配的电影、剧集、动漫、女优或成人作品
+				</div>
+			)}
+		</div>}
 
       {sectionsReady && !loading && selected.length === 0 && !searchDone && (
-        <DiscoverEmptySelection />
-      )}
+		<div className="xl:ml-[252px]"><DiscoverEmptySelection /></div>
+	  )}
 
       {sectionsReady && selected.length > 0 && (
         <DiscoverResults

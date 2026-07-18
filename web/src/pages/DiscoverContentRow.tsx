@@ -78,8 +78,8 @@ export function ContentRow({
   const [imagesEnabled, setImagesEnabled] = useState(priority)
   const shouldRenderImages = priority || imagesEnabled
   const gridClassName = cardSize === 'large'
-    ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-    : 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6'
+    ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(210px,1fr))]'
+    : 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]'
 
   useEffect(() => {
     if (shouldRenderImages) return
@@ -158,7 +158,7 @@ export function DiscoverSkeleton() {
       {[1, 2, 3].map((section) => (
         <section key={section} className="space-y-4">
           <div className="h-8 w-48 animate-pulse rounded-xl bg-gray-100" />
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
             {Array.from({ length: 24 }, (_, index) => index).map((item) => (
               <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
             ))}
