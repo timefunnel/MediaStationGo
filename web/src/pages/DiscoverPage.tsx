@@ -13,6 +13,11 @@ import {
   writeCachedDiscoverRow,
 } from './discoverPageModel'
 
+type DiscoverModalEntry = {
+	id: number
+	item: DiscoverItem
+}
+
 export function DiscoverPage() {
   const [sections, setSections] = useState<DiscoverSection[]>([])
   const [selected, setSelected] = useState<string[]>([])
@@ -27,7 +32,7 @@ export function DiscoverPage() {
 	const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
 	const [sectionPickerDraft, setSectionPickerDraft] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeItem, setActiveItem] = useState<DiscoverItem | null>(null)
+  const [modalStack, setModalStack] = useState<DiscoverModalEntry[]>([])
   const [reloadSeq, setReloadSeq] = useState(0)
 	const [searchQuery, setSearchQuery] = useState('')
 	const [searchItems, setSearchItems] = useState<DiscoverItem[]>([])
@@ -35,6 +40,7 @@ export function DiscoverPage() {
 	const [searchErrors, setSearchErrors] = useState<Record<string, string>>({})
 	const [searchDone, setSearchDone] = useState(false)
 	const searchSequence = useRef(0)
+	const modalSequence = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -253,13 +259,32 @@ export function DiscoverPage() {
 		setSearchDone(false)
 	}
 
-	const handleAdultFollowChanged = (followed: boolean) => {
-		const source = activeItem?.source
-		const sourceID = activeItem?.provider_id
+	const openRootModal = (item: DiscoverItem) => {
+		modalSequence.current += 1
+		setModalStack([{ id: modalSequence.current, item }])
+	}
+
+	const pushModal = (item: DiscoverItem) => {
+		modalSequence.current += 1
+		const entry = { id: modalSequence.current, item }
+		setModalStack((current) => [...current, entry])
+	}
+
+	const closeTopModal = () => {
+		setModalStack((current) => current.slice(0, -1))
+	}
+
+	const handleAdultFollowChanged = (performer: DiscoverItem, followed: boolean) => {
+		const source = performer.source
+		const sourceID = performer.provider_id
 		setSearchItems((current) => current.map((item) => (
 			item.source === source && item.provider_id === sourceID ? { ...item, followed } : item
 		)))
-		setActiveItem((current) => current ? { ...current, followed } : current)
+		setModalStack((current) => current.map((entry) => (
+			entry.item.source === source && entry.item.provider_id === sourceID
+				? { ...entry, item: { ...entry.item, followed } }
+				: entry
+		)))
 		setReloadSeq((current) => current + 1)
 	}
 
@@ -321,7 +346,7 @@ export function DiscoverPage() {
 					title={`搜索结果 · ${group.label}`}
 					items={group.items}
 					priority={index === 0}
-					onSelect={setActiveItem}
+					onSelect={openRootModal}
 				/>
 			))}
 
@@ -348,26 +373,31 @@ export function DiscoverPage() {
           hasContent={hasContent}
           sectionLabel={sectionLabel}
           onPageChange={changeDiscoverPage}
-          onSelect={setActiveItem}
+          onSelect={openRootModal}
         />
       )}
 
-		{activeItem?.media_type === 'person' && (
-			<AdultPerformerModal
-				item={activeItem}
-				onClose={() => setActiveItem(null)}
-				onSelectWork={setActiveItem}
-				onFollowChanged={handleAdultFollowChanged}
-			/>
-		)}
-
-		{activeItem && activeItem.media_type !== 'person' && (
-        <DiscoverDetailModal
-          item={activeItem}
-          onClose={() => setActiveItem(null)}
-          onSelectPerformer={setActiveItem}
-        />
-      )}
+		{modalStack.map((entry, index) => {
+			const active = index === modalStack.length - 1
+			return (
+				<div key={entry.id} className={active ? undefined : 'hidden'} aria-hidden={!active}>
+					{entry.item.media_type === 'person' ? (
+						<AdultPerformerModal
+							item={entry.item}
+							onClose={closeTopModal}
+							onSelectWork={pushModal}
+							onFollowChanged={(followed) => handleAdultFollowChanged(entry.item, followed)}
+						/>
+					) : (
+						<DiscoverDetailModal
+							item={entry.item}
+							onClose={closeTopModal}
+							onSelectPerformer={pushModal}
+						/>
+					)}
+				</div>
+			)
+		})}
     </div>
   )
 }

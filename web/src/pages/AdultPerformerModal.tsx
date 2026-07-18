@@ -115,8 +115,8 @@ export function AdultPerformerModal({
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-5">
-			<div className="max-h-[94vh] w-full max-w-7xl overflow-y-auto rounded-xl border border-white/60 bg-white p-4 shadow-2xl sm:p-5">
-				<header className="mb-5 flex items-start justify-between gap-4">
+			<div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-white/60 bg-white shadow-2xl">
+				<header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-4 py-4 sm:px-5">
 					<div>
 						<p className="text-xs font-semibold uppercase text-rose-500">JavDB 女优</p>
 						<h2 className="mt-1 text-2xl font-bold text-ink-600">{resolvedItem.title}</h2>
@@ -131,8 +131,9 @@ export function AdultPerformerModal({
 					</button>
 				</header>
 
-				<section className="mb-6 flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:p-4">
-					<div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-rose-50 via-white to-primary-50 ring-4 ring-white">
+				<div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+					<section className="mb-6 flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:p-4">
+						<div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-rose-50 via-white to-primary-50 ring-4 ring-white">
 							{portrait ? (
 								<img src={portrait} alt={resolvedItem.title} className="h-full w-full object-cover" />
 							) : (
@@ -141,7 +142,7 @@ export function AdultPerformerModal({
 									<span className="text-xs font-semibold">JavDB 暂无头像</span>
 								</div>
 							)}
-					</div>
+						</div>
 					<div className="min-w-0 flex-1 space-y-2">
 						<p className="text-sm font-semibold text-ink-600">{resolvedItem.title}</p>
 						<p className="text-xs text-ink-50">选择下方作品可查看完整封面、发行日期与资源详情。</p>
@@ -165,9 +166,9 @@ export function AdultPerformerModal({
 							{saving ? <LoaderCircle size={16} className="animate-spin" /> : <Heart size={16} fill={follow ? 'currentColor' : 'none'} />}
 							{follow ? '已关注' : '关注女优'}
 						</button>
-				</section>
+					</section>
 
-				<div className="min-w-0">
+					<div className="min-w-0">
 						{loading ? (
 							<div className="flex min-h-52 items-center justify-center gap-2 text-sm text-gray-500">
 								<LoaderCircle size={18} className="animate-spin" />
@@ -189,6 +190,7 @@ export function AdultPerformerModal({
 								onSelect={onSelectWork}
 							/>
 						)}
+					</div>
 				</div>
 			</div>
 		</div>
