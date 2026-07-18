@@ -105,9 +105,8 @@ func (s *ScraperService) normalizeAdultBackdropIfNeeded(ctx context.Context, m *
 }
 
 func (s *ScraperService) fetchAdultPosterDerivationSource(ctx context.Context, m *model.Media, posterURL, backdropURL string) (string, []byte, bool) {
-	if strings.TrimSpace(backdropURL) == "" {
-		return "", nil, false
-	}
+	posterURL = strings.TrimSpace(posterURL)
+	backdropURL = strings.TrimSpace(backdropURL)
 	if posterURL != "" && posterURL != backdropURL {
 		if data, err := s.fetchAdultPosterSource(ctx, posterURL); err == nil {
 			if imageDataIsLandscape(data) {
@@ -115,11 +114,21 @@ func (s *ScraperService) fetchAdultPosterDerivationSource(ctx context.Context, m
 			}
 			return "", nil, false
 		} else {
+			if backdropURL == "" {
+				s.log.Warn("adult poster derivation skipped; poster fetch failed",
+					zap.String("media_id", mediaIDForLog(m)),
+					zap.String("source", posterURL),
+					zap.Error(err))
+				return "", nil, false
+			}
 			s.log.Warn("adult poster derivation source fetch failed; trying backdrop",
 				zap.String("media_id", mediaIDForLog(m)),
 				zap.String("source", posterURL),
 				zap.Error(err))
 		}
+	}
+	if backdropURL == "" {
+		return "", nil, false
 	}
 	data, err := s.fetchAdultPosterSource(ctx, backdropURL)
 	if err != nil {

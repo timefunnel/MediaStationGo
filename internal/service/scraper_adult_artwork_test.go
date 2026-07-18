@@ -84,6 +84,46 @@ func TestDeriveAdultPosterIfPosterMatchesBackdrop(t *testing.T) {
 	assertAdultBackdropSize(t, images, match.BackdropURL, 800, 538)
 }
 
+func TestDeriveAdultPosterFromLandscapePosterWithoutBackdrop(t *testing.T) {
+	cacheDir := t.TempDir()
+	posterPath := filepath.Join(cacheDir, "landscape-cover.jpg")
+	writeAdultArtworkTestImage(t, posterPath, 800, 538)
+
+	images := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: cacheDir}}, zap.NewNop())
+	scraper := &ScraperService{images: images, log: zap.NewNop()}
+	match := &Match{MediaType: "adult", PosterURL: posterPath}
+
+	scraper.deriveAdultPosterIfNeeded(t.Context(), &model.Media{Base: model.Base{ID: "media-poster-only"}}, &model.Library{Type: "adult"}, match)
+
+	if !strings.Contains(match.PosterURL, "adult-posters") {
+		t.Fatalf("poster should be regenerated from landscape poster: %s", match.PosterURL)
+	}
+	if !strings.Contains(match.BackdropURL, "adult-backdrops") {
+		t.Fatalf("landscape poster should also produce a backdrop: %s", match.BackdropURL)
+	}
+	assertAdultPosterSize(t, images, match.PosterURL)
+	assertAdultBackdropSize(t, images, match.BackdropURL, 800, 538)
+}
+
+func TestDeriveAdultPosterKeepsPortraitPosterWithoutBackdrop(t *testing.T) {
+	cacheDir := t.TempDir()
+	posterPath := filepath.Join(cacheDir, "portrait-poster.jpg")
+	writeAdultArtworkTestImage(t, posterPath, 600, 900)
+
+	images := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: cacheDir}}, zap.NewNop())
+	scraper := &ScraperService{images: images, log: zap.NewNop()}
+	match := &Match{MediaType: "adult", PosterURL: posterPath}
+
+	scraper.deriveAdultPosterIfNeeded(t.Context(), &model.Media{Base: model.Base{ID: "media-portrait-only"}}, &model.Library{Type: "adult"}, match)
+
+	if match.PosterURL != posterPath {
+		t.Fatalf("portrait poster should stay unchanged: %s", match.PosterURL)
+	}
+	if match.BackdropURL != "" {
+		t.Fatalf("portrait poster should not produce a backdrop: %s", match.BackdropURL)
+	}
+}
+
 func TestDeriveAdultPosterKeepsPortraitPoster(t *testing.T) {
 	cacheDir := t.TempDir()
 	posterPath := filepath.Join(cacheDir, "poster.jpg")

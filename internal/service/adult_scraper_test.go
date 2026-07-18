@@ -68,6 +68,22 @@ func TestParseAdultDetailHTML(t *testing.T) {
 	}
 }
 
+func TestParseAdultDetailHTMLReadsJavDBTileItemSample(t *testing.T) {
+	body := `<html>
+	<h2 class="title"><strong>EBWH-348 Sample</strong></h2>
+	<img class="video-cover" src="https://c0.jdbstatic.com/covers/eb/EbPpD3.jpg">
+	<a data-caption="sample" href="https://c0.jdbstatic.com/samples/eb/EbPpD3_l_0.jpg" class="tile-item"><img src="sample.jpg"></a>
+	</html>`
+
+	got := parseAdultDetailHTML(body, "EBWH-348", "javdb", "https://javdb.com/v/EbPpD3")
+	if got == nil {
+		t.Fatal("parseAdultDetailHTML returned nil")
+	}
+	if got.BackdropURL != "https://c0.jdbstatic.com/samples/eb/EbPpD3_l_0.jpg" {
+		t.Fatalf("BackdropURL = %q", got.BackdropURL)
+	}
+}
+
 func TestValidAdultActorNameRejectsCategoryLabels(t *testing.T) {
 	for _, value := range []string{"有码", "无码", "有码 无码", "Censored", "男性演员", "女优"} {
 		if validAdultActorName(value) {

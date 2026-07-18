@@ -29,8 +29,8 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	} else if cover := firstAdultImage(body, "video-cover", "cover", "column-video-cover"); cover != "" {
 		match.PosterURL = absolutizeURL(detailURL, cover)
 	}
-	if m := adultSamplePattern.FindStringSubmatch(body); len(m) > 1 {
-		match.BackdropURL = absolutizeURL(detailURL, m[1])
+	if sample := firstAdultSampleURL(body); sample != "" {
+		match.BackdropURL = absolutizeURL(detailURL, sample)
 	}
 	if dmmPoster := adultDMMPosterFromSampleURL(match.BackdropURL); dmmPoster != "" {
 		match.PosterURL = dmmPoster
@@ -56,6 +56,23 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	match.People = firstAdultPeople(body, source, detailURL)
 	match.Actors = personMetadataNames(match.People)
 	return match
+}
+
+func firstAdultSampleURL(body string) string {
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		class := " " + strings.ToLower(strings.Join(strings.Fields(attrs["class"]), " ")) + " "
+		if !strings.Contains(class, " sample-box ") && !strings.Contains(class, " tile-item ") {
+			continue
+		}
+		if href := strings.TrimSpace(attrs["href"]); href != "" {
+			return href
+		}
+	}
+	return ""
 }
 
 func adultPanelDate(body string) string {
