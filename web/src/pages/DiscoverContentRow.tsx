@@ -185,6 +185,7 @@ function DiscoverCard({
   const cardRef = useRef<HTMLButtonElement>(null)
   const source = discoverItemSource(item)
 	const isPerson = item.media_type === 'person'
+	const isJavDBAdult = item.media_type === 'adult' && source.toLowerCase() === 'javdb'
   const imageCandidates = useMemo(
     () =>
       [item.poster_url, item.backdrop_url]
@@ -207,10 +208,10 @@ function DiscoverCard({
       imageURL(activeImage, posterVersion, {
         refreshCache: shouldRefreshCache,
         retryFailed: true,
-        maxWidth: 360,
-        quality: 80,
+        maxWidth: isJavDBAdult ? 800 : isPerson ? 320 : 420,
+        quality: isJavDBAdult ? 88 : 84,
       }),
-    [activeImage, posterVersion, shouldRefreshCache],
+    [activeImage, isJavDBAdult, isPerson, posterVersion, shouldRefreshCache],
   )
 
   useEffect(() => {
@@ -256,7 +257,11 @@ function DiscoverCard({
       onClick={() => onSelect(item)}
       className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50 text-left transition-all duration-300 hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-400/40"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden bg-surface-900">
+      <div
+		className={isPerson
+			? 'relative flex aspect-square w-full items-center justify-center overflow-hidden bg-gradient-to-br from-rose-50 via-white to-primary-50'
+			: 'relative aspect-[2/3] w-full overflow-hidden bg-surface-900'}
+	  >
         {shouldLoadImage && posterSrc && !posterUnavailable ? (
           <img
             src={posterSrc}
@@ -274,10 +279,12 @@ function DiscoverCard({
                 markPosterUnavailable()
               }
             }}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+			className={isPerson
+				? 'h-28 w-28 rounded-full object-cover shadow-lg ring-4 ring-white transition-transform duration-500 group-hover:scale-105'
+				: `h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${isJavDBAdult ? 'object-right' : ''}`}
           />
         ) : isPerson ? (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-rose-50 to-rose-100 text-sm font-semibold text-rose-500">
+			<div className="flex h-28 w-28 items-center justify-center rounded-full bg-rose-100 text-sm font-semibold text-rose-500 ring-4 ring-white">
             女优
           </div>
         ) : null}

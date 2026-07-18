@@ -33,7 +33,7 @@ export function AdultPerformerModal({
 		[follows, source, sourceID],
 	)
 	const portraitSource = adultPerformerPortraitSource(resolvedItem.poster_url, follow?.image_url)
-	const portrait = imageURL(portraitSource, undefined, { maxWidth: 240, quality: 86, retryFailed: true })
+	const portrait = imageURL(portraitSource, undefined, { maxWidth: 160, quality: 88, retryFailed: true })
 
 	useEffect(() => {
 		setResolvedItem(item)
@@ -132,7 +132,7 @@ export function AdultPerformerModal({
 				</header>
 
 				<section className="mb-6 flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:p-4">
-					<div className="aspect-[3/4] w-28 shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:w-32">
+					<div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-rose-50 via-white to-primary-50 ring-4 ring-white">
 							{portrait ? (
 								<img src={portrait} alt={resolvedItem.title} className="h-full w-full object-cover" />
 							) : (

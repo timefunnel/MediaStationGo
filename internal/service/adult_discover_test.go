@@ -37,7 +37,7 @@ func TestParseJavDBMovieList(t *testing.T) {
 	}
 }
 
-func TestParseJavDBMovieListUsesPortraitThumbnail(t *testing.T) {
+func TestParseJavDBMovieListKeepsOriginalCover(t *testing.T) {
 	body := `<a href="/v/1Axvvw" class="box" title="Sample title">
 <div class="cover"><img loading="lazy" src="https://c0.jdbstatic.com/covers/1a/1Axvvw.jpg"></div>
 <div class="video-title"><strong>MVSD-696</strong> Sample title</div></a>`
@@ -45,21 +45,8 @@ func TestParseJavDBMovieListUsesPortraitThumbnail(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items = %#v", items)
 	}
-	if got := items[0].PosterURL; got != "https://c0.jdbstatic.com/thumbs/1a/1Axvvw.jpg" {
-		t.Fatalf("poster = %q, want portrait thumbnail", got)
-	}
-}
-
-func TestJavDBPortraitThumbnailURLRejectsUnrelatedURLs(t *testing.T) {
-	for _, raw := range []string{
-		"https://www.javbus.com/pics/thumb/c6jl.jpg",
-		"https://c0.jdbstatic.com/actors/BzpA.jpg",
-		"http://c0.jdbstatic.com/covers/1a/1Axvvw.jpg",
-		"https://evil.example/covers/1a/1Axvvw.jpg",
-	} {
-		if got := javDBPortraitThumbnailURL(raw); got != raw {
-			t.Fatalf("unexpected rewrite: %q => %q", raw, got)
-		}
+	if got := items[0].PosterURL; got != "https://c0.jdbstatic.com/covers/1a/1Axvvw.jpg" {
+		t.Fatalf("poster = %q, want original cover", got)
 	}
 }
 

@@ -10,7 +10,7 @@ export const defaultSections = [
 ]
 
 export const discoverRowsStorageKey = 'mediastation.discover.rows'
-const discoverRowsStorageVersion = 2
+const discoverRowsStorageVersion = 3
 const discoverRowsCacheMaxAgeMs = 6 * 60 * 60 * 1000
 
 interface CachedDiscoverRow {
