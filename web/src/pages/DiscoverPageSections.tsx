@@ -66,7 +66,7 @@ export function DiscoverHeader({
 				onChange={(event) => onSearchQueryChange(event.target.value)}
 				placeholder="搜索电影、剧集、动漫、女优或番号"
 				aria-label="聚合搜索"
-				className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-4 text-sm text-ink-600 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+				className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-4 text-base text-ink-600 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100 sm:text-sm"
 			/>
 			<button
 				type="submit"
