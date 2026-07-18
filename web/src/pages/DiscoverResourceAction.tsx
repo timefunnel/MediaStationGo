@@ -144,6 +144,7 @@ export function DiscoverResourceAction({
       key={selectedLibrary.id}
       embedded
       sidecar
+      autoSearch
       open
       initialQuery={discoverResourceSearchKeyword(item)}
       releaseDate={item.release_date}
@@ -184,20 +185,32 @@ export function DiscoverResourceAction({
         <p className="text-sm text-sand-500">当前没有可用媒体库</p>
       ) : (
         <>
-          <label className="block max-w-sm text-xs text-sand-500">
-            目标媒体库
-            <select
-              className="input-base mt-1"
-              value={effectiveLibraryID}
-              onChange={(event) => selectLibrary(event.target.value)}
-            >
-              {libraries.map((library) => (
-                <option key={library.id} value={library.id}>
-                  {library.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xl">
+              <span className="shrink-0 text-xs font-semibold text-sand-500">目标媒体库</span>
+              <select
+                className="input-base h-10 min-w-0 flex-1 py-2"
+                value={effectiveLibraryID}
+                onChange={(event) => selectLibrary(event.target.value)}
+              >
+                {libraries.map((library) => (
+                  <option key={library.id} value={library.id}>
+                    {library.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedLibrary && wideLayout && (
+              <button
+                type="button"
+                className="btn-primary h-10 shrink-0 gap-2 px-4"
+                onClick={() => setDesktopSidecarOpen(true)}
+              >
+                <Search size={16} />
+                {sidecarOpen ? '资源面板已打开' : '查找资源'}
+              </button>
+            )}
+          </div>
           {canSubscribe && selectedLibrary && (
             <div className="flex flex-wrap items-end gap-2">
               {enabledRoots.length > 1 && (
@@ -225,19 +238,7 @@ export function DiscoverResourceAction({
             </div>
           )}
           {selectedLibrary && (
-            wideLayout ? (
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="btn-primary gap-2"
-                  onClick={() => setDesktopSidecarOpen(true)}
-                >
-                  <Search size={16} />
-                  {sidecarOpen ? '资源搜索已打开' : '查找资源'}
-                </button>
-                <p className="text-xs text-sand-500">搜索结果将在详情右侧独立展示。</p>
-              </div>
-            ) : (
+            !wideLayout ? (
               <div>
                 <ResourceSearchDrawer
                   key={selectedLibrary.id}
@@ -255,7 +256,7 @@ export function DiscoverResourceAction({
                   onClose={() => undefined}
                 />
               </div>
-            )
+            ) : null
           )}
         </>
       )}

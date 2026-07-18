@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -45,6 +45,7 @@ type ResourceSearchDrawerProps = {
   open: boolean
   embedded?: boolean
   sidecar?: boolean
+  autoSearch?: boolean
   initialQuery?: string
   releaseDate?: string
   upgradeMediaID?: string
@@ -82,6 +83,7 @@ export function ResourceSearchDrawer({
   open,
   embedded = false,
   sidecar = false,
+  autoSearch = false,
   initialQuery,
   releaseDate,
   upgradeMediaID,
@@ -117,6 +119,7 @@ export function ResourceSearchDrawer({
     candidate: ResourceSearchCandidate
     conflict: ResourceImportDuplicateConflict
   } | null>(null)
+  const autoSearchKey = useRef('')
 
   const roots = useMemo(
     () => searchRoots(response, libraryRoots),
@@ -211,15 +214,14 @@ export function ResourceSearchDrawer({
     }
   }, [onTaskChanged, open, selectedTaskStatus, taskID])
 
-  if (!open) return null
-
-  const runSearch = async (
+  const runSearch = useCallback(async (
     page: number,
     nextSource: SearchSource = source,
     nextFilters: ResourceViewFilters = appliedFilters,
     cachedView = false,
+    queryOverride?: string,
   ) => {
-    const normalizedQuery = query.trim()
+    const normalizedQuery = (queryOverride ?? query).trim()
     if (!normalizedQuery) {
       setSearchError('请输入要查找的影片或剧集名称')
       return
@@ -273,7 +275,21 @@ export function ResourceSearchDrawer({
       if (cachedView) setFiltering(false)
       else setSearching(false)
     }
-  }
+  }, [appliedFilters, fixedRootID, libraryID, query, roots, selectedRootID, source])
+
+  useEffect(() => {
+    const nextQuery = initialQuery?.trim()
+    if (!open || !autoSearch || !nextQuery) return
+    const key = `${libraryID}\u0000${nextQuery}`
+    if (autoSearchKey.current === key) return
+    autoSearchKey.current = key
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    setAppliedFilters(cleared)
+    void runSearch(1, '', cleared, false, nextQuery)
+  }, [autoSearch, initialQuery, libraryID, open, runSearch])
+
+  if (!open) return null
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault()
@@ -302,14 +318,19 @@ export function ResourceSearchDrawer({
 
   const selectSource = (nextSource: SearchSource) => {
     if (nextSource === source || searching) return
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    setAppliedFilters(cleared)
+    if (query.trim()) {
+      void runSearch(1, nextSource, cleared)
+      return
+    }
     setSource(nextSource)
     setResponse(null)
     setSearchFailure(null)
     setSearchError('')
     setDuplicateConflict(null)
     setJumpPage('1')
-    setFilters(emptyResourceFilters())
-    setAppliedFilters(emptyResourceFilters())
   }
 
   const importCandidate = async (candidate: ResourceSearchCandidate, forceDuplicate = false) => {
