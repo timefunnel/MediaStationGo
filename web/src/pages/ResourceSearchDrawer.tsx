@@ -44,6 +44,7 @@ import {
 type ResourceSearchDrawerProps = {
   open: boolean
   embedded?: boolean
+  sidecar?: boolean
   initialQuery?: string
   releaseDate?: string
   upgradeMediaID?: string
@@ -80,6 +81,7 @@ const emptyResourceFilters = (): ResourceViewFilters => ({
 export function ResourceSearchDrawer({
   open,
   embedded = false,
+  sidecar = false,
   initialQuery,
   releaseDate,
   upgradeMediaID,
@@ -382,12 +384,14 @@ export function ResourceSearchDrawer({
 
   const panel = (
     <aside
-      className={embedded
-        ? `flex w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)] ${embeddedExpanded ? 'h-[65vh] min-h-[26rem] max-h-[42rem]' : ''}`
-        : 'absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl'}
+      className={sidecar
+        ? 'flex h-full w-full flex-col overflow-hidden rounded-3xl border border-white/60 bg-[var(--app-bg)] shadow-2xl'
+        : embedded
+          ? `flex w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)] ${embeddedExpanded ? 'sm:h-[65vh] sm:min-h-[26rem] sm:max-h-[42rem]' : ''}`
+          : 'absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl'}
       aria-label={embedded ? `${libraryName} 查找资源` : undefined}
     >
-      {(!embedded || taskID) && (
+      {(!embedded || sidecar || taskID) && (
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-[var(--app-panel)] px-4 sm:px-6">
           {taskID && (
             <button
@@ -407,7 +411,7 @@ export function ResourceSearchDrawer({
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>
-          {!embedded && (
+          {(!embedded || sidecar) && (
             <button
               type="button"
               className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"
@@ -448,7 +452,7 @@ export function ResourceSearchDrawer({
         ) : (
           <>
             <form
-              className={`shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 ${embedded ? 'py-3' : 'py-4 sm:px-6'}`}
+              className={`shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 ${embedded && !sidecar ? 'py-3' : 'py-4 sm:px-6'}`}
               onSubmit={submitSearch}
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -550,7 +554,7 @@ export function ResourceSearchDrawer({
                 />
               )}
 
-              {!embedded && !response && !searching && !searchFailure && (
+              {(!embedded || sidecar) && !response && !searching && !searchFailure && (
                 <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
                   <Search className="mb-3 h-9 w-9" />
                   <p className="text-sm">选择搜索模式并输入关键词查找资源</p>

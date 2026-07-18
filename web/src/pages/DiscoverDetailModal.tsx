@@ -27,12 +27,15 @@ export function DiscoverDetailModal({
   const [detailLoading, setDetailLoading] = useState(() => supportsAdultMovieDetail(item))
   const [detailError, setDetailError] = useState('')
   const [artworkPreviewOpen, setArtworkPreviewOpen] = useState(false)
+  const [resourceSidecarOpen, setResourceSidecarOpen] = useState(false)
+  const [resourceSidecarRoot, setResourceSidecarRoot] = useState<HTMLDivElement | null>(null)
   const source = discoverItemSource(resolvedItem)
 
   useEffect(() => {
     setResolvedItem(item)
     setDetailError('')
     setArtworkPreviewOpen(false)
+    setResourceSidecarOpen(false)
     if (!supportsAdultMovieDetail(item)) {
       setDetailLoading(false)
       return
@@ -79,31 +82,55 @@ export function DiscoverDetailModal({
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-white/60 bg-white p-5 shadow-2xl">
-        <DiscoverModalHeader item={resolvedItem} source={source} onClose={onClose} />
-        {resolvedItem.media_type === 'adult' ? (
-          <>
-            <div className="grid items-start gap-5 lg:grid-cols-[minmax(340px,42%)_1fr]">
-              <DiscoverArtworkPanel
-                item={resolvedItem}
-                deferred={detailLoading}
-                onPreview={() => setArtworkPreviewOpen(true)}
-              />
-              <div className="space-y-5">{metadata}</div>
-            </div>
-            <div className="mt-5 border-t border-gray-200 pt-5">
-              <DiscoverResourceAction item={resolvedItem} />
-            </div>
-          </>
-        ) : (
-          <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
-            <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewOpen(true)} />
-            <div className="space-y-5">
-              {metadata}
-              <DiscoverResourceAction item={resolvedItem} />
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-2 backdrop-blur-sm sm:p-4">
+      <div
+        className={`flex h-[calc(100dvh-1rem)] w-full items-stretch justify-center gap-4 sm:h-[92vh] ${
+          resourceSidecarOpen ? 'max-w-[1680px]' : 'max-w-5xl'
+        }`}
+      >
+        <div className="flex min-w-0 flex-[3_1_0%] flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl lg:max-w-5xl">
+          <div className="shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <DiscoverModalHeader item={resolvedItem} source={source} onClose={onClose} />
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
+            {resolvedItem.media_type === 'adult' ? (
+              <>
+                <div className="grid items-start gap-5 lg:grid-cols-[minmax(340px,42%)_1fr]">
+                  <DiscoverArtworkPanel
+                    item={resolvedItem}
+                    deferred={detailLoading}
+                    onPreview={() => setArtworkPreviewOpen(true)}
+                  />
+                  <div className="space-y-5">{metadata}</div>
+                </div>
+                <div className="mt-5 border-t border-gray-200 pt-5">
+                  <DiscoverResourceAction
+                    item={resolvedItem}
+                    sidecarRoot={resourceSidecarRoot}
+                    onSidecarOpenChange={setResourceSidecarOpen}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
+                <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewOpen(true)} />
+                <div className="space-y-5">
+                  {metadata}
+                  <DiscoverResourceAction
+                    item={resolvedItem}
+                    sidecarRoot={resourceSidecarRoot}
+                    onSidecarOpenChange={setResourceSidecarOpen}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        {resourceSidecarOpen && (
+          <div
+            ref={setResourceSidecarRoot}
+            className="hidden min-w-[26rem] flex-[2_1_0%] xl:block xl:max-w-3xl"
+          />
         )}
       </div>
       {artworkPreviewOpen && resolvedItem.poster_url && (

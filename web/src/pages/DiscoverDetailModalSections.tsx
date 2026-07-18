@@ -30,7 +30,13 @@ export function DiscoverModalHeader({ item, source, onClose }: { item: DiscoverI
         <h2 className="font-display text-2xl font-bold text-ink-600">{item.title}</h2>
         <p className="mt-1 text-sm text-sand-500">{discoverItemMetaText(item)}</p>
       </div>
-      <button className="rounded-full border border-gray-200 p-2 text-ink-50 hover:bg-gray-50" onClick={onClose}>
+      <button
+        type="button"
+        className="shrink-0 rounded-full border border-gray-200 p-2 text-ink-50 hover:bg-gray-50"
+        aria-label="关闭作品详情"
+        title="关闭"
+        onClick={onClose}
+      >
         <X size={18} />
       </button>
     </div>

@@ -29,8 +29,6 @@ export function DiscoverPage() {
   const [loading, setLoading] = useState(false)
   const [activeItem, setActiveItem] = useState<DiscoverItem | null>(null)
   const [reloadSeq, setReloadSeq] = useState(0)
-  const [imageVersion, setImageVersion] = useState<string>()
-  const [refreshImageVersion, setRefreshImageVersion] = useState<string>()
 	const [searchQuery, setSearchQuery] = useState('')
 	const [searchItems, setSearchItems] = useState<DiscoverItem[]>([])
 	const [searchLoading, setSearchLoading] = useState(false)
@@ -216,9 +214,6 @@ export function DiscoverPage() {
   }
 
   const refreshDiscover = () => {
-    const nextImageVersion = String(Date.now())
-    setImageVersion(nextImageVersion)
-    setRefreshImageVersion(nextImageVersion)
     setReloadSeq((current) => current + 1)
   }
 
@@ -351,8 +346,6 @@ export function DiscoverPage() {
           rowCanNext={rowCanNext}
           loading={loading}
           hasContent={hasContent}
-          imageVersion={imageVersion}
-          refreshImageVersion={refreshImageVersion}
           sectionLabel={sectionLabel}
           onPageChange={changeDiscoverPage}
           onSelect={setActiveItem}

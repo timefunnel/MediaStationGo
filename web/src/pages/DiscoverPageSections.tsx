@@ -91,6 +91,7 @@ export function DiscoverHeader({
 					onClick={onRefresh}
 					disabled={!sectionsReady || selectionSaving || selectedCount === 0}
 					className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+					title="重新拉取已选模块内容，图片继续使用缓存"
 				>
 					<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
 					刷新
@@ -118,8 +119,6 @@ export function DiscoverResults({
   rowCanNext,
   loading,
   hasContent,
-  imageVersion,
-  refreshImageVersion,
   sectionLabel,
   onPageChange,
   onSelect,
@@ -132,8 +131,6 @@ export function DiscoverResults({
   rowCanNext: Record<string, boolean>
   loading: boolean
   hasContent: boolean
-  imageVersion?: string
-  refreshImageVersion?: string
   sectionLabel: SectionLabel
   onPageChange: (key: string, delta: number) => void
   onSelect: (item: DiscoverItem) => void
@@ -159,9 +156,10 @@ export function DiscoverResults({
 
     let frame = 0
     const updateActiveKey = () => {
-      const rail = scrollContainer.querySelector<HTMLElement>('nav[aria-label="发现模块快速跳转"]')
-      const activationLine = (rail?.getBoundingClientRect().top
-        ?? scrollContainer.getBoundingClientRect().top + sectionTopOffset) + 1
+      const rail = visibleDiscoverJumpRail(scrollContainer)
+      const activationLine = (rail
+        ? discoverJumpAlignmentTop(rail)
+        : scrollContainer.getBoundingClientRect().top + sectionTopOffset) + 1
       let nextKey = navigableKeys[0]
       for (const key of navigableKeys) {
         const row = rowRefs.current[key]
@@ -197,7 +195,7 @@ export function DiscoverResults({
     if (!row) return
     const scrollContainer = row.closest('main')
     if (!scrollContainer) return
-    const rail = scrollContainer.querySelector<HTMLElement>('nav[aria-label="发现模块快速跳转"]')
+    const rail = visibleDiscoverJumpRail(scrollContainer)
     const targetTop = scrollContainer.scrollTop
       + row.getBoundingClientRect().top
       - scrollContainer.getBoundingClientRect().top
@@ -205,7 +203,7 @@ export function DiscoverResults({
     setActiveKey(key)
     scrollContainer.scrollTop = Math.max(0, Math.round(targetTop))
     if (rail) {
-      const correction = row.getBoundingClientRect().top - rail.getBoundingClientRect().top
+      const correction = row.getBoundingClientRect().top - discoverJumpAlignmentTop(rail)
       if (Math.abs(correction) >= 1) {
         scrollContainer.scrollTop = Math.max(0, Math.round(scrollContainer.scrollTop + correction))
       }
@@ -220,9 +218,9 @@ export function DiscoverResults({
   }
 
   return (
-    <div className={navigableKeys.length > 1 ? 'xl:grid xl:grid-cols-[220px_minmax(0,1fr)] xl:gap-8' : ''}>
+    <div>
       {navigableKeys.length > 1 && (
-        <DiscoverSectionRail
+        <DiscoverMobileSectionJump
           keys={navigableKeys}
           activeKey={activeKey}
           sectionLabel={sectionLabel}
@@ -231,52 +229,105 @@ export function DiscoverResults({
         />
       )}
 
-      <div className={`min-w-0 space-y-16 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
-        {selected.map((key, rowIndex) => {
-          const items = rows[key] ?? []
-          if (items.length === 0) {
-            if (rowLoading[key]) {
-              return (
-                <div
-                  key={key}
-                  ref={(element) => { rowRefs.current[key] = element }}
-                  id={discoverSectionID(key)}
-                  className="scroll-mt-16"
-                >
-                  <DiscoverRowSkeleton title={sectionLabel(key)} />
-                </div>
-              )
-            }
-            return null
-          }
-          return (
-            <div
-              key={key}
-              ref={(element) => { rowRefs.current[key] = element }}
-              id={discoverSectionID(key)}
-              className="scroll-mt-16"
-            >
-              <ContentRow
-                title={sectionLabel(key)}
-                items={items}
-                page={rowPages[key] ?? 1}
-                canNext={Boolean(rowCanNext[key])}
-                imageVersion={imageVersion}
-                refreshImageVersion={refreshImageVersion}
-                priority={rowIndex === 0}
-                onPageChange={(delta) => onPageChange(key, delta)}
-                onSelect={onSelect}
-              />
-            </div>
-          )
-        })}
-
-        {hasRowErrors && (
-          <DiscoverRowErrors rowErrors={rowErrors} sectionLabel={sectionLabel} />
+      <div className={navigableKeys.length > 1 ? 'xl:grid xl:grid-cols-[220px_minmax(0,1fr)] xl:gap-8' : ''}>
+        {navigableKeys.length > 1 && (
+          <DiscoverSectionRail
+            keys={navigableKeys}
+            activeKey={activeKey}
+            sectionLabel={sectionLabel}
+            onTop={jumpToTop}
+            onSelect={jumpToSection}
+          />
         )}
 
-        {!loading && !hasContent && !hasRowErrors && <DiscoverNoContent />}
+        <div className={`min-w-0 space-y-16 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
+          {selected.map((key, rowIndex) => {
+            const items = rows[key] ?? []
+            if (items.length === 0) {
+              if (rowLoading[key]) {
+                return (
+                  <div
+                    key={key}
+                    ref={(element) => { rowRefs.current[key] = element }}
+                    id={discoverSectionID(key)}
+                    className="scroll-mt-16"
+                  >
+                    <DiscoverRowSkeleton title={sectionLabel(key)} />
+                  </div>
+                )
+              }
+              return null
+            }
+            return (
+              <div
+                key={key}
+                ref={(element) => { rowRefs.current[key] = element }}
+                id={discoverSectionID(key)}
+                className="scroll-mt-16"
+              >
+                <ContentRow
+                  title={sectionLabel(key)}
+                  items={items}
+                  page={rowPages[key] ?? 1}
+                  canNext={Boolean(rowCanNext[key])}
+                  priority={rowIndex === 0}
+                  onPageChange={(delta) => onPageChange(key, delta)}
+                  onSelect={onSelect}
+                />
+              </div>
+            )
+          })}
+
+          {hasRowErrors && (
+            <DiscoverRowErrors rowErrors={rowErrors} sectionLabel={sectionLabel} />
+          )}
+
+          {!loading && !hasContent && !hasRowErrors && <DiscoverNoContent />}
+        </div>
       </div>
+    </div>
+  )
+}
+
+function DiscoverMobileSectionJump({
+  keys,
+  activeKey,
+  sectionLabel,
+  onTop,
+  onSelect,
+}: {
+  keys: string[]
+  activeKey: string
+  sectionLabel: SectionLabel
+  onTop: () => void
+  onSelect: (key: string) => void
+}) {
+  return (
+    <div
+      data-discover-jump-rail
+      data-discover-jump-mode="mobile"
+      className="sticky -top-4 z-30 mb-4 flex items-center gap-2 rounded-xl border border-gray-200 bg-white/95 p-2 shadow-sm backdrop-blur xl:hidden"
+    >
+      <button
+        type="button"
+        onClick={onTop}
+        className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600"
+      >
+        <ArrowUp size={14} />
+        顶部
+      </button>
+      <label className="relative min-w-0 flex-1">
+        <List className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sand-500" />
+        <span className="sr-only">快速跳转模块</span>
+        <select
+          aria-label="移动端发现模块快速跳转"
+          className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm font-semibold text-ink-600 outline-none"
+          value={activeKey || keys[0]}
+          onChange={(event) => onSelect(event.target.value)}
+        >
+          {keys.map((key) => <option key={key} value={key}>{sectionLabel(key)}</option>)}
+        </select>
+      </label>
     </div>
   )
 }
@@ -297,6 +348,7 @@ function DiscoverSectionRail({
   return (
     <aside className="hidden xl:block">
       <nav
+        data-discover-jump-rail
         aria-label="发现模块快速跳转"
         className="sticky -top-2 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
       >
@@ -342,6 +394,16 @@ function DiscoverSectionRail({
       </nav>
     </aside>
   )
+}
+
+function visibleDiscoverJumpRail(scrollContainer: Element): HTMLElement | undefined {
+  return Array.from(scrollContainer.querySelectorAll<HTMLElement>('[data-discover-jump-rail]'))
+    .find((element) => element.getClientRects().length > 0)
+}
+
+function discoverJumpAlignmentTop(rail: HTMLElement): number {
+  const bounds = rail.getBoundingClientRect()
+  return rail.dataset.discoverJumpMode === 'mobile' ? bounds.bottom + 12 : bounds.top
 }
 
 function discoverSectionID(key: string): string {

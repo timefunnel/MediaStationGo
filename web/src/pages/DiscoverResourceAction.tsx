@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { ArrowRight, BellPlus, Check, LoaderCircle } from 'lucide-react'
+import { ArrowRight, BellPlus, Check, LoaderCircle, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import type { DiscoverItem } from '../api/discover'
@@ -13,7 +14,15 @@ import { discoverResourceSearchKeyword } from './discoverDetailModalModel'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { mergeResourceImportTasks } from './resourceImportModel'
 
-export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
+export function DiscoverResourceAction({
+  item,
+  sidecarRoot,
+  onSidecarOpenChange,
+}: {
+  item: DiscoverItem
+  sidecarRoot?: HTMLElement | null
+  onSidecarOpenChange?: (open: boolean) => void
+}) {
   const [libraries, setLibraries] = useState<Library[]>([])
   const [selectedLibraryID, setSelectedLibraryID] = useState('')
   const [tasks, setTasks] = useState<ResourceImportTask[]>([])
@@ -23,7 +32,34 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
   const [subscribed, setSubscribed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [sidecarOpen, setSidecarOpen] = useState(false)
+  const [wideLayout, setWideLayout] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches
+  ))
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
+
+  const setDesktopSidecarOpen = useCallback((open: boolean) => {
+    setSidecarOpen(open)
+    onSidecarOpenChange?.(open)
+  }, [onSidecarOpenChange])
+
+  useEffect(() => {
+    setDesktopSidecarOpen(false)
+  }, [item.original_name, item.provider_id, item.source, setDesktopSidecarOpen])
+
+  useEffect(() => () => onSidecarOpenChange?.(false), [onSidecarOpenChange])
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1280px)')
+    const update = () => setWideLayout(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (!wideLayout && sidecarOpen) setDesktopSidecarOpen(false)
+  }, [setDesktopSidecarOpen, sidecarOpen, wideLayout])
 
   useEffect(() => {
     let cancelled = false
@@ -103,8 +139,28 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
     }
   }
 
+  const resourceSearch = selectedLibrary && (
+    <ResourceSearchDrawer
+      key={selectedLibrary.id}
+      embedded
+      sidecar
+      open
+      initialQuery={discoverResourceSearchKeyword(item)}
+      releaseDate={item.release_date}
+      libraryID={selectedLibrary.id}
+      libraryName={selectedLibrary.name}
+      libraryRoots={selectedLibrary.roots ?? []}
+      tasks={tasks}
+      taskID={taskID}
+      onTaskIDChange={setTaskID}
+      onTaskChanged={acceptTask}
+      onClose={() => setDesktopSidecarOpen(false)}
+    />
+  )
+
   return (
-    <section className="space-y-3">
+    <>
+      <section className="space-y-3">
       {item.in_library && item.media_id && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
           <div>
@@ -169,25 +225,43 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
             </div>
           )}
           {selectedLibrary && (
-            <ResourceSearchDrawer
-              key={selectedLibrary.id}
-              embedded
-              open
-              initialQuery={discoverResourceSearchKeyword(item)}
-              releaseDate={item.release_date}
-              libraryID={selectedLibrary.id}
-              libraryName={selectedLibrary.name}
-              libraryRoots={selectedLibrary.roots ?? []}
-              tasks={tasks}
-              taskID={taskID}
-              onTaskIDChange={setTaskID}
-              onTaskChanged={acceptTask}
-              onClose={() => undefined}
-            />
+            wideLayout ? (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="btn-primary gap-2"
+                  onClick={() => setDesktopSidecarOpen(true)}
+                >
+                  <Search size={16} />
+                  {sidecarOpen ? '资源搜索已打开' : '查找资源'}
+                </button>
+                <p className="text-xs text-sand-500">搜索结果将在详情右侧独立展示。</p>
+              </div>
+            ) : (
+              <div>
+                <ResourceSearchDrawer
+                  key={selectedLibrary.id}
+                  embedded
+                  open
+                  initialQuery={discoverResourceSearchKeyword(item)}
+                  releaseDate={item.release_date}
+                  libraryID={selectedLibrary.id}
+                  libraryName={selectedLibrary.name}
+                  libraryRoots={selectedLibrary.roots ?? []}
+                  tasks={tasks}
+                  taskID={taskID}
+                  onTaskIDChange={setTaskID}
+                  onTaskChanged={acceptTask}
+                  onClose={() => undefined}
+                />
+              </div>
+            )
           )}
         </>
       )}
-    </section>
+      </section>
+      {wideLayout && sidecarOpen && sidecarRoot && resourceSearch ? createPortal(resourceSearch, sidecarRoot) : null}
+    </>
   )
 }
 
