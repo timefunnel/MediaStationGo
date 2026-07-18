@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Heart, LoaderCircle, UserRound, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Heart, LoaderCircle, UserRound, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { imageURL } from '../api/client'
@@ -28,6 +28,7 @@ export function AdultPerformerModal({
 	const [saving, setSaving] = useState(false)
 	const [error, setError] = useState('')
 	const [profileError, setProfileError] = useState('')
+	const scrollContainerRef = useRef<HTMLDivElement>(null)
 	const follow = useMemo(
 		() => follows.find((entry) => entry.source === source && entry.source_id === sourceID),
 		[follows, source, sourceID],
@@ -113,6 +114,12 @@ export function AdultPerformerModal({
 		}
 	}
 
+	const changePage = (delta: number) => {
+		if ((delta < 0 && page <= 1) || (delta > 0 && !canNext) || loading) return
+		setPage((current) => Math.max(1, current + delta))
+		scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+	}
+
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-5">
 			<div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-white/60 bg-white shadow-2xl">
@@ -131,7 +138,7 @@ export function AdultPerformerModal({
 					</button>
 				</header>
 
-				<div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+				<div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
 					<section className="mb-6 flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:p-4">
 						<div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-rose-50 via-white to-primary-50 ring-4 ring-white">
 							{portrait ? (
@@ -182,16 +189,36 @@ export function AdultPerformerModal({
 							<ContentRow
 								title="近期作品"
 								items={works}
-								page={page}
-								canNext={canNext}
 								priority
 								cardSize="large"
-								onPageChange={(delta) => setPage((current) => Math.max(1, current + delta))}
 								onSelect={onSelectWork}
 							/>
 						)}
 					</div>
 				</div>
+				<footer className="flex shrink-0 items-center justify-center gap-3 border-t border-gray-200 bg-white px-4 py-3 sm:px-5">
+					<button
+						type="button"
+						aria-label="近期作品 上一页"
+						disabled={page <= 1 || loading}
+						onClick={() => changePage(-1)}
+						className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-rose-300 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+					>
+						<ChevronLeft size={17} />
+					</button>
+					<span className="min-w-16 text-center text-xs font-semibold text-sand-500" aria-live="polite">
+						第 {page} 页
+					</span>
+					<button
+						type="button"
+						aria-label="近期作品 下一页"
+						disabled={!canNext || loading}
+						onClick={() => changePage(1)}
+						className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-rose-300 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+					>
+						<ChevronRight size={17} />
+					</button>
+				</footer>
 			</div>
 		</div>
 	)
