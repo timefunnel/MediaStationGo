@@ -7,6 +7,7 @@ MEMORY_BYTES="2147483648"
 MEMORY_SWAP_BYTES="2147483648"
 CPU_QUOTA="100000"
 CPU_PERIOD="100000"
+MIN_FREE_MB="${MIN_FREE_MB:-4096}"
 DRIVER_OPTIONS="memory=2g,memory-swap=2g,cpu-quota=${CPU_QUOTA},cpu-period=${CPU_PERIOD}"
 
 usage() {
@@ -28,6 +29,23 @@ command -v docker >/dev/null 2>&1 || {
 
 docker buildx version >/dev/null
 
+DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
+AVAILABLE_MB="$(df -Pm "$DOCKER_ROOT" | awk 'NR == 2 { print $4 }')"
+
+case "$AVAILABLE_MB" in
+  ''|*[!0-9]*)
+    echo "cannot determine free space for Docker root: $DOCKER_ROOT" >&2
+    exit 4
+    ;;
+esac
+
+if [ "$AVAILABLE_MB" -lt "$MIN_FREE_MB" ]; then
+  echo "insufficient Docker disk space: available=${AVAILABLE_MB}MB required=${MIN_FREE_MB}MB root=$DOCKER_ROOT" >&2
+  exit 5
+fi
+
+echo "docker_root=$DOCKER_ROOT available=${AVAILABLE_MB}MB required=${MIN_FREE_MB}MB"
+
 if ! docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1; then
   docker buildx create \
     --name "$BUILDER_NAME" \
@@ -39,7 +57,7 @@ docker buildx inspect "$BUILDER_NAME" --bootstrap >/dev/null
 
 if ! docker container inspect "$BUILDER_CONTAINER" >/dev/null 2>&1; then
   echo "builder container not found: $BUILDER_CONTAINER" >&2
-  exit 4
+  exit 6
 fi
 
 actual_limits="$(docker container inspect "$BUILDER_CONTAINER" \
@@ -50,7 +68,7 @@ if [ "$actual_limits" != "$expected_limits" ]; then
   echo "builder resource limits do not match" >&2
   echo "expected: $expected_limits" >&2
   echo "actual:   $actual_limits" >&2
-  exit 5
+  exit 7
 fi
 
 echo "builder=$BUILDER_NAME limits=1cpu/2g image=$IMAGE_TAG version=$VERSION"
@@ -61,3 +79,6 @@ docker buildx build \
   --build-arg "VERSION=$VERSION" \
   --tag "$IMAGE_TAG" \
   "$CONTEXT"
+
+df -h "$DOCKER_ROOT"
+docker buildx du --builder "$BUILDER_NAME"
