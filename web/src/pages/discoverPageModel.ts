@@ -34,8 +34,11 @@ export const defaultSectionDefs: DiscoverSection[] = [
   { key: 'douban_hot_tv', label: '豆瓣热门剧集', provider: 'douban' },
   { key: 'bangumi_calendar', label: 'Bangumi 每日放送', provider: 'bangumi' },
 	{ key: 'adult_javdb_popular', label: 'JavDB 今日热门', provider: 'adult', group: 'adult' },
-	{ key: 'adult_javdb_performers', label: 'JavDB 热门女优', provider: 'adult', group: 'adult' },
+	{ key: 'adult_followed_performers', label: '关注女优', provider: 'adult', group: 'adult' },
 	{ key: 'adult_followed', label: '关注女优新作', provider: 'adult', group: 'adult' },
+	{ key: 'adult_javdb_performers_new', label: 'JavDB 新人女优', provider: 'adult', group: 'adult' },
+	{ key: 'adult_javdb_performers_monthly', label: 'JavDB 月榜女优', provider: 'adult', group: 'adult' },
+	{ key: 'adult_javdb_performers_fanza', label: 'JavDB Fanza(DMM)推薦', provider: 'adult', group: 'adult' },
 ]
 
 export function discoverItemSource(item: DiscoverItem): string {

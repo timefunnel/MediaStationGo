@@ -20,3 +20,17 @@ func TestNormalizeDiscoverPreferenceSectionsOrdersAndValidates(t *testing.T) {
 		t.Fatalf("adult filtered result = %#v err=%v", got, err)
 	}
 }
+
+func TestNormalizeDiscoverPreferenceSectionsMigratesLegacyPerformerSection(t *testing.T) {
+	sections := []discoverSectionDef{
+		{Key: "adult_javdb_performers_new", Group: "adult"},
+		{Key: "adult_javdb_performers_monthly", Group: "adult"},
+		{Key: "adult_javdb_performers_fanza", Group: "adult"},
+	}
+	got, err := normalizeDiscoverPreferenceSections(
+		[]string{"adult_javdb_performers"}, sections, true, false,
+	)
+	if err != nil || len(got) != 1 || got[0] != "adult_javdb_performers_monthly" {
+		t.Fatalf("got = %#v err=%v", got, err)
+	}
+}

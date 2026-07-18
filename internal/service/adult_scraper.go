@@ -48,9 +48,10 @@ var defaultAdultBases = []string{
 }
 
 type AdultProvider struct {
-	log       *zap.Logger
-	client    *http.Client
-	apiConfig *APIConfigService
+	log                    *zap.Logger
+	client                 *http.Client
+	apiConfig              *APIConfigService
+	javDBPerformerSections adultJavDBPerformerSectionCache
 }
 
 func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvider {

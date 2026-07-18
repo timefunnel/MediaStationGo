@@ -3,9 +3,12 @@ package service
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
 func TestParseJavDBMovieList(t *testing.T) {
@@ -79,6 +82,69 @@ func TestParseJavDBPerformerList(t *testing.T) {
 	}
 	if len(item.People) != 1 || item.People[0].SourceID != "BzpA" {
 		t.Fatalf("unexpected performer metadata: %#v", item.People)
+	}
+}
+
+func TestParseJavDBPerformerSections(t *testing.T) {
+	body := `<h3 class="title is-4 mb-4">新人</h3>
+<div id="actors" class="actors"><a href="/actors/New1"><img src="https://c0.jdbstatic.com/avatars/new1.jpg"><strong>新人女优</strong></a></div>
+<h3 class="title is-4 mb-4">月榜</h3>
+<div id="actors" class="actors"><a href="/actors/Month1"><img src="https://c0.jdbstatic.com/avatars/month1.jpg"><strong>月榜女优</strong></a></div>
+<h3 class="title is-4 mb-4">Fanza(DMM)推薦</h3>
+<div id="actors" class="actors"><a href="/actors/Fanza1"><img src="https://c0.jdbstatic.com/avatars/fanza1.jpg"><strong>推荐女优</strong></a></div>`
+	sections, err := parseJavDBPerformerSections(body, "https://javdb.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sections[adultJavDBPerformerNew]; len(got) != 1 || got[0].ProviderID != "New1" {
+		t.Fatalf("new performers = %#v", got)
+	}
+	if got := sections[adultJavDBPerformerMonthly]; len(got) != 1 || got[0].ProviderID != "Month1" {
+		t.Fatalf("monthly performers = %#v", got)
+	}
+	if got := sections[adultJavDBPerformerFanza]; len(got) != 1 || got[0].ProviderID != "Fanza1" {
+		t.Fatalf("fanza performers = %#v", got)
+	}
+}
+
+func TestAdultProviderJavDBPerformerSectionsShareOneFetch(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actors" {
+			http.NotFound(w, r)
+			return
+		}
+		requests.Add(1)
+		_, _ = w.Write([]byte(`<h3>新人</h3><a href="/actors/New1"><strong>新人女优</strong></a>
+<h3>月榜</h3><a href="/actors/Month1"><strong>月榜女优</strong></a>
+<h3>Fanza(DMM)推薦</h3><a href="/actors/Fanza1"><strong>推荐女优</strong></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	for _, section := range []string{adultJavDBPerformerNew, adultJavDBPerformerMonthly, adultJavDBPerformerFanza} {
+		items, err := provider.DiscoverJavDBPerformerSection(t.Context(), section)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("section %s items=%#v err=%v", section, items, err)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("actors requests = %d, want 1", got)
+	}
+}
+
+func TestFollowedAdultPerformerItems(t *testing.T) {
+	items := FollowedAdultPerformerItems([]model.AdultPerformerFollow{{
+		Name: "关注女优", Source: "javdb", SourceID: "Actor1",
+		ImageURL:   "https://c0.jdbstatic.com/avatars/actor1.jpg",
+		ProfileURL: "https://javdb.com/actors/Actor1",
+	}})
+	if len(items) != 1 || !items[0].Followed || items[0].MediaType != "person" {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].ProviderID != "Actor1" || len(items[0].People) != 1 {
+		t.Fatalf("performer identity = %#v", items[0])
 	}
 }
 

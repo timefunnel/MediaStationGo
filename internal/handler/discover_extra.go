@@ -41,8 +41,11 @@ var discoverSectionCatalog = []discoverSectionDef{
 	{Key: "douban_top_movie", Label: "豆瓣高分电影", Provider: "douban"},
 	{Key: "bangumi_calendar", Label: "Bangumi 每日放送", Provider: "bangumi"},
 	{Key: "adult_javdb_popular", Label: "JavDB 今日热门", Provider: "adult", Group: "adult"},
-	{Key: "adult_javdb_performers", Label: "JavDB 热门女优", Provider: "adult", Group: "adult"},
+	{Key: "adult_followed_performers", Label: "关注女优", Provider: "adult", Group: "adult"},
 	{Key: "adult_followed", Label: "关注女优新作", Provider: "adult", Group: "adult"},
+	{Key: "adult_javdb_performers_new", Label: "JavDB 新人女优", Provider: "adult", Group: "adult"},
+	{Key: "adult_javdb_performers_monthly", Label: "JavDB 月榜女优", Provider: "adult", Group: "adult"},
+	{Key: "adult_javdb_performers_fanza", Label: "JavDB Fanza(DMM)推薦", Provider: "adult", Group: "adult"},
 }
 
 const discoverFeedSectionTimeout = 20 * time.Second
@@ -307,7 +310,8 @@ func discoverSectionProvider(key string) string {
 		}
 	}
 	switch key {
-	case "adult_javdb_popular", "adult_javdb_performers", "adult_followed":
+	case "adult_javdb_popular", "adult_javdb_performers", "adult_followed_performers", "adult_followed",
+		"adult_javdb_performers_new", "adult_javdb_performers_monthly", "adult_javdb_performers_fanza":
 		return "adult"
 	case "trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
 		return "tmdb"
@@ -350,11 +354,11 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 			return []service.ExternalMediaResult{}, nil
 		}
 		return svc.Adult.DiscoverJavDBPopular(ctx)
-	case "adult_javdb_performers":
+	case "adult_javdb_performers", "adult_javdb_performers_monthly":
 		if svc.Adult == nil || page > 1 {
 			return []service.ExternalMediaResult{}, nil
 		}
-		items, err := svc.Adult.DiscoverJavDBPerformers(ctx)
+		items, err := svc.Adult.DiscoverJavDBPerformerSection(ctx, "monthly")
 		if err != nil {
 			return nil, err
 		}
@@ -362,6 +366,31 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 			return nil, err
 		}
 		return items, nil
+	case "adult_javdb_performers_new", "adult_javdb_performers_fanza":
+		if svc.Adult == nil || page > 1 {
+			return []service.ExternalMediaResult{}, nil
+		}
+		section := "new"
+		if k == "adult_javdb_performers_fanza" {
+			section = "fanza"
+		}
+		items, err := svc.Adult.DiscoverJavDBPerformerSection(ctx, section)
+		if err != nil {
+			return nil, err
+		}
+		if err := markAdultPerformerFollows(ctx, svc, userID, items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	case "adult_followed_performers":
+		if svc.Repo == nil || svc.Repo.AdultFollow == nil || page > 1 {
+			return []service.ExternalMediaResult{}, nil
+		}
+		follows, err := svc.Repo.AdultFollow.ListByUser(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		return service.FollowedAdultPerformerItems(follows), nil
 	case "adult_followed":
 		if svc.Adult == nil || svc.Repo == nil || svc.Repo.AdultFollow == nil {
 			return []service.ExternalMediaResult{}, nil
@@ -399,7 +428,8 @@ func discoverSectionHasNext(key string, itemCount int) bool {
 
 func discoverSectionCacheKeyForUser(key, userID string) string {
 	switch key {
-	case "adult_javdb_performers", "adult_followed":
+	case "adult_javdb_performers", "adult_followed_performers", "adult_followed",
+		"adult_javdb_performers_new", "adult_javdb_performers_monthly", "adult_javdb_performers_fanza":
 		return key + ":" + strings.TrimSpace(userID)
 	default:
 		return key

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -22,7 +23,29 @@ var (
 	adultListScorePattern   = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
 	adultPerformerIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	adultMovieIDPattern     = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	adultJavDBActorHeading  = regexp.MustCompile(`(?is)<h3\b[^>]*>(.*?)</h3>`)
 )
+
+const adultJavDBPerformerSectionCacheTTL = 5 * time.Minute
+
+const (
+	adultJavDBPerformerNew     = "new"
+	adultJavDBPerformerMonthly = "monthly"
+	adultJavDBPerformerFanza   = "fanza"
+)
+
+type adultJavDBPerformerSectionFlight struct {
+	done     chan struct{}
+	sections map[string][]ExternalMediaResult
+	err      error
+}
+
+type adultJavDBPerformerSectionCache struct {
+	mu        sync.Mutex
+	sections  map[string][]ExternalMediaResult
+	fetchedAt time.Time
+	flight    *adultJavDBPerformerSectionFlight
+}
 
 func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMediaResult, error) {
 	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
@@ -31,11 +54,154 @@ func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMed
 	return limitAdultDiscoveryItems(items, 30), err
 }
 
-func (p *AdultProvider) DiscoverJavDBPerformers(ctx context.Context) ([]ExternalMediaResult, error) {
-	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
-		return base + "/rankings/actors?t=censored"
-	}, parseJavDBPerformerList)
-	return limitAdultDiscoveryItems(items, 30), err
+func (p *AdultProvider) DiscoverJavDBPerformerSection(ctx context.Context, section string) ([]ExternalMediaResult, error) {
+	section = strings.ToLower(strings.TrimSpace(section))
+	switch section {
+	case adultJavDBPerformerNew, adultJavDBPerformerMonthly, adultJavDBPerformerFanza:
+	default:
+		return nil, fmt.Errorf("unsupported JavDB performer section: %s", section)
+	}
+	sections, err := p.loadJavDBPerformerSections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := sections[section]
+	if len(items) == 0 {
+		return nil, fmt.Errorf("JavDB performer section %s returned no usable items", section)
+	}
+	return limitAdultDiscoveryItems(items, 30), nil
+}
+
+func (p *AdultProvider) loadJavDBPerformerSections(ctx context.Context) (map[string][]ExternalMediaResult, error) {
+	if p == nil {
+		return nil, errors.New("adult provider is unavailable")
+	}
+	cache := &p.javDBPerformerSections
+	cache.mu.Lock()
+	if len(cache.sections) > 0 && time.Since(cache.fetchedAt) < adultJavDBPerformerSectionCacheTTL {
+		sections := cloneAdultPerformerSections(cache.sections)
+		cache.mu.Unlock()
+		return sections, nil
+	}
+	if cache.flight != nil {
+		flight := cache.flight
+		cache.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-flight.done:
+			return cloneAdultPerformerSections(flight.sections), flight.err
+		}
+	}
+	flight := &adultJavDBPerformerSectionFlight{done: make(chan struct{})}
+	cache.flight = flight
+	cache.mu.Unlock()
+
+	sections, err := p.fetchJavDBPerformerSections(ctx)
+	cache.mu.Lock()
+	flight.sections = cloneAdultPerformerSections(sections)
+	flight.err = err
+	if err == nil {
+		cache.sections = cloneAdultPerformerSections(sections)
+		cache.fetchedAt = time.Now()
+	}
+	cache.flight = nil
+	close(flight.done)
+	cache.mu.Unlock()
+	return cloneAdultPerformerSections(sections), err
+}
+
+func (p *AdultProvider) fetchJavDBPerformerSections(ctx context.Context) (map[string][]ExternalMediaResult, error) {
+	var lastErr error
+	foundSource := false
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != "javdb" {
+			continue
+		}
+		foundSource = true
+		base = strings.TrimRight(base, "/")
+		body, err := p.fetchText(ctx, base+"/actors", base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		sections, err := parseJavDBPerformerSections(body, base)
+		if err == nil {
+			return sections, nil
+		}
+		lastErr = err
+	}
+	if !foundSource {
+		return nil, errors.New("adult source javdb is not configured")
+	}
+	return nil, lastErr
+}
+
+func cloneAdultPerformerSections(source map[string][]ExternalMediaResult) map[string][]ExternalMediaResult {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string][]ExternalMediaResult, len(source))
+	for key, items := range source {
+		cloned[key] = append([]ExternalMediaResult(nil), items...)
+	}
+	return cloned
+}
+
+func parseJavDBPerformerSections(body, base string) (map[string][]ExternalMediaResult, error) {
+	headings := adultJavDBActorHeading.FindAllStringSubmatchIndex(body, -1)
+	sections := make(map[string][]ExternalMediaResult, 3)
+	for index, heading := range headings {
+		if len(heading) < 4 {
+			continue
+		}
+		section := javDBPerformerSectionKey(stripAdultHTML(body[heading[2]:heading[3]]))
+		if section == "" {
+			continue
+		}
+		end := len(body)
+		if index+1 < len(headings) {
+			end = headings[index+1][0]
+		}
+		sections[section] = parseJavDBPerformerList(body[heading[1]:end], base)
+	}
+	for _, section := range []string{adultJavDBPerformerNew, adultJavDBPerformerMonthly, adultJavDBPerformerFanza} {
+		if len(sections[section]) == 0 {
+			return nil, fmt.Errorf("JavDB actors page is missing performer section %s", section)
+		}
+	}
+	return sections, nil
+}
+
+func javDBPerformerSectionKey(title string) string {
+	title = strings.ToLower(strings.TrimSpace(title))
+	switch {
+	case title == "新人":
+		return adultJavDBPerformerNew
+	case title == "月榜":
+		return adultJavDBPerformerMonthly
+	case strings.Contains(title, "fanza") || strings.Contains(title, "dmm"):
+		return adultJavDBPerformerFanza
+	default:
+		return ""
+	}
+}
+
+func FollowedAdultPerformerItems(follows []model.AdultPerformerFollow) []ExternalMediaResult {
+	items := make([]ExternalMediaResult, 0, len(follows))
+	for _, follow := range follows {
+		person := PersonMetadata{
+			Name:       follow.Name,
+			ImageURL:   follow.ImageURL,
+			ProfileURL: follow.ProfileURL,
+			Source:     follow.Source,
+			SourceID:   follow.SourceID,
+		}
+		item := adultPerformerItem(person)
+		item.Followed = true
+		items = append(items, item)
+	}
+	return items
 }
 
 func (p *AdultProvider) SearchPerformers(ctx context.Context, query string) ([]ExternalMediaResult, error) {

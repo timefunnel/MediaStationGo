@@ -83,6 +83,9 @@ func normalizeDiscoverPreferenceSections(
 	selected := make(map[string]struct{}, len(raw))
 	for _, value := range raw {
 		key := strings.TrimSpace(value)
+		if key == "adult_javdb_performers" {
+			key = "adult_javdb_performers_monthly"
+		}
 		if key == "" {
 			if rejectUnknown {
 				return nil, fmt.Errorf("discover section key is empty")

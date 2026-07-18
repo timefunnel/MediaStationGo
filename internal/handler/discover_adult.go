@@ -215,6 +215,14 @@ func forgetAdultDiscoverUserSections(svc *service.Container, userID string) {
 	if svc == nil || svc.Discover == nil {
 		return
 	}
-	svc.Discover.ForgetSection(discoverSectionCacheKeyForUser("adult_javdb_performers", userID))
-	svc.Discover.ForgetSection(discoverSectionCacheKeyForUser("adult_followed", userID))
+	for _, key := range []string{
+		"adult_javdb_performers",
+		"adult_followed_performers",
+		"adult_followed",
+		"adult_javdb_performers_new",
+		"adult_javdb_performers_monthly",
+		"adult_javdb_performers_fanza",
+	} {
+		svc.Discover.ForgetSection(discoverSectionCacheKeyForUser(key, userID))
+	}
 }
