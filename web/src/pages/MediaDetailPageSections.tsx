@@ -12,6 +12,7 @@ import { MediaDetailMetadata } from './MediaDetailMetadata'
 import { mediaDetailScrapeMediaType } from './MediaDetailPageModel'
 import { MediaDetailVersions } from './MediaDetailVersions'
 import { MediaDetailParts } from './MediaDetailParts'
+import { MediaDetailSubtitles } from './MediaDetailSubtitles'
 
 interface MediaDetailPlaybackActionsProps {
   media: Media
@@ -218,6 +219,13 @@ export function MediaDetailMainContent({
             deletingID={versionDeletingID}
             onDelete={onDeleteVersion}
           />
+          {isAdmin && (
+            <MediaDetailSubtitles
+              mediaId={media.id}
+              versions={versions}
+              versionsLoading={versionsLoading}
+            />
+          )}
           <MediaDetailParts parts={parts} loading={partsLoading} />
           {isAdmin && (
             <MediaDetailAdminPanel

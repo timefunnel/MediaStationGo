@@ -276,7 +276,7 @@ func embySubtitleDisplayLanguage(lang string) string {
 }
 
 func embySubtitleVirtualPath(mediaID string, trackIndex int, ext string, track SubtitleTrack) string {
-	filename := ""
+	filename := strings.TrimSpace(track.Name)
 	if _, localFilename, ok := parseLocalSubtitlePath(track.Path); ok {
 		filename = strings.TrimSpace(localFilename)
 	}

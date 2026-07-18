@@ -34,6 +34,7 @@ type SubtitleService struct {
 	log           *zap.Logger
 	repo          *repository.Container
 	storage       *StorageConfigService
+	pipeline      subtitlePipelineClient
 	localCacheDir string
 	cloudCache    *cloudSubtitleDiscoveryCache
 }
@@ -61,11 +62,13 @@ func (s *SubtitleService) SetStorageConfig(storage *StorageConfigService) {
 
 // SubtitleTrack describes one external subtitle file.
 type SubtitleTrack struct {
-	Lang  string `json:"lang"`
-	Label string `json:"label"`
-	Path  string `json:"path"`
-	URL   string `json:"url"`
-	Codec string `json:"codec"`
+	Lang   string `json:"lang"`
+	Label  string `json:"label"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	URL    string `json:"url"`
+	Codec  string `json:"codec"`
+	Source string `json:"source"`
 }
 
 // extToCodec maps the file extension to the inner codec name.
@@ -171,10 +174,12 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 			}
 			lang, label := detectLangLabel(fullName, base)
 			tracks = append(tracks, SubtitleTrack{
-				Lang:  lang,
-				Label: label,
-				Path:  filepath.Join(c, e.Name()),
-				Codec: codec,
+				Lang:   lang,
+				Label:  label,
+				Name:   e.Name(),
+				Path:   filepath.Join(c, e.Name()),
+				Codec:  codec,
+				Source: "media",
 			})
 		}
 	}

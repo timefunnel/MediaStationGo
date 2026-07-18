@@ -97,7 +97,7 @@ func TestSubtitleDiscoverMergesLocalCacheTracks(t *testing.T) {
 	if len(tracks) != 1 {
 		t.Fatalf("len(tracks) = %d, want 1: %#v", len(tracks), tracks)
 	}
-	if tracks[0].Path != "local-subtitle://media-cached/subtitlecat-test.srt" || tracks[0].Lang != "zh-Hans" || tracks[0].Label != "简体中文" || tracks[0].Codec != "srt" {
+	if tracks[0].Path != "local-subtitle://media-cached/subtitlecat-test.srt" || tracks[0].Name != "subtitlecat-test.srt" || tracks[0].Lang != "zh-Hans" || tracks[0].Label != "简体中文" || tracks[0].Codec != "srt" || tracks[0].Source != "cache" {
 		t.Fatalf("unexpected local cache track: %#v", tracks[0])
 	}
 
@@ -115,5 +115,59 @@ func TestSubtitleDiscoverMergesLocalCacheTracks(t *testing.T) {
 	}
 	if !strings.HasPrefix(vtt.String(), "WEBVTT") || !strings.Contains(vtt.String(), "hello") {
 		t.Fatalf("unexpected vtt body: %q", vtt.String())
+	}
+}
+
+func TestSubtitleDeleteRemovesOnlySelectedCachedTrackAndUpdatesIndex(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:subtitle-delete?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Library{}, &model.Media{}); err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{
+		Base:  model.Base{ID: "media-delete-subtitle"},
+		Title: "Delete Subtitle",
+		Path:  filepath.Join(t.TempDir(), "Delete Subtitle.mkv"),
+	}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+	mediaCacheDir := filepath.Join(cacheDir, media.ID)
+	if err := os.MkdirAll(mediaCacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"subtitlecat-first.srt", "assrt-second.ass"} {
+		if err := os.WriteFile(filepath.Join(mediaCacheDir, name), []byte("subtitle"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index := `{"media_id":"media-delete-subtitle","tracks":[` +
+		`{"media_id":"media-delete-subtitle","filename":"subtitlecat-first.srt","lang":"zh-Hans","label":"简体中文","source":"subtitlecat","provider_id":"first"},` +
+		`{"media_id":"media-delete-subtitle","filename":"assrt-second.ass","lang":"zh-Hans","label":"简体中文","source":"assrt","provider_id":"second"}` +
+		`]}`
+	if err := os.WriteFile(filepath.Join(mediaCacheDir, "tracks.json"), []byte(index), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSubtitleService(zap.NewNop(), repository.New(db))
+	svc.SetLocalCacheDir(cacheDir)
+	if err := svc.Delete(t.Context(), media.ID, localSubtitleURI(media.ID, "subtitlecat-first.srt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(mediaCacheDir, "subtitlecat-first.srt")); !os.IsNotExist(err) {
+		t.Fatalf("deleted subtitle still exists: %v", err)
+	}
+	tracks, err := svc.Discover(t.Context(), media.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 1 || tracks[0].Name != "assrt-second.ass" || tracks[0].Source != "assrt" {
+		t.Fatalf("unexpected remaining tracks: %#v", tracks)
+	}
+	if err := svc.Delete(t.Context(), media.ID, localSubtitleURI(media.ID, "not-indexed.srt")); err == nil {
+		t.Fatal("expected unowned subtitle deletion to fail")
 	}
 }

@@ -55,6 +55,16 @@ func (b *serviceContainerBuilder) initResourceImport() {
 		return
 	}
 	b.c.ResourceImport = service
+	if b.c.Subtitle != nil && service != nil {
+		subtitleClient, ok := service.client.(subtitlePipelineClient)
+		if !ok {
+			if b.log != nil {
+				b.log.Error("resource pipeline client does not support subtitle operations")
+			}
+		} else {
+			b.c.Subtitle.SetPipelineClient(subtitleClient)
+		}
+	}
 	if b.c.Subscription != nil {
 		b.c.Subscription.SetResourceImport(service)
 	}

@@ -26,10 +26,15 @@ type localSubtitleIndex struct {
 }
 
 type localSubtitleIndexTrack struct {
-	MediaID  string `json:"media_id"`
-	Filename string `json:"filename"`
-	Lang     string `json:"lang"`
-	Label    string `json:"label"`
+	MediaID    string `json:"media_id"`
+	Filename   string `json:"filename"`
+	Lang       string `json:"lang"`
+	Label      string `json:"label"`
+	Path       string `json:"path,omitempty"`
+	Source     string `json:"source,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
+	Query      string `json:"query,omitempty"`
+	Score      int    `json:"score,omitempty"`
 }
 
 func subtitleCacheDirFromEnv() string {
@@ -89,10 +94,12 @@ func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string) []Subtitle
 			_, label = detectLangLabel(strings.TrimSuffix(filename, ext), "")
 		}
 		tracks = append(tracks, SubtitleTrack{
-			Lang:  lang,
-			Label: label,
-			Path:  localSubtitleURI(mediaID, filename),
-			Codec: codec,
+			Lang:   lang,
+			Label:  label,
+			Name:   filename,
+			Path:   localSubtitleURI(mediaID, filename),
+			Codec:  codec,
+			Source: firstNonEmpty(strings.TrimSpace(item.Source), "cache"),
 		})
 	}
 	return tracks
