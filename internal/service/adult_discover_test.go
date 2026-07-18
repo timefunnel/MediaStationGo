@@ -204,3 +204,29 @@ func TestAdultProviderSearchPerformersResolvesMovieDetails(t *testing.T) {
 		t.Fatalf("items = %#v", items)
 	}
 }
+
+func TestAdultProviderSearchMoviesReturnsJavDBCards(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "MIZD-534" || r.URL.Query().Get("f") != "all" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`<a class="box" href="/v/mizd534" title="Sample title">
+<img src="https://c0.jdbstatic.com/covers/mi/mizd534.jpg">
+<strong>MIZD-534</strong><span>2026-08-01</span></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.SearchMovies(t.Context(), "MIZD-534")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ProviderID != "mizd534" || items[0].OriginalName != "MIZD-534" {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].ReleaseDate != "2026-08-01" || items[0].MediaType != "adult" {
+		t.Fatalf("release metadata = %#v", items[0])
+	}
+}

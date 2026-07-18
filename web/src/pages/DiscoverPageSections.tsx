@@ -8,28 +8,26 @@ type SectionLabel = (key: string) => string
 
 export function DiscoverHeader({
   selectedCount,
-  adultSearchEnabled,
   sectionsReady,
   loading,
 	selectionSaving,
-	adultSearchQuery,
-	adultSearchLoading,
+	searchQuery,
+	searchLoading,
   onRefresh,
 	onOpenSectionPicker,
-	onAdultSearchQueryChange,
-	onAdultSearch,
+	onSearchQueryChange,
+	onSearch,
 }: {
   selectedCount: number
-  adultSearchEnabled: boolean
   sectionsReady: boolean
   loading: boolean
 	selectionSaving: boolean
-	adultSearchQuery: string
-  adultSearchLoading: boolean
+	searchQuery: string
+  searchLoading: boolean
   onRefresh: () => void
 	onOpenSectionPicker: () => void
-	onAdultSearchQueryChange: (value: string) => void
-	onAdultSearch: () => void
+	onSearchQueryChange: (value: string) => void
+	onSearch: () => void
 }) {
   return (
     <header className="space-y-5">
@@ -67,32 +65,30 @@ export function DiscoverHeader({
           刷新
         </button>
 		</div>
-		{adultSearchEnabled && (
-					<form
-						onSubmit={(event) => {
-							event.preventDefault()
-							onAdultSearch()
-						}}
-						className="ml-auto flex w-full max-w-lg justify-end gap-2"
-					>
-						<input
-							type="search"
-							value={adultSearchQuery}
-							onChange={(event) => onAdultSearchQueryChange(event.target.value)}
-							placeholder="搜索任意 JavDB 女优"
-							aria-label="搜索女优"
-							className="h-9 min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-3 text-sm text-ink-600 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100 sm:max-w-xs"
-						/>
-						<button
-							type="submit"
-							disabled={adultSearchLoading || adultSearchQuery.trim().length < 2}
-							className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-						>
-							{adultSearchLoading ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}
-							搜索女优
-						</button>
-					</form>
-		)}
+		<form
+			onSubmit={(event) => {
+				event.preventDefault()
+				onSearch()
+			}}
+			className="ml-auto flex w-full max-w-2xl justify-end gap-2"
+		>
+			<input
+				type="search"
+				value={searchQuery}
+				onChange={(event) => onSearchQueryChange(event.target.value)}
+				placeholder="搜索电影、剧集、动漫、女优或番号"
+				aria-label="聚合搜索"
+				className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm text-ink-600 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
+			/>
+			<button
+				type="submit"
+				disabled={!sectionsReady || searchLoading || searchQuery.trim().length < 1}
+				className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-primary-300 bg-primary-500/10 px-4 text-xs font-semibold text-brand-500 transition hover:bg-primary-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+			>
+				{searchLoading ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}
+				聚合搜索
+			</button>
+		</form>
     </header>
   )
 }

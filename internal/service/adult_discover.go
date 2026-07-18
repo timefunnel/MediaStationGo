@@ -250,6 +250,43 @@ func (p *AdultProvider) SearchPerformers(ctx context.Context, query string) ([]E
 	return []ExternalMediaResult{}, nil
 }
 
+func (p *AdultProvider) SearchMovies(ctx context.Context, query string) ([]ExternalMediaResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("adult movie query is empty")
+	}
+	if p == nil {
+		return nil, errors.New("adult provider is unavailable")
+	}
+
+	var lastErr error
+	foundSource := false
+	completedSource := false
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != "javdb" {
+			continue
+		}
+		foundSource = true
+		base = strings.TrimRight(base, "/")
+		body, err := p.fetchText(ctx, base+"/search?q="+url.QueryEscape(query)+"&f=all", base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		completedSource = true
+		if items := parseJavDBMovieList(body, base); len(items) > 0 {
+			return limitAdultDiscoveryItems(items, 20), nil
+		}
+	}
+	if !foundSource {
+		return nil, errors.New("adult source javdb is not configured")
+	}
+	if lastErr != nil && !completedSource {
+		return nil, lastErr
+	}
+	return []ExternalMediaResult{}, nil
+}
+
 func (p *AdultProvider) searchJavDBPerformerMovieDetails(
 	ctx context.Context,
 	base string,

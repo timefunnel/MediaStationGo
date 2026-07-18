@@ -31,11 +31,11 @@ export function DiscoverPage() {
   const [reloadSeq, setReloadSeq] = useState(0)
   const [imageVersion, setImageVersion] = useState<string>()
   const [refreshImageVersion, setRefreshImageVersion] = useState<string>()
-	const [performerSearchQuery, setPerformerSearchQuery] = useState('')
-	const [performerSearchItems, setPerformerSearchItems] = useState<DiscoverItem[]>([])
-	const [performerSearchLoading, setPerformerSearchLoading] = useState(false)
-	const [performerSearchError, setPerformerSearchError] = useState('')
-	const [performerSearchDone, setPerformerSearchDone] = useState(false)
+	const [searchQuery, setSearchQuery] = useState('')
+	const [searchItems, setSearchItems] = useState<DiscoverItem[]>([])
+	const [searchLoading, setSearchLoading] = useState(false)
+	const [searchErrors, setSearchErrors] = useState<Record<string, string>>({})
+	const [searchDone, setSearchDone] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -160,6 +160,7 @@ export function DiscoverPage() {
   )
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
+	const searchGroups = useMemo(() => groupDiscoverSearchItems(searchItems), [searchItems])
 
   const openSectionPicker = () => {
 		setSectionPickerDraft(selected)
@@ -214,30 +215,32 @@ export function DiscoverPage() {
     setReloadSeq((current) => current + 1)
   }
 
-	const searchAdultPerformers = async () => {
-		const query = performerSearchQuery.trim()
-		setPerformerSearchDone(true)
-		setPerformerSearchItems([])
-		setPerformerSearchError('')
-		if ([...query].length < 2) {
-			setPerformerSearchError('女优搜索词至少需要 2 个字符')
+	const searchDiscoverCatalog = async () => {
+		const query = searchQuery.trim()
+		setSearchDone(true)
+		setSearchItems([])
+		setSearchErrors({})
+		if ([...query].length < 1) {
+			setSearchErrors({ request: '请输入搜索词' })
 			return
 		}
-		setPerformerSearchLoading(true)
+		setSearchLoading(true)
 		try {
-			setPerformerSearchItems(await discoverAPI.searchAdultPerformers(query))
+			const result = await discoverAPI.search(query)
+			setSearchItems(result.items)
+			setSearchErrors(result.errors)
 		} catch (error) {
 			const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
-			setPerformerSearchError(message || '女优搜索失败')
+			setSearchErrors({ request: message || '聚合搜索失败' })
 		} finally {
-			setPerformerSearchLoading(false)
+			setSearchLoading(false)
 		}
 	}
 
 	const handleAdultFollowChanged = (followed: boolean) => {
 		const source = activeItem?.source
 		const sourceID = activeItem?.provider_id
-		setPerformerSearchItems((current) => current.map((item) => (
+		setSearchItems((current) => current.map((item) => (
 			item.source === source && item.provider_id === sourceID ? { ...item, followed } : item
 		)))
 		setActiveItem((current) => current ? { ...current, followed } : current)
@@ -248,16 +251,15 @@ export function DiscoverPage() {
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-6">
       <DiscoverHeader
         selectedCount={selected.length}
-		adultSearchEnabled={sections.some((section) => section.group === 'adult')}
         sectionsReady={sectionsReady}
         loading={loading}
 		selectionSaving={selectionSaving}
-		adultSearchQuery={performerSearchQuery}
-		adultSearchLoading={performerSearchLoading}
+		searchQuery={searchQuery}
+		searchLoading={searchLoading}
         onRefresh={refreshDiscover}
 		onOpenSectionPicker={openSectionPicker}
-		onAdultSearchQueryChange={setPerformerSearchQuery}
-		onAdultSearch={() => void searchAdultPerformers()}
+		onSearchQueryChange={setSearchQuery}
+		onSearch={() => void searchDiscoverCatalog()}
       />
 
 		{sectionPickerOpen && (
@@ -280,34 +282,36 @@ export function DiscoverPage() {
         </div>
       )}
 
-		{sectionsReady && performerSearchError && (
-			<div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-				{performerSearchError}
+		{sectionsReady && Object.keys(searchErrors).length > 0 && (
+			<div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+				<p className="font-semibold">以下搜索源未返回结果：</p>
+				{Object.entries(searchErrors).map(([source, message]) => <p key={source}>{message}</p>)}
 			</div>
 		)}
 
-		{sectionsReady && performerSearchLoading && (
-			<div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-				正在搜索 JavDB 女优…
+		{sectionsReady && searchLoading && (
+			<div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-brand-500">
+				正在聚合搜索 TMDb、豆瓣、Bangumi{sections.some((section) => section.group === 'adult') ? ' 与 JavDB' : ''}…
 			</div>
 		)}
 
-		{sectionsReady && performerSearchItems.length > 0 && (
+		{sectionsReady && searchGroups.map((group, index) => (
 			<ContentRow
-				title="女优搜索结果"
-				items={performerSearchItems}
-				priority
+				key={group.key}
+				title={`搜索结果 · ${group.label}`}
+				items={group.items}
+				priority={index === 0}
 				onSelect={setActiveItem}
 			/>
-		)}
+		))}
 
-		{sectionsReady && performerSearchDone && !performerSearchLoading && !performerSearchError && performerSearchItems.length === 0 && (
+		{sectionsReady && searchDone && !searchLoading && Object.keys(searchErrors).length === 0 && searchItems.length === 0 && (
 			<div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
-				没有找到匹配的 JavDB 女优
+				没有找到匹配的电影、剧集、动漫、女优或成人作品
 			</div>
 		)}
 
-      {sectionsReady && !loading && selected.length === 0 && !performerSearchDone && (
+      {sectionsReady && !loading && selected.length === 0 && !searchDone && (
         <DiscoverEmptySelection />
       )}
 
@@ -371,6 +375,32 @@ function discoverRequestErrorMessage(err: unknown): string {
     return '推荐源网络不可用，已跳过本次加载'
   }
   return '推荐源暂时不可用，已跳过本次加载'
+}
+
+function groupDiscoverSearchItems(items: DiscoverItem[]): Array<{
+	key: string
+	label: string
+	items: DiscoverItem[]
+}> {
+	const definitions = [
+		{ key: 'movie', label: '电影' },
+		{ key: 'tv', label: '剧集' },
+		{ key: 'anime', label: '动漫' },
+		{ key: 'person', label: '女优' },
+		{ key: 'adult', label: '成人作品' },
+	]
+	const grouped = new Map<string, DiscoverItem[]>()
+	for (const item of items) {
+		const mediaType = item.media_type?.trim().toLowerCase() || 'other'
+		grouped.set(mediaType, [...(grouped.get(mediaType) ?? []), item])
+	}
+	const groups = definitions
+		.map((definition) => ({ ...definition, items: grouped.get(definition.key) ?? [] }))
+		.filter((group) => group.items.length > 0)
+	const known = new Set(definitions.map((definition) => definition.key))
+	const otherItems = items.filter((item) => !known.has(item.media_type?.trim().toLowerCase() || 'other'))
+	if (otherItems.length > 0) groups.push({ key: 'other', label: '其他', items: otherItems })
+	return groups
 }
 
 function discoverPreferenceErrorMessage(error: unknown): string {

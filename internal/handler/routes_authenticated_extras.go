@@ -21,6 +21,7 @@ func registerAuthedUISurfaceRoutes(authed *gin.RouterGroup, svc *service.Contain
 	authed.PUT("/discover/preferences", requirePermission(svc, "can_view_discover"), updateDiscoverPreferenceHandler(svc))
 	authed.GET("/discover/sections", requirePermission(svc, "can_view_discover"), discoverSectionsHandler(svc))
 	authed.GET("/discover/feed", requirePermission(svc, "can_view_discover"), discoverFeedHandler(svc))
+	authed.GET("/discover/search", requirePermission(svc, "can_view_discover"), discoverSearchHandler(svc))
 	authed.GET("/discover/adult/follows", requirePermission(svc, "can_view_discover"), listAdultPerformerFollowsHandler(svc))
 	authed.POST("/discover/adult/follows", requirePermission(svc, "can_view_discover"), createAdultPerformerFollowHandler(svc))
 	authed.DELETE("/discover/adult/follows/:id", requirePermission(svc, "can_view_discover"), deleteAdultPerformerFollowHandler(svc))

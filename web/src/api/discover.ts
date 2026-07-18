@@ -76,6 +76,11 @@ export interface DiscoverPreference {
   selected_sections: string[]
 }
 
+export interface DiscoverSearchResult {
+	items: DiscoverItem[]
+	errors: Record<string, string>
+}
+
 // 后端在 TMDb 不可达 / API key 缺失时统一返回 { items: [], error: "..." }
 // 200 状态码——前端必须能区分这两种情况，不能简单用 items.length === 0
 // 推断"未配置 API key"。
@@ -118,6 +123,10 @@ export const discoverAPI = {
         }
         return { items, meta }
       }),
+	search: (query: string) =>
+		api
+			.get<DiscoverSearchResult>('/discover/search', { params: { q: query } })
+			.then((r) => ({ items: r.data.items ?? [], errors: r.data.errors ?? {} })),
 	adultFollows: () =>
 		api.get<{ items: AdultPerformerFollow[] }>('/discover/adult/follows').then((r) => r.data.items ?? []),
 	followAdultPerformer: (input: {

@@ -61,35 +61,13 @@ func SearchExternalMedia(ctx context.Context, query string, year int, mediaType 
 		if m == nil || strings.TrimSpace(m.Title) == "" {
 			return
 		}
+		item := externalMediaResultFromMatch(source, typ, m)
 		totalEpisodes := 0
 		if source == "tmdb" && typ == "tv" && m.TMDbID > 0 && tmdb != nil {
 			totalEpisodes, _ = tmdb.GetTVEpisodeCount(ctx, m.TMDbID)
 		}
-		results = append(results, ExternalMediaResult{
-			Source:           source,
-			MediaType:        typ,
-			Title:            m.Title,
-			OriginalName:     m.OriginalName,
-			Overview:         m.Overview,
-			PosterURL:        m.PosterURL,
-			BackdropURL:      m.BackdropURL,
-			Year:             m.Year,
-			ReleaseDate:      m.ReleaseDate,
-			Rating:           m.Rating,
-			DurationMinutes:  m.DurationMinutes,
-			Maker:            m.Maker,
-			TMDbID:           m.TMDbID,
-			BangumiID:        m.BangumiID,
-			SubscribeKeyword: buildSubscribeKeyword(m.Title, m.Year),
-			SubscribeAliases: buildSubscribeAliases(m.Title, m.OriginalName, m.Year),
-			TotalEpisodes:    totalEpisodes,
-			Languages:        m.Languages,
-			Countries:        m.Countries,
-			Genres:           m.Genres,
-			Actors:           m.Actors,
-			People:           m.People,
-			NSFW:             m.NSFW,
-		})
+		item.TotalEpisodes = totalEpisodes
+		results = append(results, item)
 	}
 
 	if tmdb != nil {
@@ -130,6 +108,38 @@ func SearchExternalMedia(ctx context.Context, query string, year int, mediaType 
 	}
 
 	return dedupeExternalMedia(results)
+}
+
+func externalMediaResultFromMatch(source, mediaType string, match *Match) ExternalMediaResult {
+	if match == nil {
+		return ExternalMediaResult{}
+	}
+	return ExternalMediaResult{
+		Source:           source,
+		MediaType:        mediaType,
+		Title:            match.Title,
+		OriginalName:     match.OriginalName,
+		Overview:         match.Overview,
+		PosterURL:        match.PosterURL,
+		BackdropURL:      match.BackdropURL,
+		Year:             match.Year,
+		ReleaseDate:      match.ReleaseDate,
+		Rating:           match.Rating,
+		DurationMinutes:  match.DurationMinutes,
+		Maker:            match.Maker,
+		TMDbID:           match.TMDbID,
+		BangumiID:        match.BangumiID,
+		DoubanID:         match.DoubanID,
+		TheTVDBID:        match.TheTVDBID,
+		SubscribeKeyword: buildSubscribeKeyword(match.Title, match.Year),
+		SubscribeAliases: buildSubscribeAliases(match.Title, match.OriginalName, match.Year),
+		Languages:        match.Languages,
+		Countries:        match.Countries,
+		Genres:           match.Genres,
+		Actors:           match.Actors,
+		People:           match.People,
+		NSFW:             match.NSFW,
+	}
 }
 
 func buildSubscribeKeyword(title string, year int) string {
