@@ -350,7 +350,7 @@ func TestListLibrarySeriesDoesNotTruncateLargeEpisodeLibraries(t *testing.T) {
 			EpisodeNum: i,
 		})
 	}
-	if err := repos.DB.CreateInBatches(rows, 500).Error; err != nil {
+	if err := repos.DB.CreateInBatches(rows, 100).Error; err != nil {
 		t.Fatal(err)
 	}
 	svc := &service.Container{

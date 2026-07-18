@@ -287,7 +287,7 @@ func TestSearchMediaVisibleCanReturnHugeLibraryResultsWhenRequested(t *testing.T
 			EpisodeNum: i + 1,
 		}
 	}
-	if err := db.CreateInBatches(&rows, 500).Error; err != nil {
+	if err := db.CreateInBatches(&rows, 100).Error; err != nil {
 		t.Fatal(err)
 	}
 
