@@ -7,8 +7,9 @@ param(
     [string]$RemoteRoot = "/opt/codex-build/mediastationgo",
     [string]$Image = "golang:1.25",
     [string]$Packages = "./internal/service ./internal/handler",
-    [string]$Cpus = "1",
-    [string]$Memory = "1280m",
+    [string]$Cpus = "2",
+    [string]$Memory = "2g",
+    [ValidateRange(1, 2)][int]$Parallelism = 2,
     [double]$MaxLoad1 = 1.5,
     [int]$MinMemAvailableMb = 1200,
     [switch]$Full,
@@ -83,7 +84,7 @@ Write-Host "Remote: $Remote port $Port"
 Write-Host "Remote root: $RemoteRoot"
 Write-Host "Image: $Image"
 Write-Host "Packages: $Packages"
-Write-Host "Resource limit: cpus=$Cpus memory=$Memory"
+Write-Host "Resource limit: cpus=$Cpus memory=$Memory parallelism=$Parallelism"
 Write-Host "Local tracked diff: $hasDiff"
 if ($untracked.Count -gt 0) {
     Write-Host "Untracked files will be included in the remote patch with git add -N:"
@@ -126,6 +127,7 @@ $qRemoteFormattedPatch = ConvertTo-BashSingleQuoted $remoteFormattedPatch
 $qPackages = ConvertTo-BashSingleQuoted $Packages
 $qCpus = ConvertTo-BashSingleQuoted $Cpus
 $qMemory = ConvertTo-BashSingleQuoted $Memory
+$qParallelism = ConvertTo-BashSingleQuoted ([string]$Parallelism)
 $qMaxLoad1 = ConvertTo-BashSingleQuoted ([string]$MaxLoad1)
 $qMinMemAvailableMb = ConvertTo-BashSingleQuoted ([string]$MinMemAvailableMb)
 $gofmtEnabled = if ($NoGofmt) { "0" } else { "1" }
@@ -142,6 +144,7 @@ FORMATTED_PATCH=$qRemoteFormattedPatch
 TEST_PACKAGES=$qPackages
 CPUS=$qCpus
 MEMORY=$qMemory
+PARALLELISM=$qParallelism
 MAX_LOAD_1=$qMaxLoad1
 MIN_MEM_AVAILABLE_MB=$qMinMemAvailableMb
 GOFMT_ENABLED=$gofmtEnabled
@@ -197,7 +200,7 @@ fi
 
 run_go() {
   docker run --rm --cpus="`$CPUS" -m "`$MEMORY" \
-    -e GOMAXPROCS=1 \
+    -e GOMAXPROCS="`$PARALLELISM" \
     -e GOMODCACHE=/go/pkg/mod \
     -e GOCACHE=/go/build-cache \
     -v "`$WORKTREE:/src" \
@@ -218,7 +221,7 @@ fi
 git diff --binary --output="`$FORMATTED_PATCH" -- .
 
 # shellcheck disable=SC2086
-run_go go test -p 1 `$TEST_PACKAGES
+run_go go test -p "`$PARALLELISM" `$TEST_PACKAGES
 
 echo "formatted patch: `$FORMATTED_PATCH"
 du -sh "`$REMOTE_ROOT" 2>/dev/null || true

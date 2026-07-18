@@ -5,7 +5,7 @@ BUILDER_NAME="mediastationgo-limited"
 BUILDER_CONTAINER="buildx_buildkit_${BUILDER_NAME}0"
 MEMORY_BYTES="2147483648"
 MEMORY_SWAP_BYTES="2147483648"
-CPU_QUOTA="100000"
+CPU_QUOTA="200000"
 CPU_PERIOD="100000"
 MIN_FREE_MB="${MIN_FREE_MB:-4096}"
 DRIVER_OPTIONS="memory=2g,memory-swap=2g,cpu-quota=${CPU_QUOTA},cpu-period=${CPU_PERIOD}"
@@ -65,13 +65,24 @@ actual_limits="$(docker container inspect "$BUILDER_CONTAINER" \
 expected_limits="$MEMORY_BYTES $MEMORY_SWAP_BYTES $CPU_QUOTA $CPU_PERIOD"
 
 if [ "$actual_limits" != "$expected_limits" ]; then
-  echo "builder resource limits do not match" >&2
-  echo "expected: $expected_limits" >&2
-  echo "actual:   $actual_limits" >&2
-  exit 7
+	echo "updating fixed builder resource limits in place"
+	docker update \
+		--memory 2g \
+		--memory-swap 2g \
+		--cpu-period "$CPU_PERIOD" \
+		--cpu-quota "$CPU_QUOTA" \
+		"$BUILDER_CONTAINER" >/dev/null
+	actual_limits="$(docker container inspect "$BUILDER_CONTAINER" \
+		--format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.CpuQuota}} {{.HostConfig.CpuPeriod}}')"
+	if [ "$actual_limits" != "$expected_limits" ]; then
+		echo "builder resource limits do not match after update" >&2
+		echo "expected: $expected_limits" >&2
+		echo "actual:   $actual_limits" >&2
+		exit 7
+	fi
 fi
 
-echo "builder=$BUILDER_NAME limits=1cpu/2g image=$IMAGE_TAG version=$VERSION"
+echo "builder=$BUILDER_NAME limits=2cpu/2g image=$IMAGE_TAG version=$VERSION"
 docker buildx build \
   --builder "$BUILDER_NAME" \
   --load \
