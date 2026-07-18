@@ -197,6 +197,7 @@ fi
 
 run_go() {
   docker run --rm --cpus="`$CPUS" -m "`$MEMORY" \
+    -e GOMAXPROCS=1 \
     -e GOMODCACHE=/go/pkg/mod \
     -e GOCACHE=/go/build-cache \
     -v "`$WORKTREE:/src" \
@@ -217,7 +218,7 @@ fi
 git diff --binary --output="`$FORMATTED_PATCH" -- .
 
 # shellcheck disable=SC2086
-run_go go test `$TEST_PACKAGES
+run_go go test -p 1 `$TEST_PACKAGES
 
 echo "formatted patch: `$FORMATTED_PATCH"
 du -sh "`$REMOTE_ROOT" 2>/dev/null || true
