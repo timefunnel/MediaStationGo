@@ -39,8 +39,9 @@ func SearchDiscoverCatalog(
 		return result
 	}
 
+	adultCodeQuery := normalizeAdultCode(query) != ""
 	tasks := make([]discoverCatalogSearchTask, 0, 6)
-	if tmdb != nil {
+	if tmdb != nil && !adultCodeQuery {
 		tasks = append(tasks,
 			discoverCatalogSearchTask{key: "tmdb_movie", run: func() ([]ExternalMediaResult, error) {
 				matches, err := tmdb.SearchMovieCandidates(ctx, query, 0)
@@ -52,7 +53,7 @@ func SearchDiscoverCatalog(
 			}},
 		)
 	}
-	if douban != nil {
+	if douban != nil && !adultCodeQuery {
 		tasks = append(tasks, discoverCatalogSearchTask{key: "douban", run: func() ([]ExternalMediaResult, error) {
 			match, err := douban.SearchMatch(ctx, query)
 			if err != nil || match == nil {
@@ -62,7 +63,7 @@ func SearchDiscoverCatalog(
 			return []ExternalMediaResult{externalMediaResultFromMatch("douban", mediaType, match)}, nil
 		}})
 	}
-	if bangumi != nil {
+	if bangumi != nil && !adultCodeQuery {
 		tasks = append(tasks, discoverCatalogSearchTask{key: "bangumi", run: func() ([]ExternalMediaResult, error) {
 			match, err := bangumi.Search(ctx, query)
 			if err != nil || match == nil {
@@ -72,7 +73,7 @@ func SearchDiscoverCatalog(
 		}})
 	}
 	if adult != nil {
-		if normalizeAdultCode(query) == "" {
+		if !adultCodeQuery {
 			tasks = append(tasks, discoverCatalogSearchTask{key: "javdb_performer", run: func() ([]ExternalMediaResult, error) {
 				return adult.SearchPerformers(ctx, query)
 			}})
