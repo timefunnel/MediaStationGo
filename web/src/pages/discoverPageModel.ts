@@ -42,6 +42,10 @@ export function discoverItemSource(item: DiscoverItem): string {
   return item.source || (item.bangumi_id ? 'bangumi' : item.douban_id ? 'douban' : 'tmdb')
 }
 
+export function discoverCardMetaText(item: DiscoverItem): string {
+  return [item.media_type, item.release_date?.trim()].filter(Boolean).join(' · ') || '推荐'
+}
+
 export function readCachedDiscoverRows(selected: string[]): {
   rows: Record<string, DiscoverItem[]>
   rowCanNext: Record<string, boolean>

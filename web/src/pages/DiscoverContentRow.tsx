@@ -3,7 +3,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Heart, Info } from 'lucide-rea
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
-import { discoverItemSource } from './discoverPageModel'
+import { discoverCardMetaText, discoverItemSource } from './discoverPageModel'
 
 const discoverRowPreloadMargin = '0px'
 const discoverCardPreloadMargin = '0px'
@@ -302,7 +302,7 @@ function DiscoverCard({
           {item.title}
         </p>
 		<p className={isPerson ? 'hidden' : 'text-[11px] text-sand-500'}>
-          {[item.media_type, item.year && item.year > 0 ? item.year : ''].filter(Boolean).join(' · ') || '推荐'}
+          {discoverCardMetaText(item)}
         </p>
 		{isPerson && <p className="text-[11px] text-sand-500">女优</p>}
 		<p className={isPerson ? 'hidden' : 'flex items-center gap-1 pt-1 text-[10px] font-semibold text-brand-500'}>
