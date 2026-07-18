@@ -22,7 +22,7 @@ export function DiscoverDetailModal({
   onSelectPerformer?: (item: DiscoverItem) => void
 }) {
   const [resolvedItem, setResolvedItem] = useState(item)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(() => supportsAdultMovieDetail(item))
   const [detailError, setDetailError] = useState('')
   const source = discoverItemSource(resolvedItem)
 
@@ -72,7 +72,7 @@ export function DiscoverDetailModal({
         {resolvedItem.media_type === 'adult' ? (
           <>
             <div className="grid items-start gap-5 lg:grid-cols-[minmax(340px,42%)_1fr]">
-              <DiscoverArtworkPanel item={resolvedItem} />
+              <DiscoverArtworkPanel item={resolvedItem} deferred={detailLoading} />
               <div className="space-y-5">{metadata}</div>
             </div>
             <div className="mt-5 border-t border-gray-200 pt-5">

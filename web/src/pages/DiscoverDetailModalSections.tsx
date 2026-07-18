@@ -36,8 +36,18 @@ export function DiscoverModalHeader({ item, source, onClose }: { item: DiscoverI
   )
 }
 
-export function DiscoverArtworkPanel({ item }: { item: DiscoverItem }) {
+export function DiscoverArtworkPanel({ item, deferred = false }: { item: DiscoverItem; deferred?: boolean }) {
   const adultArtwork = item.media_type === 'adult'
+  if (adultArtwork && deferred) {
+    return (
+      <div className="aspect-[3/2] overflow-hidden rounded-2xl bg-gray-950">
+        <div className="flex h-full items-center justify-center gap-2 text-sm font-medium text-gray-300">
+          <LoaderCircle size={18} className="animate-spin" />
+          正在加载完整封面…
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
       <div className={`overflow-hidden rounded-2xl ${adultArtwork ? 'bg-gray-950' : 'bg-gray-100'}`}>
