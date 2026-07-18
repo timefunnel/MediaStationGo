@@ -6,11 +6,12 @@ import { formatSize } from './libraryPageModel'
 type MediaDetailVersionsProps = {
   versions: MediaVersion[]
   loading: boolean
+  isAdmin: boolean
   deletingID: string
   onDelete: (version: MediaVersion) => void
 }
 
-export function MediaDetailVersions({ versions, loading, deletingID, onDelete }: MediaDetailVersionsProps) {
+export function MediaDetailVersions({ versions, loading, isAdmin, deletingID, onDelete }: MediaDetailVersionsProps) {
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-sand-500">
@@ -37,7 +38,7 @@ export function MediaDetailVersions({ versions, loading, deletingID, onDelete }:
                 {version.is_current && <span className="text-xs font-normal text-[#c9954a]">当前播放版本</span>}
               </div>
               <p className="truncate text-xs text-sand-500" title={version.path}>{version.path}</p>
-              <p className="text-xs text-ink-50">{versionTechnicalText(version)}</p>
+              <p className="text-xs text-ink-50">{versionTechnicalText(version, isAdmin)}</p>
             </div>
             {version.can_manage && (
               <button
@@ -63,10 +64,10 @@ function versionLabel(version: MediaVersion): string {
   return [resolution, version.container?.toUpperCase(), version.video_codec?.toUpperCase()].filter(Boolean).join(' · ') || '未探测版本'
 }
 
-function versionTechnicalText(version: MediaVersion): string {
+function versionTechnicalText(version: MediaVersion, isAdmin: boolean): string {
   return [
     version.size_bytes > 0 ? formatSize(version.size_bytes) : '',
     version.audio_codec?.toUpperCase(),
-    version.created_at ? `入库于 ${new Date(version.created_at).toLocaleString()}` : '',
+    isAdmin && version.created_at ? `入库于 ${new Date(version.created_at).toLocaleString()}` : '',
   ].filter(Boolean).join(' · ')
 }

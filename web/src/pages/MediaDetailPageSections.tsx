@@ -214,6 +214,7 @@ export function MediaDetailMainContent({
           <MediaDetailVersions
             versions={versions}
             loading={versionsLoading}
+            isAdmin={isAdmin}
             deletingID={versionDeletingID}
             onDelete={onDeleteVersion}
           />
