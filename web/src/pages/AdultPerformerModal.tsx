@@ -33,7 +33,7 @@ export function AdultPerformerModal({
 		[follows, source, sourceID],
 	)
 	const portraitSource = adultPerformerPortraitSource(resolvedItem.poster_url, follow?.image_url)
-	const portrait = imageURL(portraitSource, undefined, { maxWidth: 160, quality: 88, retryFailed: true })
+	const portrait = imageURL(portraitSource, undefined, { maxWidth: 160, quality: 88 })
 
 	useEffect(() => {
 		setResolvedItem(item)

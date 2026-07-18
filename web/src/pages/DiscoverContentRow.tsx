@@ -207,7 +207,6 @@ function DiscoverCard({
     () =>
       imageURL(activeImage, posterVersion, {
         refreshCache: shouldRefreshCache,
-        retryFailed: true,
         maxWidth: isJavDBAdult ? 800 : isPerson ? 320 : 420,
         quality: isJavDBAdult ? 88 : 84,
       }),
