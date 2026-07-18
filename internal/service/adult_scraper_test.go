@@ -68,6 +68,19 @@ func TestParseAdultDetailHTML(t *testing.T) {
 	}
 }
 
+func TestValidAdultActorNameRejectsCategoryLabels(t *testing.T) {
+	for _, value := range []string{"有码", "无码", "有码 无码", "Censored", "男性演员", "女优"} {
+		if validAdultActorName(value) {
+			t.Fatalf("validAdultActorName(%q) = true", value)
+		}
+	}
+	for _, value := range []string{"石川澪", "七沢みあ"} {
+		if !validAdultActorName(value) {
+			t.Fatalf("validAdultActorName(%q) = false", value)
+		}
+	}
+}
+
 func TestAdultProviderDiscoverMovieDetailUsesRequestedJavDBItem(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v/QNRVYG" {

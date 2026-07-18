@@ -21,7 +21,7 @@ export function LibraryActorFilter({
       <label className="min-w-0 flex-1 sm:max-w-sm">
         <span className="sr-only">按演员筛选</span>
         <select
-          className="input-base h-10 w-full text-base sm:text-sm"
+          className="input-base h-11 w-full py-2 text-base leading-6 sm:text-sm"
           value={selected}
           onChange={(event) => onChange(event.target.value)}
         >

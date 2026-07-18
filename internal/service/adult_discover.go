@@ -613,7 +613,7 @@ func adultPerformerSourceID(href string) string {
 		return ""
 	}
 	switch strings.ToLower(parts[1]) {
-	case "censored", "uncensored", "western":
+	case "censored", "uncensored", "western", "male":
 		return ""
 	default:
 		return parts[1]

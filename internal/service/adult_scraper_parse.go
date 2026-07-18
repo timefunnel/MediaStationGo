@@ -244,8 +244,14 @@ func validAdultActorName(value string) bool {
 	if value == "" || len([]rune(value)) > 100 {
 		return false
 	}
-	switch strings.ToLower(value) {
-	case "actor", "actors", "actress", "actresses", "performer", "performers", "演员", "演員", "女优", "女優":
+	normalized := strings.ToLower(strings.NewReplacer(
+		" ", "", "\t", "", "·", "", "・", "", "/", "", "_", "", "-", "",
+	).Replace(value))
+	switch normalized {
+	case "actor", "actors", "actress", "actresses", "performer", "performers",
+		"演员", "演員", "女优", "女優", "男优", "男優", "男性演员", "男性演員",
+		"有码", "有碼", "无码", "無碼", "有码女优", "有碼女優", "无码女优", "無碼女優",
+		"有码无码", "有碼無碼", "censored", "uncensored", "western", "欧美", "歐美":
 		return false
 	default:
 		return true
