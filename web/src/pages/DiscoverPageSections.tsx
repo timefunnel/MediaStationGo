@@ -223,7 +223,7 @@ export function DiscoverResults({
         />
       )}
 
-      <div className={`min-w-0 space-y-10 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
+      <div className={`min-w-0 space-y-16 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
         {selected.map((key, rowIndex) => {
           const items = rows[key] ?? []
           if (items.length === 0) {
