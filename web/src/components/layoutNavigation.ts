@@ -49,9 +49,9 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     icon: Home,
     activePaths: ['/', '/libraries', '/library', '/poster-wall', '/discover', '/search', '/dlna', '/ai'],
     items: [
-      { to: '/', label: '系统首页', icon: Home, end: true },
-      { to: '/libraries', label: '媒体库', icon: Library },
-      { to: '/poster-wall', label: '海报墙', icon: Image },
+      { to: '/', label: '系统首页', icon: Home, end: true, permission: 'can_view_dashboard' },
+      { to: '/libraries', label: '媒体库', icon: Library, permission: 'can_play_media' },
+      { to: '/poster-wall', label: '海报墙', icon: Image, permission: 'can_play_media' },
       { to: '/discover', label: '精彩发现', icon: Compass, permission: 'can_view_discover' },
       { to: '/search', label: '智能搜索', icon: Search, permission: 'can_use_ai' },
       { to: '/dlna', label: 'DLNA 投屏', icon: Cast, permission: 'can_cast' },
@@ -64,10 +64,10 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     icon: User,
     activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/profile', '/play-profiles', '/recycle'],
     items: [
-      { to: '/favourites', label: '我的收藏', icon: Heart },
-      { to: '/playlists', label: '播放列表', icon: ListMusic },
-      { to: '/history', label: '观看历史', icon: Clock },
-      { to: '/recycle', label: '回收站', icon: Trash2 },
+      { to: '/favourites', label: '我的收藏', icon: Heart, permission: 'can_favorite' },
+      { to: '/playlists', label: '播放列表', icon: ListMusic, permission: 'can_play_media' },
+      { to: '/history', label: '观看历史', icon: Clock, permission: 'can_view_history' },
+      { to: '/recycle', label: '回收站', icon: Trash2, permission: 'can_manage_files' },
     ],
   },
   {
@@ -76,7 +76,7 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     icon: CloudDownload,
     activePaths: ['/downloads', '/download-clients', '/subscriptions', '/site-search', '/sites'],
     items: [
-      { to: '/downloads', label: '下载中心', icon: Activity },
+      { to: '/downloads', label: '下载中心', icon: Activity, permission: 'can_manage_downloads' },
       { to: '/subscriptions', label: '订阅追更', icon: Rss, adminOnly: true },
       { to: '/sites', label: 'PT / RSS 站点', icon: Globe, permission: 'can_manage_sites', adminOnly: true },
     ],

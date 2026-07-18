@@ -4,11 +4,13 @@ import toast from 'react-hot-toast'
 import { adminAPI } from '../api/admin'
 import { libraryAPI } from '../api/library'
 import { licenseAPI, type LicenseStatus } from '../api/license'
-import type { Library, User } from '../types'
+import { getUserPermissions, resetUserPermissions, updateUserPermissions } from '../api/permission'
+import type { Library, User, UserPermission } from '../types'
 import { confirmAction } from '../components/confirmAction'
 import { requestPassword } from '../components/requestPassword'
 import { AdminUsersForm } from './AdminUsersForm'
 import { AdminUserLibraryAccessModal } from './AdminUserLibraryAccessModal'
+import { AdminUserMenuPermissionModal } from './AdminUserMenuPermissionModal'
 import { AdminUsersTable } from './AdminUsersTable'
 
 export function AdminUsersPanel() {
@@ -23,6 +25,11 @@ export function AdminUsersPanel() {
   const [libraryAccessUser, setLibraryAccessUser] = useState<User | null>(null)
   const [loadingLibraryAccessID, setLoadingLibraryAccessID] = useState<string | null>(null)
   const [savingLibraryAccess, setSavingLibraryAccess] = useState(false)
+  const [permissionUser, setPermissionUser] = useState<User | null>(null)
+  const [userPermission, setUserPermission] = useState<UserPermission | null>(null)
+  const [loadingPermissionID, setLoadingPermissionID] = useState<string | null>(null)
+  const [savingPermission, setSavingPermission] = useState(false)
+  const [resettingPermission, setResettingPermission] = useState(false)
   const refresh = async () => {
     const [nextUsers, nextLicense] = await Promise.all([
       adminAPI.listUsers(),
@@ -176,6 +183,59 @@ export function AdminUsersPanel() {
     }
   }
 
+  const openMenuPermission = async (user: User) => {
+    if (user.role === 'admin' || loadingPermissionID) return
+    setLoadingPermissionID(user.id)
+    try {
+      const permission = await getUserPermissions(user.id)
+      setUserPermission(permission)
+      setPermissionUser(user)
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '加载菜单权限失败'
+      toast.error(msg)
+    } finally {
+      setLoadingPermissionID(null)
+    }
+  }
+
+  const saveMenuPermission = async (permissions: Record<string, boolean>) => {
+    if (!permissionUser || savingPermission) return
+    setSavingPermission(true)
+    try {
+      await updateUserPermissions(permissionUser.id, permissions)
+      toast.success('菜单权限已更新')
+      setPermissionUser(null)
+      setUserPermission(null)
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '更新菜单权限失败'
+      toast.error(msg)
+    } finally {
+      setSavingPermission(false)
+    }
+  }
+
+  const resetMenuPermission = async () => {
+    if (!permissionUser || resettingPermission) return
+    setResettingPermission(true)
+    try {
+      await resetUserPermissions(permissionUser.id)
+      const permission = await getUserPermissions(permissionUser.id)
+      setUserPermission(permission)
+      toast.success('已恢复默认菜单权限')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '重置菜单权限失败'
+      toast.error(msg)
+    } finally {
+      setResettingPermission(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <AdminUsersForm
@@ -203,6 +263,8 @@ export function AdminUsersPanel() {
         onDeleteUser={deleteUser}
         loadingLibraryAccessID={loadingLibraryAccessID}
         onManageLibraries={openLibraryAccess}
+        loadingPermissionID={loadingPermissionID}
+        onManagePermissions={openMenuPermission}
       />
 
       {libraryAccessUser && (
@@ -213,6 +275,22 @@ export function AdminUsersPanel() {
           saving={savingLibraryAccess}
           onClose={() => setLibraryAccessUser(null)}
           onSave={saveLibraryAccess}
+        />
+      )}
+
+      {permissionUser && userPermission && (
+        <AdminUserMenuPermissionModal
+          key={`${permissionUser.id}-${userPermission.updated_at}`}
+          user={permissionUser}
+          permission={userPermission}
+          saving={savingPermission}
+          resetting={resettingPermission}
+          onClose={() => {
+            setPermissionUser(null)
+            setUserPermission(null)
+          }}
+          onSave={saveMenuPermission}
+          onReset={resetMenuPermission}
         />
       )}
     </div>

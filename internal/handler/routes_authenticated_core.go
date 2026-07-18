@@ -21,9 +21,9 @@ func registerAuthedUserAndLicenseRoutes(authed *gin.RouterGroup, svc *service.Co
 }
 
 func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/libraries", listLibrariesHandler(svc))
+	authed.GET("/libraries", requirePermission(svc, "can_play_media"), listLibrariesHandler(svc))
 	authed.POST("/libraries", middleware.AdminRequired(), createLibraryHandler(svc))
-	authed.GET("/libraries/:id", getLibraryHandler(svc))
+	authed.GET("/libraries/:id", requirePermission(svc, "can_play_media"), getLibraryHandler(svc))
 	authed.PATCH("/libraries/:id", middleware.AdminRequired(), updateLibraryHandler(svc))
 	authed.DELETE("/libraries/:id", middleware.AdminRequired(), deleteLibraryHandler(svc))
 	authed.GET("/libraries/:id/roots", middleware.AdminRequired(), listLibraryRootsHandler(svc))
@@ -41,18 +41,18 @@ func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container
 	authed.POST("/libraries/:id/generated-artwork", middleware.AdminRequired(), runGeneratedArtworkHandler(svc))
 	authed.DELETE("/libraries/:id/generated-artwork", middleware.AdminRequired(), cancelGeneratedArtworkHandler(svc))
 
-	authed.GET("/libraries/:id/media", listMediaHandler(svc))
-	authed.GET("/libraries/:id/series", listLibrarySeriesHandler(svc))
-	authed.GET("/libraries/:id/series/episodes", listLibrarySeriesEpisodesHandler(svc))
-	authed.GET("/libraries/:id/seasons", listSeasonsHandler(svc))
+	authed.GET("/libraries/:id/media", requirePermission(svc, "can_play_media"), listMediaHandler(svc))
+	authed.GET("/libraries/:id/series", requirePermission(svc, "can_play_media"), listLibrarySeriesHandler(svc))
+	authed.GET("/libraries/:id/series/episodes", requirePermission(svc, "can_play_media"), listLibrarySeriesEpisodesHandler(svc))
+	authed.GET("/libraries/:id/seasons", requirePermission(svc, "can_play_media"), listSeasonsHandler(svc))
 }
 
 func registerAuthedMediaRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/media/:id", getMediaHandler(svc))
-	authed.GET("/media/:id/versions", getMediaVersionsHandler(svc))
-	authed.GET("/media/:id/parts", getMediaPartsHandler(svc))
-	authed.DELETE("/media/:id/versions/:version_id", deleteMediaVersionHandler(svc))
-	authed.GET("/media", searchMediaHandler(svc))
+	authed.GET("/media/:id", requirePermission(svc, "can_play_media"), getMediaHandler(svc))
+	authed.GET("/media/:id/versions", requirePermission(svc, "can_play_media"), getMediaVersionsHandler(svc))
+	authed.GET("/media/:id/parts", requirePermission(svc, "can_play_media"), getMediaPartsHandler(svc))
+	authed.DELETE("/media/:id/versions/:version_id", requirePermission(svc, "can_play_media"), deleteMediaVersionHandler(svc))
+	authed.GET("/media", requirePermission(svc, "can_play_media"), searchMediaHandler(svc))
 	authed.PATCH("/media/:id/metadata", middleware.AdminRequired(), updateMediaMetadataHandler(svc))
 	authed.POST("/media/:id/scrape", middleware.AdminRequired(), scrapeOneHandler(svc))
 	authed.GET("/media/:id/scrape/search", middleware.AdminRequired(), manualScrapeSearchHandler(svc))
@@ -63,22 +63,22 @@ func registerAuthedMediaRoutes(authed *gin.RouterGroup, svc *service.Container) 
 	authed.DELETE("/media/:id", middleware.AdminRequired(), deleteMediaHandler(svc))
 	authed.POST("/media/:id/restore", restoreMediaHandler(svc))
 	authed.DELETE("/media/:id/purge", purgeMediaHandler(svc))
-	authed.GET("/media/:id/subtitles", listSubtitlesHandler(svc))
-	authed.GET("/subtitles/:id", serveSubtitleHandler(svc))
+	authed.GET("/media/:id/subtitles", requirePermission(svc, "can_play_media"), listSubtitlesHandler(svc))
+	authed.GET("/subtitles/:id", requirePermission(svc, "can_play_media"), serveSubtitleHandler(svc))
 	authed.POST("/subtitles/cloud-cache/invalidate", middleware.AdminRequired(), invalidateCloudSubtitleCacheHandler(svc))
 	authed.POST("/media/:id/nfo", middleware.AdminRequired(), exportNFOHandler(svc))
 	authed.POST("/libraries/:id/nfo", middleware.AdminRequired(), exportLibraryNFOHandler(svc))
 }
 
 func registerAuthedPlaybackAndProxyRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/stream/:id", streamHandler(svc))
-	authed.HEAD("/stream/:id", streamHandler(svc))
-	authed.GET("/hls/:id/index.m3u8", hlsPlaylistHandler(svc))
-	authed.GET("/hls/:id/:seg", hlsSegmentHandler(svc))
-	authed.DELETE("/hls/:id", stopTranscodeHandler(svc))
+	authed.GET("/stream/:id", requirePermission(svc, "can_play_media"), streamHandler(svc))
+	authed.HEAD("/stream/:id", requirePermission(svc, "can_play_media"), streamHandler(svc))
+	authed.GET("/hls/:id/index.m3u8", requirePermission(svc, "can_play_media"), hlsPlaylistHandler(svc))
+	authed.GET("/hls/:id/:seg", requirePermission(svc, "can_play_media"), hlsSegmentHandler(svc))
+	authed.DELETE("/hls/:id", requirePermission(svc, "can_play_media"), stopTranscodeHandler(svc))
 
-	authed.GET("/cloud/play/:type", cloudPlayHandler(svc))
-	authed.HEAD("/cloud/play/:type", cloudPlayHandler(svc))
+	authed.GET("/cloud/play/:type", requirePermission(svc, "can_play_media"), cloudPlayHandler(svc))
+	authed.HEAD("/cloud/play/:type", requirePermission(svc, "can_play_media"), cloudPlayHandler(svc))
 
 	authed.GET("/img/cloud/:type", cloudArtworkProxyHandler(svc))
 	authed.HEAD("/img/cloud/:type", cloudArtworkProxyHandler(svc))
@@ -86,18 +86,18 @@ func registerAuthedPlaybackAndProxyRoutes(authed *gin.RouterGroup, svc *service.
 }
 
 func registerAuthedCollectionRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/history", recentHistoryHandler(svc))
-	authed.POST("/history", recordProgressHandler(svc))
+	authed.GET("/history", requirePermission(svc, "can_view_history"), recentHistoryHandler(svc))
+	authed.POST("/history", requirePermission(svc, "can_play_media"), recordProgressHandler(svc))
 
-	authed.GET("/favourites", listFavouritesHandler(svc))
-	authed.POST("/favourites/:id", toggleFavouriteHandler(svc))
+	authed.GET("/favourites", requirePermission(svc, "can_favorite"), listFavouritesHandler(svc))
+	authed.POST("/favourites/:id", requirePermission(svc, "can_favorite"), toggleFavouriteHandler(svc))
 
 	authed.GET("/storage", storageBreakdownHandler(svc))
 
-	authed.GET("/playlists", listPlaylistsHandler(svc))
-	authed.POST("/playlists", createPlaylistHandler(svc))
-	authed.GET("/playlists/:id", getPlaylistHandler(svc))
-	authed.POST("/playlists/:id/items", addPlaylistItemHandler(svc))
-	authed.DELETE("/playlists/:id/items/:media_id", removePlaylistItemHandler(svc))
-	authed.DELETE("/playlists/:id", deletePlaylistHandler(svc))
+	authed.GET("/playlists", requirePermission(svc, "can_play_media"), listPlaylistsHandler(svc))
+	authed.POST("/playlists", requirePermission(svc, "can_play_media"), createPlaylistHandler(svc))
+	authed.GET("/playlists/:id", requirePermission(svc, "can_play_media"), getPlaylistHandler(svc))
+	authed.POST("/playlists/:id/items", requirePermission(svc, "can_play_media"), addPlaylistItemHandler(svc))
+	authed.DELETE("/playlists/:id/items/:media_id", requirePermission(svc, "can_play_media"), removePlaylistItemHandler(svc))
+	authed.DELETE("/playlists/:id", requirePermission(svc, "can_play_media"), deletePlaylistHandler(svc))
 }

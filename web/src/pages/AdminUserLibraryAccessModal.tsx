@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { LibraryBig, Save, X } from 'lucide-react'
 
 import type { Library, User } from '../types'
+import { AdminAccessSwitch } from './AdminAccessSwitch'
 
 type AdminUserLibraryAccessModalProps = {
   user: User
@@ -70,7 +71,7 @@ export function AdminUserLibraryAccessModal({
               <span className="block text-sm font-medium text-ink-600">全部媒体库</span>
               <span className="block text-xs text-ink-50">以后新建的媒体库也会自动开放</span>
             </span>
-            <AccessSwitch
+            <AdminAccessSwitch
               checked={allowAll}
               disabled={saving}
               label="允许访问全部媒体库"
@@ -91,7 +92,7 @@ export function AdminUserLibraryAccessModal({
                     <span className="block truncate text-sm text-ink-600">{library.name}</span>
                     <span className="block truncate text-xs text-ink-50">{library.type}</span>
                   </span>
-                  <AccessSwitch
+                  <AdminAccessSwitch
                     checked={selectedIDs.includes(library.id)}
                     disabled={allowAll || saving}
                     label={`${selectedIDs.includes(library.id) ? '关闭' : '开放'} ${library.name}`}
@@ -126,37 +127,5 @@ export function AdminUserLibraryAccessModal({
         </div>
       </div>
     </div>
-  )
-}
-
-function AccessSwitch({
-  checked,
-  disabled,
-  label,
-  onChange,
-}: {
-  checked: boolean
-  disabled?: boolean
-  label: string
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed ${
-        checked ? 'bg-brand-500' : 'bg-gray-300'
-      }`}
-      onClick={() => onChange(!checked)}
-    >
-      <span
-        className={`pointer-events-none mt-0.5 inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
   )
 }

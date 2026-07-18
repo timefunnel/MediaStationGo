@@ -1,4 +1,4 @@
-import { KeyRound, LibraryBig, Loader2, Pencil, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react'
+import { KeyRound, LibraryBig, Loader2, Pencil, ShieldCheck, SlidersHorizontal, Trash2, UserCheck, UserX, X } from 'lucide-react'
 
 import type { User } from '../types'
 
@@ -8,6 +8,7 @@ type AdminUsersTableProps = {
   editingUsername: string
   resettingPasswordID: string | null
   loadingLibraryAccessID: string | null
+  loadingPermissionID: string | null
   onEditingUsernameChange: (value: string) => void
   onSaveEdit: (id: string) => void
   onCancelEdit: () => void
@@ -16,6 +17,7 @@ type AdminUsersTableProps = {
   onToggleStatus: (user: User) => void
   onDeleteUser: (user: User) => void
   onManageLibraries: (user: User) => void
+  onManagePermissions: (user: User) => void
 }
 
 export function AdminUsersTable({
@@ -24,6 +26,7 @@ export function AdminUsersTable({
   editingUsername,
   resettingPasswordID,
   loadingLibraryAccessID,
+  loadingPermissionID,
   onEditingUsernameChange,
   onSaveEdit,
   onCancelEdit,
@@ -32,6 +35,7 @@ export function AdminUsersTable({
   onToggleStatus,
   onDeleteUser,
   onManageLibraries,
+  onManagePermissions,
 }: AdminUsersTableProps) {
   return (
     <div className="glass-panel overflow-x-auto">
@@ -110,6 +114,14 @@ export function AdminUsersTable({
                   onClick={() => onManageLibraries(u)}
                 >
                   {loadingLibraryAccessID === u.id ? <Loader2 size={12} className="animate-spin" /> : <LibraryBig size={12} />}
+                </button>
+                <button
+                  className="rounded-lg border border-violet-400/40 px-2 py-1 text-xs text-violet-500 hover:bg-violet-400/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={u.role === 'admin' ? '管理员固定拥有全部菜单权限' : '菜单权限'}
+                  disabled={u.role === 'admin' || loadingPermissionID !== null}
+                  onClick={() => onManagePermissions(u)}
+                >
+                  {loadingPermissionID === u.id ? <Loader2 size={12} className="animate-spin" /> : <SlidersHorizontal size={12} />}
                 </button>
                 <button
                   className="rounded-lg border border-amber-400/40 px-2 py-1 text-xs text-amber-500 hover:bg-amber-400/10"

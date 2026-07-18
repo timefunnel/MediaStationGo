@@ -25,7 +25,7 @@ func registerAuthedSubscriptionRoutes(authed *gin.RouterGroup, svc *service.Cont
 }
 
 func registerAuthedStatsDiscoveryAndAIRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/stats", statsHandler(svc))
+	authed.GET("/stats", requirePermission(svc, "can_view_dashboard"), statsHandler(svc))
 	authed.GET("/tasks", middleware.AdminRequired(), tasksHandler(svc))
 
 	authed.GET("/discover/trending", requirePermission(svc, "can_view_discover"), trendingHandler(svc))
@@ -45,8 +45,8 @@ func registerAuthedFileRoutes(authed *gin.RouterGroup, svc *service.Container) {
 }
 
 func registerAuthedDLNARoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/dlna/devices", dlnaListHandler(svc))
-	authed.POST("/dlna/cast", dlnaCastHandler(svc))
+	authed.GET("/dlna/devices", requirePermission(svc, "can_cast"), dlnaListHandler(svc))
+	authed.POST("/dlna/cast", requirePermission(svc, "can_cast"), dlnaCastHandler(svc))
 }
 
 func registerAuthedSTRMRoutes(authed *gin.RouterGroup, svc *service.Container) {
@@ -79,9 +79,9 @@ func registerAuthedSiteRoutes(authed *gin.RouterGroup, svc *service.Container) {
 }
 
 func registerAuthedRecycleAndRealtimeRoutes(authed *gin.RouterGroup, svc *service.Container) {
-	authed.GET("/recycle", listRecycleHandler(svc))
-	authed.POST("/recycle/restore", restoreMediaBatchHandler(svc))
-	authed.POST("/recycle/purge", purgeMediaBatchHandler(svc))
+	authed.GET("/recycle", requirePermission(svc, "can_manage_files"), listRecycleHandler(svc))
+	authed.POST("/recycle/restore", requirePermission(svc, "can_manage_files"), restoreMediaBatchHandler(svc))
+	authed.POST("/recycle/purge", requirePermission(svc, "can_manage_files"), purgeMediaBatchHandler(svc))
 
 	authed.GET("/ws", wsHandler(svc))
 	authed.GET("/events", sseHandler(svc))
