@@ -219,7 +219,11 @@ func (p *AdultProvider) discoverAdultList(
 }
 
 func parseJavDBMovieList(body, base string) []ExternalMediaResult {
-	return parseAdultMovieList(body, base, "javdb", "box", "/v/")
+	items := parseAdultMovieList(body, base, "javdb", "box", "/v/")
+	for i := range items {
+		items[i].PosterURL = javDBPortraitThumbnailURL(items[i].PosterURL)
+	}
+	return items
 }
 
 func parseJavBusMovieList(body, base string) []ExternalMediaResult {
@@ -361,6 +365,22 @@ func firstAdultListImage(inner string) string {
 	}
 	attrs := adultAttrs(image[1])
 	return firstText(attrs["data-src"], attrs["data-original"], attrs["data-lazy-src"], attrs["src"])
+}
+
+func javDBPortraitThumbnailURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !strings.EqualFold(u.Scheme, "https") {
+		return raw
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host != "jdbstatic.com" && !strings.HasSuffix(host, ".jdbstatic.com") {
+		return raw
+	}
+	if !strings.HasPrefix(u.Path, "/covers/") {
+		return raw
+	}
+	u.Path = "/thumbs/" + strings.TrimPrefix(u.Path, "/covers/")
+	return u.String()
 }
 
 func adultListReleaseDate(inner string) string {
