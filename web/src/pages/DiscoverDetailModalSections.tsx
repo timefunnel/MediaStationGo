@@ -9,6 +9,7 @@ import {
   Tags,
   UserRound,
   X,
+  ZoomIn,
 } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
@@ -36,7 +37,15 @@ export function DiscoverModalHeader({ item, source, onClose }: { item: DiscoverI
   )
 }
 
-export function DiscoverArtworkPanel({ item, deferred = false }: { item: DiscoverItem; deferred?: boolean }) {
+export function DiscoverArtworkPanel({
+  item,
+  deferred = false,
+  onPreview,
+}: {
+  item: DiscoverItem
+  deferred?: boolean
+  onPreview?: () => void
+}) {
   const adultArtwork = item.media_type === 'adult'
   if (adultArtwork && deferred) {
     return (
@@ -52,11 +61,22 @@ export function DiscoverArtworkPanel({ item, deferred = false }: { item: Discove
     <div className="space-y-3">
       <div className={`overflow-hidden rounded-2xl ${adultArtwork ? 'bg-gray-950' : 'bg-gray-100'}`}>
         {item.poster_url ? (
-          <img
-            src={imageURL(item.poster_url)}
-            alt={item.title}
-            className={adultArtwork ? 'aspect-[3/2] w-full object-contain' : 'aspect-[2/3] w-full object-cover'}
-          />
+          <button
+            type="button"
+            className="group relative block w-full cursor-zoom-in overflow-hidden text-left"
+            aria-label={`查看 ${item.title} 大图`}
+            onClick={onPreview}
+          >
+            <img
+              src={imageURL(item.poster_url)}
+              alt={item.title}
+              className={`${adultArtwork ? 'aspect-[3/2] object-contain' : 'aspect-[2/3] object-cover'} w-full transition duration-200 group-hover:scale-[1.01]`}
+            />
+            <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-black/65 px-2.5 py-1.5 text-xs font-medium text-white opacity-90 shadow-lg backdrop-blur-sm transition group-hover:bg-black/80">
+              <ZoomIn size={14} />
+              查看大图
+            </span>
+          </button>
         ) : (
           <div className={`flex items-center justify-center text-sand-500 ${adultArtwork ? 'aspect-[3/2]' : 'aspect-[2/3]'}`}>无海报</div>
         )}
