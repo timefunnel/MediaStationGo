@@ -1,103 +1,79 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Flame, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
 
-import type { DiscoverItem, DiscoverSection } from '../api/discover'
+import type { DiscoverItem } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
 
 type SectionLabel = (key: string) => string
 
 export function DiscoverHeader({
-  sections,
-  selected,
+  selectedCount,
+  adultSearchEnabled,
   sectionsReady,
   loading,
 	selectionSaving,
 	adultSearchQuery,
 	adultSearchLoading,
   onRefresh,
-  onToggleSection,
+	onOpenSectionPicker,
 	onAdultSearchQueryChange,
 	onAdultSearch,
 }: {
-  sections: DiscoverSection[]
-  selected: string[]
+  selectedCount: number
+  adultSearchEnabled: boolean
   sectionsReady: boolean
   loading: boolean
 	selectionSaving: boolean
 	adultSearchQuery: string
-	adultSearchLoading: boolean
+  adultSearchLoading: boolean
   onRefresh: () => void
-  onToggleSection: (key: string) => void
+	onOpenSectionPicker: () => void
 	onAdultSearchQueryChange: (value: string) => void
 	onAdultSearch: () => void
 }) {
-	const generalSections = sections.filter((section) => section.group !== 'adult')
-	const adultSections = sections.filter((section) => section.group === 'adult')
-
   return (
-    <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-      <div className="flex items-center gap-4">
-        <div className="rounded-2xl border border-primary-500/20 bg-gradient-to-br from-primary-500/20 to-primary-600/10 p-3">
-          <Sparkles className="h-8 w-8 text-brand-500" />
+    <header className="space-y-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="rounded-2xl border border-primary-500/20 bg-gradient-to-br from-primary-500/20 to-primary-600/10 p-3">
+            <Sparkles className="h-8 w-8 text-brand-500" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="font-display text-4xl font-bold tracking-tight text-ink-600">发现</h1>
+              <button
+                type="button"
+                onClick={onOpenSectionPicker}
+                disabled={!sectionsReady || selectionSaving}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Layers3 size={14} />
+                选择模块
+                <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-sand-500">{selectedCount}</span>
+              </button>
+            </div>
+            <p className="mt-1 text-base text-ink-50">
+              多源推荐：TMDb / 豆瓣 / Bangumi，可按需组合显示
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="font-display text-4xl font-bold tracking-tight text-ink-600">
-            发现
-          </h1>
-          <p className="mt-1 text-base text-ink-50">
-            多源推荐：TMDb / 豆瓣 / Bangumi，可按需组合显示
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 lg:items-end">
         <button
           type="button"
           onClick={onRefresh}
-          disabled={!sectionsReady || selectionSaving || selected.length === 0}
+          disabled={!sectionsReady || selectionSaving || selectedCount === 0}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           刷新
         </button>
-		<div className="space-y-2 lg:max-w-3xl">
-			<div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-				{generalSections.map((section) => (
-					<DiscoverSectionToggle
-						key={section.key}
-						section={section}
-						active={selected.includes(section.key)}
-						onToggle={onToggleSection}
-						disabled={selectionSaving}
-					/>
-				))}
-			</div>
-			{adultSections.length > 0 && (
-				<div className="space-y-2 border-t border-rose-200/70 pt-2">
-					<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-						<div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-							<Flame size={14} />
-							成人专区
-						</div>
-						<div className="flex flex-wrap gap-2">
-							{adultSections.map((section) => (
-								<DiscoverSectionToggle
-									key={section.key}
-									section={section}
-									active={selected.includes(section.key)}
-									onToggle={onToggleSection}
-									disabled={selectionSaving}
-									adult
-								/>
-							))}
-						</div>
-					</div>
+		</div>
+		{adultSearchEnabled && (
 					<form
 						onSubmit={(event) => {
 							event.preventDefault()
 							onAdultSearch()
 						}}
-						className="flex justify-end gap-2"
+						className="ml-auto flex w-full max-w-lg justify-end gap-2"
 					>
 						<input
 							type="search"
@@ -116,47 +92,9 @@ export function DiscoverHeader({
 							搜索女优
 						</button>
 					</form>
-				</div>
-			)}
-		</div>
-      </div>
+		)}
     </header>
   )
-}
-
-function DiscoverSectionToggle({
-	section,
-	active,
-	onToggle,
-	adult = false,
-	disabled = false,
-}: {
-	section: DiscoverSection
-	active: boolean
-	onToggle: (key: string) => void
-	adult?: boolean
-	disabled?: boolean
-}) {
-	return (
-		<button
-			type="button"
-			disabled={disabled}
-			onClick={() => onToggle(section.key)}
-			className={
-				'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
-				(active
-					? adult
-						? 'border-rose-400 bg-rose-50 text-rose-700'
-						: 'border-primary-400 bg-primary-400/15 text-brand-500'
-					: adult
-						? 'border-rose-200 bg-white text-rose-500 hover:border-rose-400 hover:text-rose-700'
-						: 'border-gray-200 bg-white text-gray-500 hover:border-primary-300 hover:text-ink-600') +
-				(disabled ? ' cursor-not-allowed opacity-50' : '')
-			}
-		>
-			{section.label}
-		</button>
-	)
 }
 
 export function DiscoverEmptySelection() {

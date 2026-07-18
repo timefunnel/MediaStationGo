@@ -5,6 +5,7 @@ import { AdultPerformerModal } from './AdultPerformerModal'
 import { ContentRow, DiscoverSkeleton } from './DiscoverContentRow'
 import { DiscoverDetailModal } from './DiscoverDetailModal'
 import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './DiscoverPageSections'
+import { DiscoverSectionPickerModal } from './DiscoverSectionPickerModal'
 import {
   defaultSections,
   orderSelectedSections,
@@ -23,6 +24,8 @@ export function DiscoverPage() {
   const [sectionsReady, setSectionsReady] = useState(false)
   const [selectionSaving, setSelectionSaving] = useState(false)
   const [selectionError, setSelectionError] = useState('')
+	const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
+	const [sectionPickerDraft, setSectionPickerDraft] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [activeItem, setActiveItem] = useState<DiscoverItem | null>(null)
   const [reloadSeq, setReloadSeq] = useState(0)
@@ -158,18 +161,37 @@ export function DiscoverPage() {
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
 
-  const toggleSection = async (key: string) => {
+  const openSectionPicker = () => {
+		setSectionPickerDraft(selected)
+		setSelectionError('')
+		setSectionPickerOpen(true)
+	}
+
+	const toggleSectionPickerDraft = (key: string) => {
+		setSectionPickerDraft((current) => orderSelectedSections(
+			current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+			sections,
+		))
+	}
+
+	const saveSectionSelection = async () => {
     if (selectionSaving) return
-    const next = orderSelectedSections(
-      selected.includes(key) ? selected.filter((item) => item !== key) : [...selected, key],
-      sections,
-    )
+		const next = orderSelectedSections(sectionPickerDraft, sections)
+		if (next.length === selected.length && next.every((key, index) => key === selected[index])) {
+			setSectionPickerOpen(false)
+			return
+		}
     setSelectionSaving(true)
     setSelectionError('')
     try {
       const saved = await discoverAPI.savePreference(next)
-      setSelected(orderSelectedSections(saved.selected_sections, sections))
-      setRowPages((current) => ({ ...current, [key]: current[key] ?? 1 }))
+		const savedSelection = orderSelectedSections(saved.selected_sections, sections)
+      setSelected(savedSelection)
+		setSectionPickerDraft(savedSelection)
+		setRowPages((current) => Object.fromEntries(
+			savedSelection.map((key) => [key, current[key] ?? 1]),
+		))
+		setSectionPickerOpen(false)
     } catch (error) {
       setSelectionError(discoverPreferenceErrorMessage(error))
     } finally {
@@ -225,18 +247,30 @@ export function DiscoverPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-6">
       <DiscoverHeader
-        sections={sections}
-        selected={selected}
+        selectedCount={selected.length}
+		adultSearchEnabled={sections.some((section) => section.group === 'adult')}
         sectionsReady={sectionsReady}
         loading={loading}
 		selectionSaving={selectionSaving}
 		adultSearchQuery={performerSearchQuery}
 		adultSearchLoading={performerSearchLoading}
         onRefresh={refreshDiscover}
-        onToggleSection={(key) => void toggleSection(key)}
+		onOpenSectionPicker={openSectionPicker}
 		onAdultSearchQueryChange={setPerformerSearchQuery}
 		onAdultSearch={() => void searchAdultPerformers()}
       />
+
+		{sectionPickerOpen && (
+			<DiscoverSectionPickerModal
+				sections={sections}
+				selected={sectionPickerDraft}
+				saving={selectionSaving}
+				error={selectionError}
+				onToggle={toggleSectionPickerDraft}
+				onClose={() => setSectionPickerOpen(false)}
+				onSave={() => void saveSectionSelection()}
+			/>
+		)}
 
       {!sectionsReady && <DiscoverSkeleton />}
 

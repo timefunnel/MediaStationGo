@@ -1,0 +1,159 @@
+import { Check, Flame, Layers3, Save, X } from 'lucide-react'
+
+import type { DiscoverSection } from '../api/discover'
+
+export function DiscoverSectionPickerModal({
+  sections,
+  selected,
+  saving,
+  error,
+  onToggle,
+  onClose,
+  onSave,
+}: {
+  sections: DiscoverSection[]
+  selected: string[]
+  saving: boolean
+  error?: string
+  onToggle: (key: string) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const generalSections = sections.filter((section) => section.group !== 'adult')
+  const adultSections = sections.filter((section) => section.group === 'adult')
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="discover-section-picker-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="rounded-xl bg-primary-500/10 p-2 text-brand-500">
+              <Layers3 size={18} />
+            </span>
+            <div className="min-w-0">
+              <h2 id="discover-section-picker-title" className="text-lg font-semibold text-ink-600">
+                选择发现模块
+              </h2>
+              <p className="text-xs text-ink-50">已选择 {selected.length} 个模块，保存后按固定顺序展示</p>
+            </div>
+          </div>
+          <button type="button" className="icon-button" title="关闭" onClick={onClose} disabled={saving}>
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="max-h-[64vh] space-y-6 overflow-y-auto p-5">
+          <DiscoverSectionGroup
+            title="影视与动漫"
+            sections={generalSections}
+            selected={selected}
+            disabled={saving}
+            onToggle={onToggle}
+          />
+          {adultSections.length > 0 && (
+            <DiscoverSectionGroup
+              title="成人专区"
+              sections={adultSections}
+              selected={selected}
+              disabled={saving}
+              adult
+              onToggle={onToggle}
+            />
+          )}
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-5 py-4">
+          <p className="text-xs text-sand-500">可以清空全部模块，之后仍可在这里重新选择。</p>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-ink-100 transition hover:border-gray-400"
+              onClick={onClose}
+              disabled={saving}
+            >
+              取消
+            </button>
+            <button type="button" className="neon-button inline-flex items-center gap-2" onClick={onSave} disabled={saving}>
+              <Save size={15} />
+              {saving ? '保存中' : '保存选择'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DiscoverSectionGroup({
+  title,
+  sections,
+  selected,
+  disabled,
+  adult = false,
+  onToggle,
+}: {
+  title: string
+  sections: DiscoverSection[]
+  selected: string[]
+  disabled: boolean
+  adult?: boolean
+  onToggle: (key: string) => void
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className={`flex items-center gap-2 text-sm font-semibold ${adult ? 'text-rose-700' : 'text-ink-600'}`}>
+        {adult ? <Flame size={16} /> : <Layers3 size={16} />}
+        {title}
+      </h3>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {sections.map((section) => {
+          const active = selected.includes(section.key)
+          return (
+            <button
+              key={section.key}
+              type="button"
+              aria-pressed={active}
+              disabled={disabled}
+              onClick={() => onToggle(section.key)}
+              className={
+                'flex items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium transition ' +
+                (active
+                  ? adult
+                    ? 'border-rose-300 bg-rose-50 text-rose-700'
+                    : 'border-primary-300 bg-primary-500/10 text-brand-500'
+                  : 'border-gray-200 bg-white text-ink-100 hover:border-primary-200 hover:bg-gray-50')
+              }
+            >
+              <span>{section.label}</span>
+              <span
+                className={
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ' +
+                  (active
+                    ? adult
+                      ? 'border-rose-500 bg-rose-500 text-white'
+                      : 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-gray-300 bg-white text-transparent')
+                }
+              >
+                <Check size={13} strokeWidth={3} />
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
