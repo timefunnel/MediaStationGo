@@ -138,7 +138,7 @@ export function DiscoverResults({
   onPageChange: (key: string, delta: number) => void
   onSelect: (item: DiscoverItem) => void
 }) {
-  const sectionTopOffset = 64
+  const sectionTopOffset = 32
   const hasRowErrors = Object.keys(rowErrors).length > 0
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const navigableKeys = useMemo(
@@ -288,7 +288,7 @@ function DiscoverSectionRail({
     <aside className="hidden xl:block">
       <nav
         aria-label="发现模块快速跳转"
-        className="sticky top-6 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
+        className="sticky -top-2 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
       >
         <div className="flex items-center gap-2 text-xs font-semibold text-sand-500">
           <List size={14} />
