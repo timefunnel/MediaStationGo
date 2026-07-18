@@ -44,6 +44,7 @@ type ResourceSearchDrawerProps = {
   open: boolean
   embedded?: boolean
   initialQuery?: string
+  releaseDate?: string
   upgradeMediaID?: string
   fixedRootID?: string
   canRemoveOldVersion?: boolean
@@ -79,6 +80,7 @@ export function ResourceSearchDrawer({
   open,
   embedded = false,
   initialQuery,
+  releaseDate,
   upgradeMediaID,
   fixedRootID,
   canRemoveOldVersion = false,
@@ -458,6 +460,12 @@ export function ResourceSearchDrawer({
                 pansou={pansouAvailable}
                 onSelect={selectSource}
               />
+
+              {releaseDate?.trim() && (
+                <p className="-mt-1 mb-3 text-xs text-sand-500">
+                  发行日期：<span className="font-medium text-ink-100">{releaseDate.trim()}</span>
+                </p>
+              )}
 
               <div className="flex min-w-0 gap-2">
                 <label className="min-w-0 flex-1">

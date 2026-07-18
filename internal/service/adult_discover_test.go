@@ -1,6 +1,12 @@
 package service
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"go.uber.org/zap"
+)
 
 func TestParseJavDBMovieList(t *testing.T) {
 	body := `<div class="movie-list">
@@ -103,5 +109,50 @@ func TestNormalizeAdultPerformerImageURL(t *testing.T) {
 	}
 	if _, ok := NormalizeAdultPerformerImageURL("https://example.com/avatar.jpg"); ok {
 		t.Fatal("untrusted image host must be rejected")
+	}
+}
+
+func TestAdultProviderSearchPerformersUsesDirectActorResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "Actor Name" || r.URL.Query().Get("f") != "actor" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`<a href="/actors/BzpA"><img src="https://c0.jdbstatic.com/actors/BzpA.jpg"><strong>Actor Name</strong></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.SearchPerformers(t.Context(), "Actor Name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ProviderID != "BzpA" || items[0].Title != "Actor Name" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestAdultProviderSearchPerformersResolvesMovieDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search":
+			_, _ = w.Write([]byte(`<a class="box" href="/v/abc" title="Sample"><strong>ABF-001</strong> Sample</a>`))
+		case "/v/abc":
+			_, _ = w.Write([]byte(`<h2>ABF-001 Sample</h2><a href="/actors/BzpA"><img src="https://c0.jdbstatic.com/actors/BzpA.jpg">Actor Name</a><strong class="symbol female">♀</strong>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.SearchPerformers(t.Context(), "Actor Name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ProviderID != "BzpA" || items[0].PosterURL == "" {
+		t.Fatalf("items = %#v", items)
 	}
 }

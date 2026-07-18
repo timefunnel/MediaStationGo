@@ -42,10 +42,70 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 		}
 	}
 	match.Year = firstYearInText(body)
-	match.Rating = firstRatingInText(body)
+	match.Rating = adultPanelRating(body)
+	if match.Rating <= 0 {
+		match.Rating = firstRatingInText(body)
+	}
+	match.ReleaseDate = adultPanelDate(body)
+	if len(match.ReleaseDate) >= 4 {
+		match.Year, _ = strconv.Atoi(match.ReleaseDate[:4])
+	}
+	match.DurationMinutes = adultPanelDurationMinutes(body)
+	match.Maker = adultPanelValue(body, "片商", "メーカー", "Maker")
+	match.Genres = compactUniqueStrings(append(match.Genres, adultPanelList(body, "類別", "类别", "ジャンル", "Genre")...)...)
 	match.People = firstAdultPeople(body, source, detailURL)
 	match.Actors = personMetadataNames(match.People)
 	return match
+}
+
+func adultPanelDate(body string) string {
+	return adultListDatePattern.FindString(adultPanelValue(body, "日期", "發行日期", "发行日期", "発売日", "Release Date"))
+}
+
+func adultPanelDurationMinutes(body string) int {
+	value := adultPanelValue(body, "時長", "时长", "収録時間", "Runtime")
+	match := regexp.MustCompile(`\d+`).FindString(value)
+	minutes, _ := strconv.Atoi(match)
+	return minutes
+}
+
+func adultPanelRating(body string) float32 {
+	match := adultListScorePattern.FindStringSubmatch(adultPanelValue(body, "評分", "评分", "評価", "Rating"))
+	if len(match) < 2 {
+		return 0
+	}
+	value, _ := strconv.ParseFloat(match[1], 32)
+	return float32(value)
+}
+
+func adultPanelList(body string, labels ...string) []string {
+	value := strings.NewReplacer("，", ",", "、", ",").Replace(adultPanelValue(body, labels...))
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if item := strings.TrimSpace(part); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func adultPanelValue(body string, labels ...string) string {
+	for _, found := range adultPanelBlockPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		value := strings.TrimSpace(stripAdultHTML(found[1]))
+		for _, label := range labels {
+			for _, separator := range []string{":", "："} {
+				prefix := strings.TrimSpace(label) + separator
+				if strings.HasPrefix(value, prefix) {
+					return strings.TrimSpace(strings.TrimPrefix(value, prefix))
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func firstAdultActors(body string) []string {
@@ -54,27 +114,38 @@ func firstAdultActors(body string) []string {
 
 func firstAdultPeople(body, source, detailURL string) []PersonMetadata {
 	people := make([]PersonMetadata, 0, 4)
-	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
-		if len(found) < 3 {
+	for _, found := range adultAnchorPattern.FindAllStringSubmatchIndex(body, -1) {
+		if len(found) < 6 {
 			continue
 		}
-		attrs := adultAttrs(found[1])
+		attrs := adultAttrs(body[found[2]:found[3]])
 		if !adultActorAnchor(attrs) {
 			continue
 		}
-		name := stripAdultHTML(found[2])
+		inner := body[found[4]:found[5]]
+		name := stripAdultHTML(inner)
 		if name == "" {
 			name = strings.TrimSpace(attrs["title"])
 		}
 		if name == "" {
-			name = adultActorImageName(found[2])
+			name = adultActorImageName(inner)
 		}
 		if validAdultActorName(name) {
+			profileURL := absolutizeURL(detailURL, attrs["href"])
+			sourceID := ""
+			if strings.EqualFold(strings.TrimSpace(source), "javdb") {
+				sourceID = adultPerformerSourceID(profileURL)
+				tailEnd := min(len(body), found[1]+256)
+				if sourceID == "" || !adultJavDBFemaleAfterAnchorPattern.MatchString(body[found[1]:tailEnd]) {
+					continue
+				}
+			}
 			people = append(people, PersonMetadata{
 				Name:       name,
-				ImageURL:   adultActorImageURL(found[2], detailURL),
-				ProfileURL: absolutizeURL(detailURL, attrs["href"]),
+				ImageURL:   adultActorImageURL(inner, detailURL),
+				ProfileURL: profileURL,
 				Source:     source,
+				SourceID:   sourceID,
 			})
 		}
 	}

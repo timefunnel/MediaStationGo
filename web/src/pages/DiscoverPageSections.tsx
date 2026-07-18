@@ -1,4 +1,5 @@
-import { AlertTriangle, Flame, RefreshCw, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Flame, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem, DiscoverSection } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
@@ -10,15 +11,23 @@ export function DiscoverHeader({
   selected,
   sectionsReady,
   loading,
+	adultSearchQuery,
+	adultSearchLoading,
   onRefresh,
   onToggleSection,
+	onAdultSearchQueryChange,
+	onAdultSearch,
 }: {
   sections: DiscoverSection[]
   selected: string[]
   sectionsReady: boolean
   loading: boolean
+	adultSearchQuery: string
+	adultSearchLoading: boolean
   onRefresh: () => void
   onToggleSection: (key: string) => void
+	onAdultSearchQueryChange: (value: string) => void
+	onAdultSearch: () => void
 }) {
 	const generalSections = sections.filter((section) => section.group !== 'adult')
 	const adultSections = sections.filter((section) => section.group === 'adult')
@@ -61,22 +70,48 @@ export function DiscoverHeader({
 				))}
 			</div>
 			{adultSections.length > 0 && (
-				<div className="flex flex-col gap-2 border-t border-rose-200/70 pt-2 sm:flex-row sm:items-center sm:justify-end">
-					<div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-						<Flame size={14} />
-						成人专区
+				<div className="space-y-2 border-t border-rose-200/70 pt-2">
+					<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+						<div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600">
+							<Flame size={14} />
+							成人专区
+						</div>
+						<div className="flex flex-wrap gap-2">
+							{adultSections.map((section) => (
+								<DiscoverSectionToggle
+									key={section.key}
+									section={section}
+									active={selected.includes(section.key)}
+									onToggle={onToggleSection}
+									adult
+								/>
+							))}
+						</div>
 					</div>
-					<div className="flex flex-wrap gap-2">
-						{adultSections.map((section) => (
-							<DiscoverSectionToggle
-								key={section.key}
-								section={section}
-								active={selected.includes(section.key)}
-								onToggle={onToggleSection}
-								adult
-							/>
-						))}
-					</div>
+					<form
+						onSubmit={(event) => {
+							event.preventDefault()
+							onAdultSearch()
+						}}
+						className="flex justify-end gap-2"
+					>
+						<input
+							type="search"
+							value={adultSearchQuery}
+							onChange={(event) => onAdultSearchQueryChange(event.target.value)}
+							placeholder="搜索任意 JavDB 女优"
+							aria-label="搜索女优"
+							className="h-9 min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-3 text-sm text-ink-600 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100 sm:max-w-xs"
+						/>
+						<button
+							type="submit"
+							disabled={adultSearchLoading || adultSearchQuery.trim().length < 2}
+							className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+						>
+							{adultSearchLoading ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}
+							搜索女优
+						</button>
+					</form>
 				</div>
 			)}
 		</div>
@@ -154,40 +189,176 @@ export function DiscoverResults({
   onSelect: (item: DiscoverItem) => void
 }) {
   const hasRowErrors = Object.keys(rowErrors).length > 0
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const navigableKeys = useMemo(
+    () => selected.filter((key) => rowLoading[key] || (rows[key]?.length ?? 0) > 0),
+    [rowLoading, rows, selected],
+  )
+  const navigableKeySignature = navigableKeys.join('\u0000')
+  const [activeKey, setActiveKey] = useState('')
+
+  useEffect(() => {
+    if (navigableKeys.length === 0) {
+      setActiveKey('')
+      return
+    }
+
+    let frame = 0
+    const updateActiveKey = () => {
+      const activationLine = 128
+      let nextKey = navigableKeys[0]
+      for (const key of navigableKeys) {
+        const row = rowRefs.current[key]
+        if (!row) continue
+        if (row.getBoundingClientRect().top <= activationLine) {
+          nextKey = key
+          continue
+        }
+        break
+      }
+      setActiveKey((current) => (current === nextKey ? current : nextKey))
+    }
+    const scheduleUpdate = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        updateActiveKey()
+      })
+    }
+
+    updateActiveKey()
+    window.addEventListener('scroll', scheduleUpdate, { passive: true })
+    window.addEventListener('resize', scheduleUpdate)
+    return () => {
+      window.removeEventListener('scroll', scheduleUpdate)
+      window.removeEventListener('resize', scheduleUpdate)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [navigableKeySignature])
+
+  const jumpToSection = (key: string) => {
+    const row = rowRefs.current[key]
+    if (!row) return
+    setActiveKey(key)
+    row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   return (
-    <div className="space-y-10">
-      {selected.map((key, rowIndex) => {
-        const items = rows[key] ?? []
-        if (items.length === 0) {
-          if (rowLoading[key]) {
-            return <DiscoverRowSkeleton key={key} title={sectionLabel(key)} />
-          }
-          return null
-        }
-        return (
-          <ContentRow
-            key={key}
-            title={sectionLabel(key)}
-            items={items}
-            page={rowPages[key] ?? 1}
-            canNext={Boolean(rowCanNext[key])}
-            imageVersion={imageVersion}
-            refreshImageVersion={refreshImageVersion}
-            priority={rowIndex === 0}
-            onPageChange={(delta) => onPageChange(key, delta)}
-            onSelect={onSelect}
-          />
-        )
-      })}
-
-      {hasRowErrors && (
-        <DiscoverRowErrors rowErrors={rowErrors} sectionLabel={sectionLabel} />
+    <div className={navigableKeys.length > 1 ? 'xl:grid xl:grid-cols-[180px_minmax(0,1fr)] xl:gap-7' : ''}>
+      {navigableKeys.length > 1 && (
+        <DiscoverSectionRail
+          keys={navigableKeys}
+          activeKey={activeKey}
+          sectionLabel={sectionLabel}
+          onSelect={jumpToSection}
+        />
       )}
 
-      {!loading && !hasContent && !hasRowErrors && <DiscoverNoContent />}
+      <div className="min-w-0 space-y-10">
+        {selected.map((key, rowIndex) => {
+          const items = rows[key] ?? []
+          if (items.length === 0) {
+            if (rowLoading[key]) {
+              return (
+                <div
+                  key={key}
+                  ref={(element) => { rowRefs.current[key] = element }}
+                  id={discoverSectionID(key)}
+                  className="scroll-mt-28"
+                >
+                  <DiscoverRowSkeleton title={sectionLabel(key)} />
+                </div>
+              )
+            }
+            return null
+          }
+          return (
+            <div
+              key={key}
+              ref={(element) => { rowRefs.current[key] = element }}
+              id={discoverSectionID(key)}
+              className="scroll-mt-28"
+            >
+              <ContentRow
+                title={sectionLabel(key)}
+                items={items}
+                page={rowPages[key] ?? 1}
+                canNext={Boolean(rowCanNext[key])}
+                imageVersion={imageVersion}
+                refreshImageVersion={refreshImageVersion}
+                priority={rowIndex === 0}
+                onPageChange={(delta) => onPageChange(key, delta)}
+                onSelect={onSelect}
+              />
+            </div>
+          )
+        })}
+
+        {hasRowErrors && (
+          <DiscoverRowErrors rowErrors={rowErrors} sectionLabel={sectionLabel} />
+        )}
+
+        {!loading && !hasContent && !hasRowErrors && <DiscoverNoContent />}
+      </div>
     </div>
   )
+}
+
+function DiscoverSectionRail({
+  keys,
+  activeKey,
+  sectionLabel,
+  onSelect,
+}: {
+  keys: string[]
+  activeKey: string
+  sectionLabel: SectionLabel
+  onSelect: (key: string) => void
+}) {
+  return (
+    <aside className="hidden xl:block">
+      <nav
+        aria-label="发现模块快速跳转"
+        className="sticky top-24 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-sm backdrop-blur"
+      >
+        <div className="flex items-center gap-2 text-xs font-semibold text-sand-500">
+          <List size={14} />
+          快速跳转
+        </div>
+        <div className="mt-4 border-l border-gray-200 pl-0.5">
+          {keys.map((key) => {
+            const active = key === activeKey
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-current={active ? 'true' : undefined}
+                onClick={() => onSelect(key)}
+                className={
+                  'group -ml-[7px] flex w-[calc(100%+7px)] items-center gap-2 py-2 text-left text-xs font-semibold transition ' +
+                  (active ? 'text-brand-500' : 'text-gray-500 hover:text-ink-600')
+                }
+              >
+                <span
+                  className={
+                    'h-3 w-3 flex-none rounded-full border-2 bg-white transition ' +
+                    (active
+                      ? 'border-primary-500 ring-4 ring-primary-500/10'
+                      : 'border-gray-300 group-hover:border-primary-300')
+                  }
+                />
+                <span className="line-clamp-2">{sectionLabel(key)}</span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+    </aside>
+  )
+}
+
+function discoverSectionID(key: string): string {
+  return `discover-section-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
 function DiscoverRowErrors({

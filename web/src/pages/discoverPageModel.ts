@@ -53,14 +53,14 @@ export function readSavedSections(sections: DiscoverSection[]): string[] {
     const parsed = JSON.parse(raw)
     const allowed = new Set(sections.map((section) => section.key))
     if (Array.isArray(parsed)) {
-      return orderSectionKeys(addLegacyDefaults(parsed, allowed), sections)
+      return orderSelectedSections(addLegacyDefaults(parsed, allowed), sections)
     }
     if (!parsed || !Array.isArray(parsed.selected)) return []
     const selected = sanitizeSectionKeys(parsed.selected, allowed)
     if (parsed.version === discoverStorageVersion) {
-      return orderSectionKeys(selected, sections)
+      return orderSelectedSections(selected, sections)
     }
-    return orderSectionKeys(addLegacyDefaults(selected, allowed), sections)
+    return orderSelectedSections(addLegacyDefaults(selected, allowed), sections)
   } catch {
     return []
   }
@@ -163,7 +163,7 @@ function addLegacyDefaults(keys: unknown[], allowed: Set<string>): string[] {
   return out
 }
 
-function orderSectionKeys(keys: string[], sections: DiscoverSection[]): string[] {
+export function orderSelectedSections(keys: string[], sections: DiscoverSection[]): string[] {
   const selected = new Set(keys)
   return sections.map((section) => section.key).filter((key) => selected.has(key))
 }

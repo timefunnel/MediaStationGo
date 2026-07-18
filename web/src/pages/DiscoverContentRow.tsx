@@ -242,7 +242,7 @@ function DiscoverCard({
 
   const markPosterUnavailable = () => setPosterUnavailable(true)
 
-  if (!posterSrc || posterUnavailable) return null
+  if ((!posterSrc || posterUnavailable) && !isPerson) return null
 
   return (
     <button
@@ -252,7 +252,7 @@ function DiscoverCard({
       className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50 text-left transition-all duration-300 hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-400/40"
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden bg-surface-900">
-        {shouldLoadImage && posterSrc && (
+        {shouldLoadImage && posterSrc && !posterUnavailable ? (
           <img
             src={posterSrc}
             alt={item.title}
@@ -271,7 +271,11 @@ function DiscoverCard({
             }}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
-        )}
+        ) : isPerson ? (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-rose-50 to-rose-100 text-sm font-semibold text-rose-500">
+            女优
+          </div>
+        ) : null}
         <div className="absolute left-1.5 top-1.5 rounded-xl border border-white/20 bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white backdrop-blur-sm">
           {source}
         </div>

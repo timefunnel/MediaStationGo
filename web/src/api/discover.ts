@@ -15,6 +15,8 @@ export interface DiscoverItem extends Partial<Media> {
   overview?: string
   year?: number
   rating?: number
+  duration_minutes?: number
+  maker?: string
   subscribe_keyword?: string
   subscribe_aliases?: string[]
   total_episodes?: number
@@ -114,11 +116,28 @@ export const discoverAPI = {
 		image_url?: string
 	}) => api.post<AdultPerformerFollow>('/discover/adult/follows', input).then((r) => r.data),
 	unfollowAdultPerformer: (id: string) => api.delete(`/discover/adult/follows/${id}`),
-	adultPerformerWorks: (source: string, sourceID: string, page = 1) =>
+	searchAdultPerformers: (query: string) =>
 		api
-			.get<{ items: DiscoverItem[]; page: number; has_next: boolean }>(
+			.get<{ items: DiscoverItem[] }>('/discover/adult/performers/search', { params: { q: query } })
+			.then((r) => r.data.items ?? []),
+	adultPerformerWorks: (source: string, sourceID: string, page = 1, name?: string) =>
+		api
+			.get<{
+				items: DiscoverItem[]
+				page: number
+				has_next: boolean
+				performer?: DiscoverItem
+				performer_error?: string
+			}>(
 				`/discover/adult/performers/${encodeURIComponent(source)}/${encodeURIComponent(sourceID)}/works`,
-				{ params: { page } },
+				{ params: { page, name: name?.trim() || undefined } },
+			)
+			.then((r) => r.data),
+	adultMovieDetail: (source: string, providerID: string, code: string) =>
+		api
+			.get<DiscoverItem>(
+				`/discover/adult/items/${encodeURIComponent(source)}/${encodeURIComponent(providerID)}`,
+				{ params: { code } },
 			)
 			.then((r) => r.data),
 }

@@ -174,6 +174,7 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
               embedded
               open
               initialQuery={discoverResourceSearchKeyword(item)}
+              releaseDate={item.release_date}
               libraryID={selectedLibrary.id}
               libraryName={selectedLibrary.name}
               libraryRoots={selectedLibrary.roots ?? []}

@@ -76,6 +76,35 @@ func createAdultPerformerFollowHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func searchAdultPerformersHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireAdultDiscoverAccess(c, svc) {
+			return
+		}
+		query := strings.TrimSpace(c.Query("q"))
+		if length := len([]rune(query)); length < 2 || length > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "女优搜索词长度需为 2 到 100 个字符"})
+			return
+		}
+		items, err := svc.Adult.SearchPerformers(c.Request.Context(), query)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":  "女优搜索暂时无法使用",
+				"detail": err.Error(),
+			})
+			return
+		}
+		if err := markAdultPerformerFollows(c.Request.Context(), svc, currentUserID(c), items); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if svc.Discover != nil {
+			svc.Discover.WarmExternalArtwork(items)
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	}
+}
+
 func deleteAdultPerformerFollowHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !requireAdultDiscoverAccess(c, svc) {
@@ -118,7 +147,59 @@ func adultPerformerWorksHandler(svc *service.Container) gin.HandlerFunc {
 		if svc.Discover != nil {
 			svc.Discover.WarmExternalArtwork(items)
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items, "page": page, "has_next": len(items) >= 40})
+		response := gin.H{"items": items, "page": page, "has_next": len(items) >= 40}
+		performerName := strings.TrimSpace(c.Query("name"))
+		if page == 1 && performerName != "" {
+			if len([]rune(performerName)) > 255 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "演员名称无效"})
+				return
+			}
+			performers, profileErr := svc.Adult.SearchPerformers(c.Request.Context(), performerName)
+			if profileErr != nil {
+				response["performer_error"] = "女优头像暂时无法加载"
+			} else {
+				requestedSource := strings.ToLower(strings.TrimSpace(c.Param("source")))
+				requestedID := strings.TrimSpace(c.Param("source_id"))
+				for _, performer := range performers {
+					if strings.EqualFold(performer.Source, requestedSource) && performer.ProviderID == requestedID {
+						response["performer"] = performer
+						break
+					}
+				}
+			}
+		}
+		c.JSON(http.StatusOK, response)
+	}
+}
+
+func adultMovieDetailHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireAdultDiscoverAccess(c, svc) {
+			return
+		}
+		code := strings.TrimSpace(c.Query("code"))
+		if length := len([]rune(code)); length < 3 || length > 50 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "作品番号无效"})
+			return
+		}
+		item, err := svc.Adult.DiscoverMovieDetail(
+			c.Request.Context(), c.Param("source"), c.Param("provider_id"), code,
+		)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":  "作品详情暂时无法加载",
+				"detail": err.Error(),
+			})
+			return
+		}
+		items := []service.ExternalMediaResult{item}
+		service.EnrichExternalMediaLibraryLinks(
+			c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
+		)
+		if svc.Discover != nil {
+			svc.Discover.WarmExternalArtwork(items)
+		}
+		c.JSON(http.StatusOK, items[0])
 	}
 }
 

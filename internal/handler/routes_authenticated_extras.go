@@ -22,7 +22,9 @@ func registerAuthedUISurfaceRoutes(authed *gin.RouterGroup, svc *service.Contain
 	authed.GET("/discover/adult/follows", requirePermission(svc, "can_view_discover"), listAdultPerformerFollowsHandler(svc))
 	authed.POST("/discover/adult/follows", requirePermission(svc, "can_view_discover"), createAdultPerformerFollowHandler(svc))
 	authed.DELETE("/discover/adult/follows/:id", requirePermission(svc, "can_view_discover"), deleteAdultPerformerFollowHandler(svc))
+	authed.GET("/discover/adult/performers/search", requirePermission(svc, "can_view_discover"), searchAdultPerformersHandler(svc))
 	authed.GET("/discover/adult/performers/:source/:source_id/works", requirePermission(svc, "can_view_discover"), adultPerformerWorksHandler(svc))
+	authed.GET("/discover/adult/items/:source/:provider_id", requirePermission(svc, "can_view_discover"), adultMovieDetailHandler(svc))
 
 	authed.GET("/system/info", systemInfoHandler(svc))
 	authed.GET("/system/status", systemStatusHandler(svc))

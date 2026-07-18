@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
@@ -19,6 +21,7 @@ var (
 	adultListDatePattern    = regexp.MustCompile(`(?:19|20)\d{2}-\d{2}-\d{2}`)
 	adultListScorePattern   = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
 	adultPerformerIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	adultMovieIDPattern     = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 )
 
 func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMediaResult, error) {
@@ -48,6 +51,101 @@ func (p *AdultProvider) DiscoverJavDBPerformers(ctx context.Context) ([]External
 	return limitAdultDiscoveryItems(items, 30), err
 }
 
+func (p *AdultProvider) SearchPerformers(ctx context.Context, query string) ([]ExternalMediaResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("adult performer query is empty")
+	}
+	if p == nil {
+		return nil, errors.New("adult provider is unavailable")
+	}
+
+	var lastErr error
+	foundSource := false
+	completedSource := false
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != "javdb" {
+			continue
+		}
+		foundSource = true
+		base = strings.TrimRight(base, "/")
+		searchURL := base + "/search?q=" + url.QueryEscape(query) + "&f=actor"
+		body, err := p.fetchText(ctx, searchURL, base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if items := filterAdultPerformerItems(parseJavDBPerformerList(body, base), query); len(items) > 0 {
+			return limitAdultDiscoveryItems(items, 30), nil
+		}
+		items, err := p.searchJavDBPerformerMovieDetails(ctx, base, query, parseJavDBMovieList(body, base))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(items) > 0 {
+			return limitAdultDiscoveryItems(items, 30), nil
+		}
+		completedSource = true
+	}
+	if !foundSource {
+		return nil, errors.New("adult source javdb is not configured")
+	}
+	if lastErr != nil && !completedSource {
+		return nil, lastErr
+	}
+	return []ExternalMediaResult{}, nil
+}
+
+func (p *AdultProvider) searchJavDBPerformerMovieDetails(
+	ctx context.Context,
+	base string,
+	query string,
+	movies []ExternalMediaResult,
+) ([]ExternalMediaResult, error) {
+	const movieLimit = 6
+	out := make([]ExternalMediaResult, 0, 4)
+	seen := map[string]struct{}{}
+	var lastErr error
+	attempted := 0
+	failed := 0
+	for _, movie := range movies {
+		if attempted >= movieLimit {
+			break
+		}
+		detailURL := strings.TrimSpace(movie.ProviderURL)
+		if detailURL == "" {
+			continue
+		}
+		attempted++
+		body, err := p.fetchText(ctx, detailURL, base)
+		if err != nil {
+			failed++
+			lastErr = err
+			if p.log != nil {
+				p.log.Debug("adult performer search detail failed",
+					zap.String("url", detailURL), zap.Error(err))
+			}
+			continue
+		}
+		for _, person := range firstAdultPeople(body, "javdb", detailURL) {
+			if !adultPerformerQueryMatches(person.Name, query) || person.SourceID == "" {
+				continue
+			}
+			key := strings.ToLower(person.Source) + "\x00" + person.SourceID
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, adultPerformerItem(person))
+		}
+	}
+	if len(out) == 0 && attempted > 0 && failed == attempted {
+		return nil, lastErr
+	}
+	return out, nil
+}
+
 func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sourceID string, page int) ([]ExternalMediaResult, error) {
 	base, profileURL, ok := p.AdultPerformerProfile(ctx, source, sourceID)
 	if !ok {
@@ -69,6 +167,71 @@ func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sour
 		return nil, fmt.Errorf("adult performer page returned no usable works")
 	}
 	return limitAdultDiscoveryItems(items, 40), nil
+}
+
+func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, providerID, code string) (ExternalMediaResult, error) {
+	if p == nil {
+		return ExternalMediaResult{}, errors.New("adult provider is unavailable")
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	providerID = strings.TrimSpace(providerID)
+	code = normalizeAdultCode(code)
+	if source != "javdb" || !adultMovieIDPattern.MatchString(providerID) {
+		return ExternalMediaResult{}, errors.New("unsupported adult movie source")
+	}
+	if code == "" {
+		return ExternalMediaResult{}, errors.New("adult movie code is empty")
+	}
+
+	var lastErr error
+	foundSource := false
+	for _, base := range p.resolveBases(ctx) {
+		if adultSourceKind(base) != source {
+			continue
+		}
+		foundSource = true
+		base = strings.TrimRight(base, "/")
+		detailURL := base + "/v/" + url.PathEscape(providerID)
+		body, err := p.fetchText(ctx, detailURL, base)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		match := parseAdultDetailHTML(body, code, source, detailURL)
+		if match == nil {
+			lastErr = errors.New("adult movie detail returned no usable metadata")
+			continue
+		}
+		return ExternalMediaResult{
+			Source:           source,
+			MediaType:        "adult",
+			Title:            match.Title,
+			OriginalName:     code,
+			Overview:         match.Overview,
+			PosterURL:        match.PosterURL,
+			BackdropURL:      match.BackdropURL,
+			Year:             match.Year,
+			ReleaseDate:      match.ReleaseDate,
+			Rating:           match.Rating,
+			DurationMinutes:  match.DurationMinutes,
+			Maker:            match.Maker,
+			SubscribeKeyword: code,
+			SubscribeAliases: compactUniqueStrings(code, match.Title),
+			Genres:           match.Genres,
+			Actors:           match.Actors,
+			People:           match.People,
+			NSFW:             true,
+			ProviderURL:      detailURL,
+			ProviderID:       providerID,
+		}, nil
+	}
+	if !foundSource {
+		return ExternalMediaResult{}, errors.New("adult source javdb is not configured")
+	}
+	if lastErr != nil {
+		return ExternalMediaResult{}, lastErr
+	}
+	return ExternalMediaResult{}, errors.New("adult movie detail is unavailable")
 }
 
 func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, follows []model.AdultPerformerFollow, page int) ([]ExternalMediaResult, error) {
@@ -327,6 +490,42 @@ func parseJavDBPerformerList(body, base string) []ExternalMediaResult {
 		})
 	}
 	return out
+}
+
+func filterAdultPerformerItems(items []ExternalMediaResult, query string) []ExternalMediaResult {
+	out := make([]ExternalMediaResult, 0, len(items))
+	for _, item := range items {
+		if adultPerformerQueryMatches(item.Title, query) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func adultPerformerQueryMatches(name, query string) bool {
+	nameKey := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
+	queryKey := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(query)), " "))
+	if nameKey == "" || queryKey == "" {
+		return false
+	}
+	return strings.Contains(nameKey, queryKey) || strings.Contains(queryKey, nameKey)
+}
+
+func adultPerformerItem(person PersonMetadata) ExternalMediaResult {
+	source := strings.ToLower(strings.TrimSpace(person.Source))
+	if source == "" {
+		source = "javdb"
+	}
+	return ExternalMediaResult{
+		Source:      source,
+		MediaType:   "person",
+		Title:       strings.TrimSpace(person.Name),
+		PosterURL:   strings.TrimSpace(person.ImageURL),
+		NSFW:        true,
+		ProviderURL: strings.TrimSpace(person.ProfileURL),
+		ProviderID:  strings.TrimSpace(person.SourceID),
+		People:      []PersonMetadata{person},
+	}
 }
 
 func adultListCode(inner, href string) string {

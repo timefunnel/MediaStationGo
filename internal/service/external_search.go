@@ -21,6 +21,8 @@ type ExternalMediaResult struct {
 	Year               int              `json:"year,omitempty"`
 	ReleaseDate        string           `json:"release_date,omitempty"`
 	Rating             float32          `json:"rating,omitempty"`
+	DurationMinutes    int              `json:"duration_minutes,omitempty"`
+	Maker              string           `json:"maker,omitempty"`
 	TMDbID             int              `json:"tmdb_id,omitempty"`
 	BangumiID          int              `json:"bangumi_id,omitempty"`
 	DoubanID           string           `json:"douban_id,omitempty"`
@@ -74,6 +76,8 @@ func SearchExternalMedia(ctx context.Context, query string, year int, mediaType 
 			Year:             m.Year,
 			ReleaseDate:      m.ReleaseDate,
 			Rating:           m.Rating,
+			DurationMinutes:  m.DurationMinutes,
+			Maker:            m.Maker,
 			TMDbID:           m.TMDbID,
 			BangumiID:        m.BangumiID,
 			SubscribeKeyword: buildSubscribeKeyword(m.Title, m.Year),

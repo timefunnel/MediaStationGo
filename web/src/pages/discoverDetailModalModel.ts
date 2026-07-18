@@ -1,6 +1,15 @@
 import type { DiscoverItem } from '../api/discover'
 import { buildSubscribeKeyword } from './discoverPageModel'
 
+export {
+  discoverItemPeople,
+  discoverItemValues,
+  discoverPerformerItem,
+  discoverReleaseStatus,
+  mergeDiscoverDetail,
+  supportsAdultMovieDetail,
+} from './discoverDetailDataModel'
+
 export function discoverSubscriptionKeyword(item: DiscoverItem): string {
   return item.subscribe_keyword || buildSubscribeKeyword(item)
 }

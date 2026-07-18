@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { discoverAPI, type DiscoverItem, type DiscoverSection } from '../api/discover'
 import { AdultPerformerModal } from './AdultPerformerModal'
-import { DiscoverSkeleton } from './DiscoverContentRow'
+import { ContentRow, DiscoverSkeleton } from './DiscoverContentRow'
 import { DiscoverDetailModal } from './DiscoverDetailModal'
 import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './DiscoverPageSections'
 import {
   defaultSections,
   discoverStorageKey,
+  orderSelectedSections,
   readCachedDiscoverRows,
   readSavedSections,
   serializeSavedSections,
@@ -28,6 +29,11 @@ export function DiscoverPage() {
   const [reloadSeq, setReloadSeq] = useState(0)
   const [imageVersion, setImageVersion] = useState<string>()
   const [refreshImageVersion, setRefreshImageVersion] = useState<string>()
+	const [performerSearchQuery, setPerformerSearchQuery] = useState('')
+	const [performerSearchItems, setPerformerSearchItems] = useState<DiscoverItem[]>([])
+	const [performerSearchLoading, setPerformerSearchLoading] = useState(false)
+	const [performerSearchError, setPerformerSearchError] = useState('')
+	const [performerSearchDone, setPerformerSearchDone] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -62,8 +68,14 @@ export function DiscoverPage() {
   useEffect(() => {
     if (!sectionsReady) return
     const available = new Set(sections.map((section) => section.key))
-    const activeSelected = selected.filter((key) => available.has(key))
-    if (activeSelected.length !== selected.length) {
+    const activeSelected = orderSelectedSections(
+      selected.filter((key) => available.has(key)),
+      sections,
+    )
+    if (
+      activeSelected.length !== selected.length ||
+      activeSelected.some((key, index) => key !== selected[index])
+    ) {
       setSelected(activeSelected)
       return
     }
@@ -147,10 +159,10 @@ export function DiscoverPage() {
 
   const toggleSection = (key: string) => {
     setSelected((current) => {
-      if (current.includes(key)) {
-        return current.filter((item) => item !== key)
-      }
-      return [...current, key]
+      const next = current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+      return orderSelectedSections(next, sections)
     })
     setRowPages((current) => ({ ...current, [key]: current[key] ?? 1 }))
   }
@@ -170,6 +182,36 @@ export function DiscoverPage() {
     setReloadSeq((current) => current + 1)
   }
 
+	const searchAdultPerformers = async () => {
+		const query = performerSearchQuery.trim()
+		setPerformerSearchDone(true)
+		setPerformerSearchItems([])
+		setPerformerSearchError('')
+		if ([...query].length < 2) {
+			setPerformerSearchError('女优搜索词至少需要 2 个字符')
+			return
+		}
+		setPerformerSearchLoading(true)
+		try {
+			setPerformerSearchItems(await discoverAPI.searchAdultPerformers(query))
+		} catch (error) {
+			const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+			setPerformerSearchError(message || '女优搜索失败')
+		} finally {
+			setPerformerSearchLoading(false)
+		}
+	}
+
+	const handleAdultFollowChanged = (followed: boolean) => {
+		const source = activeItem?.source
+		const sourceID = activeItem?.provider_id
+		setPerformerSearchItems((current) => current.map((item) => (
+			item.source === source && item.provider_id === sourceID ? { ...item, followed } : item
+		)))
+		setActiveItem((current) => current ? { ...current, followed } : current)
+		setReloadSeq((current) => current + 1)
+	}
+
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-6">
       <DiscoverHeader
@@ -177,13 +219,44 @@ export function DiscoverPage() {
         selected={selected}
         sectionsReady={sectionsReady}
         loading={loading}
+		adultSearchQuery={performerSearchQuery}
+		adultSearchLoading={performerSearchLoading}
         onRefresh={refreshDiscover}
         onToggleSection={toggleSection}
+		onAdultSearchQueryChange={setPerformerSearchQuery}
+		onAdultSearch={() => void searchAdultPerformers()}
       />
 
       {!sectionsReady && <DiscoverSkeleton />}
 
-      {sectionsReady && !loading && selected.length === 0 && (
+		{sectionsReady && performerSearchError && (
+			<div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+				{performerSearchError}
+			</div>
+		)}
+
+		{sectionsReady && performerSearchLoading && (
+			<div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+				正在搜索 JavDB 女优…
+			</div>
+		)}
+
+		{sectionsReady && performerSearchItems.length > 0 && (
+			<ContentRow
+				title="女优搜索结果"
+				items={performerSearchItems}
+				priority
+				onSelect={setActiveItem}
+			/>
+		)}
+
+		{sectionsReady && performerSearchDone && !performerSearchLoading && !performerSearchError && performerSearchItems.length === 0 && (
+			<div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+				没有找到匹配的 JavDB 女优
+			</div>
+		)}
+
+      {sectionsReady && !loading && selected.length === 0 && !performerSearchDone && (
         <DiscoverEmptySelection />
       )}
 
@@ -210,7 +283,7 @@ export function DiscoverPage() {
 				item={activeItem}
 				onClose={() => setActiveItem(null)}
 				onSelectWork={setActiveItem}
-				onFollowChanged={() => setReloadSeq((current) => current + 1)}
+				onFollowChanged={handleAdultFollowChanged}
 			/>
 		)}
 
@@ -218,6 +291,7 @@ export function DiscoverPage() {
         <DiscoverDetailModal
           item={activeItem}
           onClose={() => setActiveItem(null)}
+          onSelectPerformer={setActiveItem}
         />
       )}
     </div>
