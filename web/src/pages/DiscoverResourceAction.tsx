@@ -128,7 +128,7 @@ export function DiscoverResourceAction({ item }: { item: DiscoverItem }) {
         <p className="text-sm text-sand-500">当前没有可用媒体库</p>
       ) : (
         <>
-          <label className="block text-xs text-sand-500">
+          <label className="block max-w-sm text-xs text-sand-500">
             目标媒体库
             <select
               className="input-base mt-1"

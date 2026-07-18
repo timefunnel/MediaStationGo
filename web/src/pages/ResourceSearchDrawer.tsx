@@ -9,6 +9,7 @@ import {
   Globe,
   LoaderCircle,
   RotateCcw,
+  Search,
   SlidersHorizontal,
   X,
 } from 'lucide-react'
@@ -133,6 +134,7 @@ export function ResourceSearchDrawer({
   const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
   const upgrading = Boolean(upgradeMediaID?.trim())
   const hasAppliedFilters = resourceFiltersActive(appliedFilters)
+  const embeddedExpanded = Boolean(taskID || response || searching || searchFailure || duplicateConflict)
 
   useEffect(() => {
     const nextQuery = initialQuery?.trim()
@@ -381,10 +383,11 @@ export function ResourceSearchDrawer({
   const panel = (
     <aside
       className={embedded
-        ? 'flex h-[65vh] min-h-[26rem] max-h-[42rem] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)]'
+        ? `flex w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-[var(--app-bg)] ${embeddedExpanded ? 'h-[65vh] min-h-[26rem] max-h-[42rem]' : ''}`
         : 'absolute inset-y-0 right-0 flex w-full flex-col border-l border-gray-200 bg-[var(--app-bg)] shadow-2xl sm:max-w-3xl lg:max-w-4xl'}
       aria-label={embedded ? `${libraryName} 查找资源` : undefined}
     >
+      {(!embedded || taskID) && (
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-[var(--app-panel)] px-4 sm:px-6">
           {taskID && (
             <button
@@ -399,7 +402,7 @@ export function ResourceSearchDrawer({
           )}
           <div className="min-w-0 flex-1">
             <h2 className="flex min-w-0 items-center gap-2 font-display text-lg font-bold text-ink-600">
-              {!taskID && <Globe size={19} className="shrink-0 text-brand-600" />}
+              {!taskID && <Search size={19} className="shrink-0 text-brand-600" />}
               <span className="truncate">{taskID ? '资源入库进度' : upgrading ? '升级片源' : '查找资源'}</span>
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
@@ -416,6 +419,7 @@ export function ResourceSearchDrawer({
             </button>
           )}
         </header>
+      )}
 
         {taskID ? (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
@@ -443,29 +447,23 @@ export function ResourceSearchDrawer({
           </div>
         ) : (
           <>
-            <form className="shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 py-4 sm:px-6" onSubmit={submitSearch}>
-              <div className="mb-2.5 flex items-center gap-2">
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">
-                  <Globe size={17} />
-                </span>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-ink-600">{upgrading ? '查找更高质量版本' : '查找资源'}</h3>
-                  <p className="text-xs text-sand-500">{source === 'pansou' ? '网盘资源' : '普通资源'}</p>
-                </div>
+            <form
+              className={`shrink-0 border-b border-gray-200 bg-[var(--app-panel)] px-4 ${embedded ? 'py-3' : 'py-4 sm:px-6'}`}
+              onSubmit={submitSearch}
+            >
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <SearchSourceControl
+                  source={source}
+                  searching={searching}
+                  pansou={pansouAvailable}
+                  onSelect={selectSource}
+                />
+                {releaseDate?.trim() && (
+                  <p className="text-xs text-sand-500">
+                    发行日期：<span className="font-medium text-ink-100">{releaseDate.trim()}</span>
+                  </p>
+                )}
               </div>
-
-              <SearchSourceControl
-                source={source}
-                searching={searching}
-                pansou={pansouAvailable}
-                onSelect={selectSource}
-              />
-
-              {releaseDate?.trim() && (
-                <p className="-mt-1 mb-3 text-xs text-sand-500">
-                  发行日期：<span className="font-medium text-ink-100">{releaseDate.trim()}</span>
-                </p>
-              )}
 
               <div className="flex min-w-0 gap-2">
                 <label className="min-w-0 flex-1">
@@ -486,7 +484,7 @@ export function ResourceSearchDrawer({
                   aria-label={searching ? '查找中' : '查找资源'}
                   disabled={searching}
                 >
-                  {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Globe size={18} />}
+                  {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Search size={18} />}
                 </button>
               </div>
 
@@ -552,9 +550,9 @@ export function ResourceSearchDrawer({
                 />
               )}
 
-              {!response && !searching && !searchFailure && (
+              {!embedded && !response && !searching && !searchFailure && (
                 <div className="flex min-h-56 flex-col items-center justify-center text-center text-sand-500">
-                  <Globe className="mb-3 h-9 w-9" />
+                  <Search className="mb-3 h-9 w-9" />
                   <p className="text-sm">选择搜索模式并输入关键词查找资源</p>
                 </div>
               )}
@@ -657,7 +655,7 @@ function SearchSourceControl({
   onSelect: (source: SearchSource) => void
 }) {
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-semibold text-ink-100">搜索模式</span>
       <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
         <SourceButton
