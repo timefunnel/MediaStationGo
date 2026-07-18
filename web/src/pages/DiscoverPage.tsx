@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { discoverAPI, type DiscoverItem, type DiscoverSection } from '../api/discover'
 import { AdultPerformerModal } from './AdultPerformerModal'
@@ -36,6 +36,7 @@ export function DiscoverPage() {
 	const [searchLoading, setSearchLoading] = useState(false)
 	const [searchErrors, setSearchErrors] = useState<Record<string, string>>({})
 	const [searchDone, setSearchDone] = useState(false)
+	const searchSequence = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -161,12 +162,8 @@ export function DiscoverPage() {
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
 	const searchGroups = useMemo(() => groupDiscoverSearchItems(searchItems), [searchItems])
-	const showSearchArea = sectionsReady && (
-		searchLoading ||
-		searchGroups.length > 0 ||
-		Object.keys(searchErrors).length > 0 ||
-		(searchDone && searchItems.length === 0)
-	)
+	const searchActive = searchLoading || searchDone
+	const showSearchArea = sectionsReady && searchActive
 
   const openSectionPicker = () => {
 		setSectionPickerDraft(selected)
@@ -181,17 +178,8 @@ export function DiscoverPage() {
 		))
 	}
 
-	const moveSectionPickerDraft = (key: string, direction: -1 | 1) => {
-		setSectionPickerDraft((current) => {
-			const index = current.indexOf(key)
-			const nextIndex = index + direction
-			if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current
-			const next = [...current]
-			const moved = next[index]
-			next[index] = next[nextIndex]
-			next[nextIndex] = moved
-			return next
-		})
+	const reorderSectionPickerDraft = (keys: string[]) => {
+		setSectionPickerDraft(orderSelectedSections(keys, sections))
 	}
 
 	const saveSectionSelection = async () => {
@@ -236,24 +224,38 @@ export function DiscoverPage() {
 
 	const searchDiscoverCatalog = async () => {
 		const query = searchQuery.trim()
+		const sequence = searchSequence.current + 1
+		searchSequence.current = sequence
 		setSearchDone(true)
 		setSearchItems([])
 		setSearchErrors({})
 		if ([...query].length < 1) {
+			setSearchLoading(false)
 			setSearchErrors({ request: '请输入搜索词' })
 			return
 		}
 		setSearchLoading(true)
 		try {
 			const result = await discoverAPI.search(query)
+			if (searchSequence.current !== sequence) return
 			setSearchItems(result.items)
 			setSearchErrors(result.errors)
 		} catch (error) {
+			if (searchSequence.current !== sequence) return
 			const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
 			setSearchErrors({ request: message || '聚合搜索失败' })
 		} finally {
-			setSearchLoading(false)
+			if (searchSequence.current === sequence) setSearchLoading(false)
 		}
+	}
+
+	const clearDiscoverSearch = () => {
+		searchSequence.current += 1
+		setSearchQuery('')
+		setSearchItems([])
+		setSearchErrors({})
+		setSearchLoading(false)
+		setSearchDone(false)
 	}
 
 	const handleAdultFollowChanged = (followed: boolean) => {
@@ -275,10 +277,12 @@ export function DiscoverPage() {
 		selectionSaving={selectionSaving}
 		searchQuery={searchQuery}
 		searchLoading={searchLoading}
+        searchActive={searchActive}
         onRefresh={refreshDiscover}
 		onOpenSectionPicker={openSectionPicker}
 		onSearchQueryChange={setSearchQuery}
 		onSearch={() => void searchDiscoverCatalog()}
+        onClearSearch={clearDiscoverSearch}
       />
 
 		{sectionPickerOpen && (
@@ -288,7 +292,7 @@ export function DiscoverPage() {
 				saving={selectionSaving}
 				error={selectionError}
 				onToggle={toggleSectionPickerDraft}
-				onMove={moveSectionPickerDraft}
+				onReorder={reorderSectionPickerDraft}
 				onClose={() => setSectionPickerOpen(false)}
 				onSave={() => void saveSectionSelection()}
 			/>
@@ -302,7 +306,7 @@ export function DiscoverPage() {
         </div>
       )}
 
-		{showSearchArea && <div className="space-y-8 xl:ml-[252px]">
+		{showSearchArea && <div className="space-y-8">
 			{sectionsReady && Object.keys(searchErrors).length > 0 && (
 				<div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
 					<p className="font-semibold">以下搜索源未返回结果：</p>
@@ -333,11 +337,11 @@ export function DiscoverPage() {
 			)}
 		</div>}
 
-      {sectionsReady && !loading && selected.length === 0 && !searchDone && (
+      {sectionsReady && !loading && selected.length === 0 && !searchActive && (
 		<div className="xl:ml-[252px]"><DiscoverEmptySelection /></div>
 	  )}
 
-      {sectionsReady && selected.length > 0 && (
+      {sectionsReady && selected.length > 0 && !searchActive && (
         <DiscoverResults
           selected={selected}
           rows={rows}

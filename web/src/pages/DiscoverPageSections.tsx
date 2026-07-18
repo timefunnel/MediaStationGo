@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
@@ -13,21 +13,25 @@ export function DiscoverHeader({
 	selectionSaving,
 	searchQuery,
 	searchLoading,
+  searchActive,
   onRefresh,
 	onOpenSectionPicker,
 	onSearchQueryChange,
 	onSearch,
+  onClearSearch,
 }: {
   selectedCount: number
   sectionsReady: boolean
   loading: boolean
 	selectionSaving: boolean
-	searchQuery: string
+  searchQuery: string
   searchLoading: boolean
+  searchActive: boolean
   onRefresh: () => void
 	onOpenSectionPicker: () => void
 	onSearchQueryChange: (value: string) => void
 	onSearch: () => void
+  onClearSearch: () => void
 }) {
   return (
 	<header className="grid items-start gap-6 border-b border-gray-200/80 pb-6 xl:grid-cols-[220px_minmax(0,1fr)] xl:gap-8">
@@ -72,15 +76,26 @@ export function DiscoverHeader({
 				{searchLoading ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}
 				聚合搜索
 			</button>
-			<button
-				type="button"
-				onClick={onRefresh}
-				disabled={!sectionsReady || selectionSaving || selectedCount === 0}
-				className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
-			>
-				<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-				刷新
-			</button>
+			{searchActive ? (
+				<button
+					type="button"
+					onClick={onClearSearch}
+					className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500"
+				>
+					<ArrowLeft size={14} />
+					返回发现
+				</button>
+			) : (
+				<button
+					type="button"
+					onClick={onRefresh}
+					disabled={!sectionsReady || selectionSaving || selectedCount === 0}
+					className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+					刷新
+				</button>
+			)}
 		</form>
 	</header>
   )
@@ -123,13 +138,13 @@ export function DiscoverResults({
   onPageChange: (key: string, delta: number) => void
   onSelect: (item: DiscoverItem) => void
 }) {
+  const sectionTopOffset = 96
   const hasRowErrors = Object.keys(rowErrors).length > 0
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const navigableKeys = useMemo(
     () => selected.filter((key) => rowLoading[key] || (rows[key]?.length ?? 0) > 0),
     [rowLoading, rows, selected],
   )
-  const navigableKeySignature = navigableKeys.join('\u0000')
   const [activeKey, setActiveKey] = useState('')
 
   useEffect(() => {
@@ -138,9 +153,13 @@ export function DiscoverResults({
       return
     }
 
+    const firstRow = navigableKeys.map((key) => rowRefs.current[key]).find(Boolean)
+    const scrollContainer = firstRow?.closest('main')
+    if (!scrollContainer) return
+
     let frame = 0
     const updateActiveKey = () => {
-      const activationLine = 128
+      const activationLine = scrollContainer.getBoundingClientRect().top + sectionTopOffset + 1
       let nextKey = navigableKeys[0]
       for (const key of navigableKeys) {
         const row = rowRefs.current[key]
@@ -162,20 +181,26 @@ export function DiscoverResults({
     }
 
     updateActiveKey()
-    window.addEventListener('scroll', scheduleUpdate, { passive: true })
+    scrollContainer.addEventListener('scroll', scheduleUpdate, { passive: true })
     window.addEventListener('resize', scheduleUpdate)
     return () => {
-      window.removeEventListener('scroll', scheduleUpdate)
+      scrollContainer.removeEventListener('scroll', scheduleUpdate)
       window.removeEventListener('resize', scheduleUpdate)
       if (frame) window.cancelAnimationFrame(frame)
     }
-  }, [navigableKeySignature])
+  }, [navigableKeys])
 
   const jumpToSection = (key: string) => {
     const row = rowRefs.current[key]
     if (!row) return
+    const scrollContainer = row.closest('main')
+    if (!scrollContainer) return
+    const targetTop = scrollContainer.scrollTop
+      + row.getBoundingClientRect().top
+      - scrollContainer.getBoundingClientRect().top
+      - sectionTopOffset
     setActiveKey(key)
-    row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrollContainer.scrollTop = Math.max(0, Math.round(targetTop))
   }
 
   return (
@@ -199,7 +224,7 @@ export function DiscoverResults({
                   key={key}
                   ref={(element) => { rowRefs.current[key] = element }}
                   id={discoverSectionID(key)}
-                  className="scroll-mt-28"
+                  className="scroll-mt-24"
                 >
                   <DiscoverRowSkeleton title={sectionLabel(key)} />
                 </div>
@@ -212,7 +237,7 @@ export function DiscoverResults({
               key={key}
               ref={(element) => { rowRefs.current[key] = element }}
               id={discoverSectionID(key)}
-              className="scroll-mt-28"
+              className="scroll-mt-24"
             >
               <ContentRow
                 title={sectionLabel(key)}
