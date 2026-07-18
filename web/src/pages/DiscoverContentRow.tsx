@@ -59,6 +59,7 @@ export function ContentRow({
   imageVersion,
   refreshImageVersion,
   priority = false,
+  cardSize = 'default',
   onPageChange,
   onSelect,
 }: {
@@ -69,12 +70,16 @@ export function ContentRow({
   imageVersion?: string
   refreshImageVersion?: string
   priority?: boolean
+  cardSize?: 'default' | 'large'
   onPageChange?: (delta: number) => void
   onSelect: (item: DiscoverItem) => void
 }) {
   const rowRef = useRef<HTMLElement>(null)
   const [imagesEnabled, setImagesEnabled] = useState(priority)
   const shouldRenderImages = priority || imagesEnabled
+  const gridClassName = cardSize === 'large'
+    ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+    : 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6'
 
   useEffect(() => {
     if (shouldRenderImages) return
@@ -123,7 +128,7 @@ export function ContentRow({
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
+      <div className={gridClassName}>
         {shouldRenderImages
           ? items.map((item, index) => (
               <DiscoverCard

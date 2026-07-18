@@ -33,7 +33,7 @@ export function AdultPerformerModal({
 		[follows, source, sourceID],
 	)
 	const portraitSource = adultPerformerPortraitSource(resolvedItem.poster_url, follow?.image_url)
-	const portrait = imageURL(portraitSource, undefined, { maxWidth: 480, quality: 84, retryFailed: true })
+	const portrait = imageURL(portraitSource, undefined, { maxWidth: 240, quality: 86, retryFailed: true })
 
 	useEffect(() => {
 		setResolvedItem(item)
@@ -115,7 +115,7 @@ export function AdultPerformerModal({
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-5">
-			<div className="max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-white/60 bg-white p-4 shadow-2xl sm:p-5">
+			<div className="max-h-[94vh] w-full max-w-7xl overflow-y-auto rounded-xl border border-white/60 bg-white p-4 shadow-2xl sm:p-5">
 				<header className="mb-5 flex items-start justify-between gap-4">
 					<div>
 						<p className="text-xs font-semibold uppercase text-rose-500">JavDB 女优</p>
@@ -131,9 +131,8 @@ export function AdultPerformerModal({
 					</button>
 				</header>
 
-				<div className="grid gap-5 lg:grid-cols-[220px_1fr]">
-					<aside className="space-y-3">
-						<div className="aspect-[3/4] overflow-hidden rounded-lg bg-gray-100">
+				<section className="mb-6 flex flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:p-4">
+					<div className="aspect-[3/4] w-28 shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:w-32">
 							{portrait ? (
 								<img src={portrait} alt={resolvedItem.title} className="h-full w-full object-cover" />
 							) : (
@@ -142,18 +141,22 @@ export function AdultPerformerModal({
 									<span className="text-xs font-semibold">JavDB 暂无头像</span>
 								</div>
 							)}
-						</div>
+					</div>
+					<div className="min-w-0 flex-1 space-y-2">
+						<p className="text-sm font-semibold text-ink-600">{resolvedItem.title}</p>
+						<p className="text-xs text-ink-50">选择下方作品可查看完整封面、发行日期与资源详情。</p>
 						{profileError && (
 							<p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
 								{profileError}
 							</p>
 						)}
-						<button
+					</div>
+					<button
 							type="button"
 							disabled={!sourceID || saving}
 							onClick={() => void toggleFollow()}
 							className={
-								'inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition disabled:opacity-50 ' +
+								'inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-semibold transition disabled:opacity-50 sm:w-auto ' +
 								(follow
 									? 'border-rose-300 bg-rose-50 text-rose-700'
 									: 'border-gray-200 bg-white text-ink-600 hover:border-rose-300 hover:text-rose-600')
@@ -162,9 +165,9 @@ export function AdultPerformerModal({
 							{saving ? <LoaderCircle size={16} className="animate-spin" /> : <Heart size={16} fill={follow ? 'currentColor' : 'none'} />}
 							{follow ? '已关注' : '关注女优'}
 						</button>
-					</aside>
+				</section>
 
-					<div className="min-w-0">
+				<div className="min-w-0">
 						{loading ? (
 							<div className="flex min-h-52 items-center justify-center gap-2 text-sm text-gray-500">
 								<LoaderCircle size={18} className="animate-spin" />
@@ -181,11 +184,11 @@ export function AdultPerformerModal({
 								page={page}
 								canNext={canNext}
 								priority
+								cardSize="large"
 								onPageChange={(delta) => setPage((current) => Math.max(1, current + delta))}
 								onSelect={onSelectWork}
 							/>
 						)}
-					</div>
 				</div>
 			</div>
 		</div>
