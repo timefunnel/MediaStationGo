@@ -9,9 +9,12 @@ const sections = [
   { key: 'third', label: '第三模块', provider: 'test' },
 ]
 
-test('发现模块始终按分区定义顺序展示', () => {
-  assert.deepEqual(orderSelectedSections(['third', 'first'], sections), ['first', 'third'])
-  assert.deepEqual(orderSelectedSections(['third', 'first', 'second'], sections), ['first', 'second', 'third'])
+test('发现模块保留用户排序并过滤无效或重复模块', () => {
+  assert.deepEqual(orderSelectedSections(['third', 'first'], sections), ['third', 'first'])
+  assert.deepEqual(
+    orderSelectedSections(['third', 'missing', 'first', 'third', 'second'], sections),
+    ['third', 'first', 'second'],
+  )
 })
 
 test('发现卡片展示完整发行日期而不是年份', () => {

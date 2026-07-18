@@ -181,6 +181,19 @@ export function DiscoverPage() {
 		))
 	}
 
+	const moveSectionPickerDraft = (key: string, direction: -1 | 1) => {
+		setSectionPickerDraft((current) => {
+			const index = current.indexOf(key)
+			const nextIndex = index + direction
+			if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current
+			const next = [...current]
+			const moved = next[index]
+			next[index] = next[nextIndex]
+			next[nextIndex] = moved
+			return next
+		})
+	}
+
 	const saveSectionSelection = async () => {
     if (selectionSaving) return
 		const next = orderSelectedSections(sectionPickerDraft, sections)
@@ -275,6 +288,7 @@ export function DiscoverPage() {
 				saving={selectionSaving}
 				error={selectionError}
 				onToggle={toggleSectionPickerDraft}
+				onMove={moveSectionPickerDraft}
 				onClose={() => setSectionPickerOpen(false)}
 				onSave={() => void saveSectionSelection()}
 			/>

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -25,11 +26,19 @@ func TestDiscoverPreferenceRepositoryIsUserScopedAndPersistsEmptySelection(t *te
 		t.Fatal(err)
 	}
 	row, err := repo.FindByUserID(t.Context(), "user-1")
-	if err != nil || row == nil || len(row.SelectedSections) != 2 {
+	if err != nil || row == nil || !slices.Equal(row.SelectedSections, preference.SelectedSections) {
 		t.Fatalf("row = %#v err=%v", row, err)
 	}
 	if other, err := repo.FindByUserID(t.Context(), "user-2"); err != nil || other != nil {
 		t.Fatalf("other = %#v err=%v", other, err)
+	}
+	preference.SelectedSections = []string{"adult_followed", "tmdb_trending_day"}
+	if err := repo.Upsert(t.Context(), preference); err != nil {
+		t.Fatal(err)
+	}
+	row, err = repo.FindByUserID(t.Context(), "user-1")
+	if err != nil || row == nil || !slices.Equal(row.SelectedSections, preference.SelectedSections) {
+		t.Fatalf("reordered row = %#v err=%v", row, err)
 	}
 	preference.SelectedSections = []string{}
 	if err := repo.Upsert(t.Context(), preference); err != nil {

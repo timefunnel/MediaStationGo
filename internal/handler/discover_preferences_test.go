@@ -2,14 +2,14 @@ package handler
 
 import "testing"
 
-func TestNormalizeDiscoverPreferenceSectionsOrdersAndValidates(t *testing.T) {
+func TestNormalizeDiscoverPreferenceSectionsPreservesUserOrderAndValidates(t *testing.T) {
 	sections := []discoverSectionDef{
 		{Key: "first"},
 		{Key: "second"},
 		{Key: "adult", Group: "adult"},
 	}
 	got, err := normalizeDiscoverPreferenceSections([]string{"second", "first", "second"}, sections, true, true)
-	if err != nil || len(got) != 2 || got[0] != "first" || got[1] != "second" {
+	if err != nil || len(got) != 2 || got[0] != "second" || got[1] != "first" {
 		t.Fatalf("got = %#v err=%v", got, err)
 	}
 	if _, err := normalizeDiscoverPreferenceSections([]string{"missing"}, sections, true, true); err == nil {

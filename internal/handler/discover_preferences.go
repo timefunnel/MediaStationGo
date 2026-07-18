@@ -26,12 +26,16 @@ func getDiscoverPreferenceHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"configured": false, "selected_sections": []string{}})
 			return
 		}
-		selected, _ := normalizeDiscoverPreferenceSections(
+		selected, err := normalizeDiscoverPreferenceSections(
 			row.SelectedSections,
 			enabledDiscoverSections(c.Request.Context(), svc),
 			discoverAdultAllowed(c, svc),
 			false,
 		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"configured": true, "selected_sections": selected})
 	}
 }
@@ -72,15 +76,14 @@ func normalizeDiscoverPreferenceSections(
 		return nil, fmt.Errorf("too many discover sections")
 	}
 	allowed := make(map[string]struct{}, len(sections))
-	order := make([]string, 0, len(sections))
 	for _, section := range sections {
 		if section.Group == "adult" && !adultAllowed {
 			continue
 		}
 		allowed[section.Key] = struct{}{}
-		order = append(order, section.Key)
 	}
 	selected := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
 	for _, value := range raw {
 		key := strings.TrimSpace(value)
 		if key == "adult_javdb_performers" {
@@ -98,13 +101,11 @@ func normalizeDiscoverPreferenceSections(
 			}
 			continue
 		}
-		selected[key] = struct{}{}
-	}
-	out := make([]string, 0, len(selected))
-	for _, key := range order {
-		if _, ok := selected[key]; ok {
-			out = append(out, key)
+		if _, exists := selected[key]; exists {
+			continue
 		}
+		selected[key] = struct{}{}
+		out = append(out, key)
 	}
 	return out, nil
 }

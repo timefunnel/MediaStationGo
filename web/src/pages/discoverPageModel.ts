@@ -129,8 +129,16 @@ function emptyDiscoverRowsCache(): CachedDiscoverRowsPayload {
 }
 
 export function orderSelectedSections(keys: string[], sections: DiscoverSection[]): string[] {
-  const selected = new Set(keys)
-  return sections.map((section) => section.key).filter((key) => selected.has(key))
+  const available = new Set(sections.map((section) => section.key))
+  const selected = new Set<string>()
+  const ordered: string[] = []
+  for (const value of keys) {
+    const key = value.trim()
+    if (!available.has(key) || selected.has(key)) continue
+    selected.add(key)
+    ordered.push(key)
+  }
+  return ordered
 }
 
 export function buildSubscribeKeyword(item: DiscoverItem): string {
