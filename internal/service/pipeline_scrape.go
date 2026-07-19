@@ -72,8 +72,7 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 				continue
 			}
 			match := matches[0]
-			manualReq := pipelineManualScrapeRequestFromMatch(match)
-			refreshed, err := s.scraper.ApplyManualMatchWithOptions(ctx, mediaID, manualReq, options)
+			refreshed, err := s.applySelectedMatch(ctx, media, match, options)
 			if err != nil {
 				return PipelineScrapeResult{}, err
 			}
@@ -110,6 +109,66 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 		result.AppliedCount = 1 + propagated
 	}
 	return result, nil
+}
+
+func (s *PipelineScrapeService) applySelectedMatch(
+	ctx context.Context,
+	media *model.Media,
+	match ExternalMediaResult,
+	options ScrapeOptions,
+) (*model.Media, error) {
+	if !pipelineResolvedFD2Match(match) {
+		return s.scraper.ApplyManualMatchWithOptions(
+			ctx,
+			media.ID,
+			pipelineManualScrapeRequestFromMatch(match),
+			options,
+		)
+	}
+	lib, _ := s.repos.Library.FindByID(ctx, media.LibraryID)
+	if err := s.scraper.applyProviderMatchWithOptions(ctx, media, lib, pipelineMatchFromExternalResult(match), options); err != nil {
+		return nil, err
+	}
+	return s.repos.Media.FindByID(ctx, media.ID)
+}
+
+func pipelineResolvedFD2Match(match ExternalMediaResult) bool {
+	if !strings.EqualFold(strings.TrimSpace(match.MediaType), "adult") || adultFC2Number(match.OriginalName) == "" {
+		return false
+	}
+	for _, genre := range match.Genres {
+		if strings.EqualFold(strings.TrimSpace(genre), "fd2ppv") {
+			return true
+		}
+	}
+	return false
+}
+
+func pipelineMatchFromExternalResult(match ExternalMediaResult) *Match {
+	return &Match{
+		TMDbID:          match.TMDbID,
+		BangumiID:       match.BangumiID,
+		DoubanID:        match.DoubanID,
+		TheTVDBID:       match.TheTVDBID,
+		MediaType:       match.MediaType,
+		Title:           match.Title,
+		OriginalName:    match.OriginalName,
+		Overview:        match.Overview,
+		PosterURL:       match.PosterURL,
+		BackdropURL:     match.BackdropURL,
+		PreviewImages:   append([]string(nil), match.PreviewImages...),
+		Year:            match.Year,
+		ReleaseDate:     match.ReleaseDate,
+		Rating:          match.Rating,
+		DurationMinutes: match.DurationMinutes,
+		Maker:           match.Maker,
+		Languages:       append([]string(nil), match.Languages...),
+		Countries:       append([]string(nil), match.Countries...),
+		Genres:          append([]string(nil), match.Genres...),
+		Actors:          append([]string(nil), match.Actors...),
+		People:          append([]PersonMetadata(nil), match.People...),
+		NSFW:            match.NSFW,
+	}
 }
 
 func (s *PipelineScrapeService) propagateEpisodeMatch(ctx context.Context, media *model.Media, refreshed *model.Media, req PipelineScrapeRequest) (int, error) {
