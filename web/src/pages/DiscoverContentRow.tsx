@@ -9,6 +9,8 @@ const discoverRowPreloadMargin = '0px'
 const discoverCardPreloadMargin = '0px'
 const discoverPriorityPosterCount = 3
 
+export type DiscoverRefreshStatus = 'loading' | 'success' | 'error'
+
 const discoverCardVisibilityCallbacks = new Map<Element, () => void>()
 let discoverCardVisibilityObserver: IntersectionObserver | null = null
 
@@ -59,6 +61,7 @@ export function ContentRow({
   imageVersion,
   refreshImageVersion,
   refreshing = false,
+  refreshStatus,
   priority = false,
   cardSize = 'default',
   onPageChange,
@@ -72,6 +75,7 @@ export function ContentRow({
   imageVersion?: string
   refreshImageVersion?: string
   refreshing?: boolean
+  refreshStatus?: DiscoverRefreshStatus
   priority?: boolean
   cardSize?: 'default' | 'large'
   onPageChange?: (delta: number) => void
@@ -111,16 +115,12 @@ export function ContentRow({
         {(onRefresh || onPageChange) && (
           <div className="flex items-center gap-2">
             {onRefresh && (
-              <button
-                type="button"
-                aria-label={`${title} 刷新`}
-                title="只刷新当前模块"
-                disabled={refreshing}
-                onClick={onRefresh}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-              </button>
+              <DiscoverRefreshControl
+                title={title}
+                refreshing={refreshing}
+                status={refreshStatus}
+                onRefresh={onRefresh}
+              />
             )}
             {onPageChange && (
               <>
@@ -169,6 +169,44 @@ export function ContentRow({
             ))}
       </div>
     </section>
+  )
+}
+
+export function DiscoverRefreshControl({
+  title,
+  refreshing,
+  status,
+  onRefresh,
+}: {
+  title: string
+  refreshing: boolean
+  status?: DiscoverRefreshStatus
+  onRefresh: () => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        aria-label={discoverRefreshButtonLabel(title, status)}
+        title={discoverRefreshButtonTitle(status)}
+        disabled={refreshing || status === 'loading'}
+        onClick={onRefresh}
+        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40 ${
+          status === 'success'
+            ? 'border-emerald-300 text-emerald-600'
+            : status === 'error'
+              ? 'border-red-300 text-red-500'
+              : 'border-gray-200 text-ink-100'
+        }`}
+      >
+        <RefreshCw size={15} className={refreshing || status === 'loading' ? 'animate-spin' : ''} />
+      </button>
+      {status && (
+        <span aria-live="polite" className={`text-xs font-semibold ${discoverRefreshStatusClassName(status)}`}>
+          {discoverRefreshStatusLabel(status)}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -362,4 +400,30 @@ function DiscoverCard({
 
 function discoverKey(item: DiscoverItem, index: number): string {
 	return `${item.source || 'source'}:${item.provider_id || item.tmdb_id || item.douban_id || item.bangumi_id || item.title}:${index}`
+}
+
+function discoverRefreshButtonLabel(title: string, status?: DiscoverRefreshStatus): string {
+  if (status === 'loading') return `${title} 正在刷新`
+  if (status === 'success') return `${title} 已刷新`
+  if (status === 'error') return `${title} 刷新失败`
+  return `${title} 刷新`
+}
+
+function discoverRefreshButtonTitle(status?: DiscoverRefreshStatus): string {
+  if (status === 'loading') return '正在刷新当前模块'
+  if (status === 'success') return '当前模块已刷新，点击可再次刷新'
+  if (status === 'error') return '当前模块刷新失败，点击重试'
+  return '只刷新当前模块'
+}
+
+function discoverRefreshStatusLabel(status: DiscoverRefreshStatus): string {
+  if (status === 'loading') return '正在刷新…'
+  if (status === 'success') return '已刷新'
+  return '刷新失败'
+}
+
+function discoverRefreshStatusClassName(status: DiscoverRefreshStatus): string {
+  if (status === 'loading') return 'text-brand-500'
+  if (status === 'success') return 'text-emerald-600'
+  return 'text-red-500'
 }

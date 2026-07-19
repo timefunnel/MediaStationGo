@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { discoverAPI, type DiscoverItem, type DiscoverSection } from '../api/discover'
 import { AdultPerformerModal } from './AdultPerformerModal'
-import { ContentRow, DiscoverSkeleton } from './DiscoverContentRow'
+import { ContentRow, DiscoverSkeleton, type DiscoverRefreshStatus } from './DiscoverContentRow'
 import { DiscoverDetailModal } from './DiscoverDetailModal'
 import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './DiscoverPageSections'
 import { DiscoverSectionPickerModal } from './DiscoverSectionPickerModal'
@@ -25,6 +25,7 @@ export function DiscoverPage() {
   const [rowPages, setRowPages] = useState<Record<string, number>>({})
   const [rowCanNext, setRowCanNext] = useState<Record<string, boolean>>({})
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
+  const [rowRefreshStatus, setRowRefreshStatus] = useState<Record<string, DiscoverRefreshStatus>>({})
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [sectionsReady, setSectionsReady] = useState(false)
   const [selectionSaving, setSelectionSaving] = useState(false)
@@ -41,15 +42,16 @@ export function DiscoverPage() {
 	const modalSequence = useRef(0)
 	const rowPagesRef = useRef<Record<string, number>>({})
 	const rowRequestSequences = useRef<Record<string, number>>({})
+	const rowRefreshClearTimers = useRef<Record<string, number>>({})
 
-	const loadDiscoverSection = useCallback(async (key: string, page: number, refresh = false) => {
+	const loadDiscoverSection = useCallback(async (key: string, page: number, refresh = false): Promise<boolean | undefined> => {
 		const sequence = (rowRequestSequences.current[key] ?? 0) + 1
 		rowRequestSequences.current[key] = sequence
 		setRowLoading((current) => ({ ...current, [key]: true }))
 		setRowErrors((current) => updateDiscoverRowError(current, key))
 		try {
 			const feed = await discoverAPI.feed([key], page, { refresh })
-			if (rowRequestSequences.current[key] !== sequence) return
+			if (rowRequestSequences.current[key] !== sequence) return undefined
 			const meta = feed.meta[key]
 			const issue = meta?.error || meta?.warning
 			const nextItems = feed.items[key] ?? []
@@ -70,18 +72,26 @@ export function DiscoverPage() {
 				writeCachedDiscoverRow(key, page, nextItems, nextCanNext)
 			}
 			setRowErrors((current) => updateDiscoverRowError(current, key, issue))
+			return !issue
 		} catch (error) {
-			if (rowRequestSequences.current[key] !== sequence) return
+			if (rowRequestSequences.current[key] !== sequence) return undefined
 			const message = discoverRequestErrorMessage(error)
 			setRows((current) => ((current[key]?.length ?? 0) > 0 ? current : { ...current, [key]: [] }))
 			setRowCanNext((current) => (key in current ? current : { ...current, [key]: false }))
 			setRowErrors((current) => ({ ...current, [key]: message }))
+			return false
 		} finally {
 			if (rowRequestSequences.current[key] === sequence) {
 				setRowLoading((current) => ({ ...current, [key]: false }))
 			}
 		}
 	}, [])
+
+  useEffect(() => () => {
+    for (const timer of Object.values(rowRefreshClearTimers.current)) {
+      window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -149,6 +159,9 @@ export function DiscoverPage() {
       selected.filter((key) => key in current).map((key) => [key, current[key]]),
     ))
     setRowErrors((current) => Object.fromEntries(
+      selected.filter((key) => key in current).map((key) => [key, current[key]]),
+    ))
+    setRowRefreshStatus((current) => Object.fromEntries(
       selected.filter((key) => key in current).map((key) => [key, current[key]]),
     ))
     for (const key of selected) {
@@ -227,7 +240,34 @@ export function DiscoverPage() {
   }
 
   const refreshDiscoverSection = (key: string) => {
-    void loadDiscoverSection(key, rowPagesRef.current[key] ?? 1, true)
+    const existingTimer = rowRefreshClearTimers.current[key]
+    if (existingTimer) {
+      window.clearTimeout(existingTimer)
+      delete rowRefreshClearTimers.current[key]
+    }
+    setRowRefreshStatus((current) => ({ ...current, [key]: 'loading' }))
+    void loadDiscoverSection(key, rowPagesRef.current[key] ?? 1, true).then((success) => {
+      if (success === undefined) {
+        setRowRefreshStatus((current) => {
+          if (current[key] !== 'loading') return current
+          const next = { ...current }
+          delete next[key]
+          return next
+        })
+        return
+      }
+      const status: DiscoverRefreshStatus = success ? 'success' : 'error'
+      setRowRefreshStatus((current) => ({ ...current, [key]: status }))
+      rowRefreshClearTimers.current[key] = window.setTimeout(() => {
+        delete rowRefreshClearTimers.current[key]
+        setRowRefreshStatus((current) => {
+          if (current[key] !== status) return current
+          const next = { ...current }
+          delete next[key]
+          return next
+        })
+      }, 2500)
+    })
   }
 
 	const searchDiscoverCatalog = async () => {
@@ -373,6 +413,7 @@ export function DiscoverPage() {
           selected={selected}
           rows={rows}
           rowLoading={rowLoading}
+          rowRefreshStatus={rowRefreshStatus}
           rowErrors={rowErrors}
           rowPages={rowPages}
           rowCanNext={rowCanNext}

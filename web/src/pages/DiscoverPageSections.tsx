@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowUp, Layers3, List, LoaderCircle, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowUp, Layers3, List, LoaderCircle, Search, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
-import { ContentRow } from './DiscoverContentRow'
+import { ContentRow, DiscoverRefreshControl, type DiscoverRefreshStatus } from './DiscoverContentRow'
 
 type SectionLabel = (key: string) => string
 
@@ -100,6 +100,7 @@ export function DiscoverResults({
   rows,
   rowLoading,
   rowErrors,
+  rowRefreshStatus,
   rowPages,
   rowCanNext,
   loading,
@@ -113,6 +114,7 @@ export function DiscoverResults({
   rows: Record<string, DiscoverItem[]>
   rowLoading: Record<string, boolean>
   rowErrors: Record<string, string>
+  rowRefreshStatus: Record<string, DiscoverRefreshStatus>
   rowPages: Record<string, number>
   rowCanNext: Record<string, boolean>
   loading: boolean
@@ -239,7 +241,11 @@ export function DiscoverResults({
                     id={discoverSectionID(key)}
                     className="scroll-mt-16"
                   >
-                    <DiscoverRowSkeleton title={sectionLabel(key)} />
+                    <DiscoverRowSkeleton
+                      title={sectionLabel(key)}
+                      refreshStatus={rowRefreshStatus[key]}
+                      onRefresh={() => onRefresh(key)}
+                    />
                   </div>
                 )
               }
@@ -255,6 +261,7 @@ export function DiscoverResults({
                       title={sectionLabel(key)}
                       message={rowErrors[key]}
                       refreshing={Boolean(rowLoading[key])}
+                      refreshStatus={rowRefreshStatus[key]}
                       onRefresh={() => onRefresh(key)}
                     />
                   </div>
@@ -275,6 +282,7 @@ export function DiscoverResults({
                   page={rowPages[key] ?? 1}
                   canNext={Boolean(rowCanNext[key])}
                   refreshing={Boolean(rowLoading[key])}
+                  refreshStatus={rowRefreshStatus[key]}
                   priority={rowIndex === 0}
                   onPageChange={(delta) => onPageChange(key, delta)}
                   onRefresh={() => onRefresh(key)}
@@ -420,27 +428,25 @@ function DiscoverUnavailableRow({
   title,
   message,
   refreshing,
+  refreshStatus,
   onRefresh,
 }: {
   title: string
   message: string
   refreshing: boolean
+  refreshStatus?: DiscoverRefreshStatus
   onRefresh: () => void
 }) {
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
-        <button
-          type="button"
-          aria-label={`${title} 刷新`}
-          title="只刷新当前模块"
-          disabled={refreshing}
-          onClick={onRefresh}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-        </button>
+        <DiscoverRefreshControl
+          title={title}
+          refreshing={refreshing}
+          status={refreshStatus}
+          onRefresh={onRefresh}
+        />
       </div>
       <DiscoverRowWarning message={message} />
     </section>
@@ -469,10 +475,28 @@ function DiscoverNoContent() {
   )
 }
 
-function DiscoverRowSkeleton({ title }: { title: string }) {
+function DiscoverRowSkeleton({
+  title,
+  refreshStatus,
+  onRefresh,
+}: {
+  title: string
+  refreshStatus?: DiscoverRefreshStatus
+  onRefresh: () => void
+}) {
   return (
     <section className="space-y-4">
-      <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
+        {refreshStatus && (
+          <DiscoverRefreshControl
+            title={title}
+            refreshing
+            status={refreshStatus}
+            onRefresh={onRefresh}
+          />
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
         {Array.from({ length: 24 }, (_, index) => index).map((item) => (
           <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
