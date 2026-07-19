@@ -75,10 +75,8 @@ export function useLibraryResourceImports(libraryID: string, userID: string, onL
     }
 
     void tick()
-    const timer = window.setInterval(tick, 3_000)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
     }
   }, [acceptTasks, libraryID, userID])
 
@@ -86,6 +84,37 @@ export function useLibraryResourceImports(libraryID: string, userID: string, onL
     () => tasks.filter((task) => isResourceImportActive(task.status)),
     [tasks],
   )
+
+  useEffect(() => {
+    if (!libraryID || activeTasks.length === 0) return
+    let cancelled = false
+    let polling = false
+
+    const tick = async () => {
+      if (cancelled || polling || document.visibilityState === 'hidden') return
+      polling = true
+      try {
+        const incoming = currentUserTasks(await resourceImportsAPI.listLibrary(libraryID), userID)
+        if (cancelled) return
+        acceptTasks(incoming, true)
+        setError('')
+      } catch (requestError) {
+        if (!cancelled) setError(resourceImportError(requestError, '资源入库任务加载失败'))
+      } finally {
+        polling = false
+      }
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    const timer = window.setInterval(() => void tick(), 3_000)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [acceptTasks, activeTasks.length, libraryID, userID])
 
   const acceptTask = useCallback((task: ResourceImportTask) => acceptTasks([task]), [acceptTasks])
   const dismissCompletedTask = useCallback(() => setLatestCompletedTask(null), [])
