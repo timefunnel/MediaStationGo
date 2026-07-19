@@ -29,6 +29,7 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 		PosterPath       string  `json:"poster_path"`
 		BackdropPath     string  `json:"backdrop_path"`
 		ReleaseDate      string  `json:"release_date"`
+		Runtime          int     `json:"runtime"`
 		VoteAverage      float32 `json:"vote_average"`
 		Genres           []struct {
 			Name string `json:"name"`
@@ -47,13 +48,14 @@ func (t *TMDbProvider) GetMovieMatch(ctx context.Context, tmdbID int) (*Match, e
 		return nil, err
 	}
 	m := &Match{
-		TMDbID:       r.ID,
-		MediaType:    "movie",
-		Title:        r.Title,
-		OriginalName: r.OriginalTitle,
-		Overview:     r.Overview,
-		Rating:       r.VoteAverage,
-		Languages:    nonEmptyStrings(r.OriginalLanguage),
+		TMDbID:          r.ID,
+		MediaType:       "movie",
+		Title:           r.Title,
+		OriginalName:    r.OriginalTitle,
+		Overview:        r.Overview,
+		Rating:          r.VoteAverage,
+		DurationMinutes: r.Runtime,
+		Languages:       nonEmptyStrings(r.OriginalLanguage),
 	}
 	if m.Title == "" {
 		m.Title = r.OriginalTitle
@@ -109,6 +111,7 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 		PosterPath       string   `json:"poster_path"`
 		BackdropPath     string   `json:"backdrop_path"`
 		FirstAirDate     string   `json:"first_air_date"`
+		EpisodeRunTime   []int    `json:"episode_run_time"`
 		VoteAverage      float32  `json:"vote_average"`
 		Genres           []struct {
 			Name string `json:"name"`
@@ -132,6 +135,12 @@ func (t *TMDbProvider) GetTVMatch(ctx context.Context, tmdbID int) (*Match, erro
 		Rating:       r.VoteAverage,
 		Languages:    nonEmptyStrings(r.OriginalLanguage),
 		Countries:    deduplicate(r.OriginCountry),
+	}
+	for _, runtime := range r.EpisodeRunTime {
+		if runtime > 0 {
+			m.DurationMinutes = runtime
+			break
+		}
 	}
 	if m.Title == "" {
 		m.Title = r.OriginalName

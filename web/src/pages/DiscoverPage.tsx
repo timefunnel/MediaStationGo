@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { discoverAPI, type DiscoverItem, type DiscoverSection } from '../api/discover'
 import { AdultPerformerModal } from './AdultPerformerModal'
@@ -31,9 +31,7 @@ export function DiscoverPage() {
   const [selectionError, setSelectionError] = useState('')
 	const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
 	const [sectionPickerDraft, setSectionPickerDraft] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
   const [modalStack, setModalStack] = useState<DiscoverModalEntry[]>([])
-  const [reloadSeq, setReloadSeq] = useState(0)
 	const [searchQuery, setSearchQuery] = useState('')
 	const [searchItems, setSearchItems] = useState<DiscoverItem[]>([])
 	const [searchLoading, setSearchLoading] = useState(false)
@@ -41,6 +39,49 @@ export function DiscoverPage() {
 	const [searchDone, setSearchDone] = useState(false)
 	const searchSequence = useRef(0)
 	const modalSequence = useRef(0)
+	const rowPagesRef = useRef<Record<string, number>>({})
+	const rowRequestSequences = useRef<Record<string, number>>({})
+
+	const loadDiscoverSection = useCallback(async (key: string, page: number, refresh = false) => {
+		const sequence = (rowRequestSequences.current[key] ?? 0) + 1
+		rowRequestSequences.current[key] = sequence
+		setRowLoading((current) => ({ ...current, [key]: true }))
+		setRowErrors((current) => updateDiscoverRowError(current, key))
+		try {
+			const feed = await discoverAPI.feed([key], page, { refresh })
+			if (rowRequestSequences.current[key] !== sequence) return
+			const meta = feed.meta[key]
+			const issue = meta?.error || meta?.warning
+			const nextItems = feed.items[key] ?? []
+			const nextCanNext = Boolean(meta?.has_next)
+			setRows((current) => {
+				if (meta?.error && nextItems.length === 0 && (current[key]?.length ?? 0) > 0) {
+					return current
+				}
+				return { ...current, [key]: nextItems }
+			})
+			setRowCanNext((current) => {
+				if (meta?.error && nextItems.length === 0 && key in current) {
+					return current
+				}
+				return { ...current, [key]: nextCanNext }
+			})
+			if (!issue) {
+				writeCachedDiscoverRow(key, page, nextItems, nextCanNext)
+			}
+			setRowErrors((current) => updateDiscoverRowError(current, key, issue))
+		} catch (error) {
+			if (rowRequestSequences.current[key] !== sequence) return
+			const message = discoverRequestErrorMessage(error)
+			setRows((current) => ((current[key]?.length ?? 0) > 0 ? current : { ...current, [key]: [] }))
+			setRowCanNext((current) => (key in current ? current : { ...current, [key]: false }))
+			setRowErrors((current) => ({ ...current, [key]: message }))
+		} finally {
+			if (rowRequestSequences.current[key] === sequence) {
+				setRowLoading((current) => ({ ...current, [key]: false }))
+			}
+		}
+	}, [])
 
   useEffect(() => {
     let cancelled = false
@@ -59,7 +100,9 @@ export function DiscoverPage() {
         setSections(items)
         const cached = readCachedDiscoverRows(nextSelected)
         setSelected(nextSelected)
-        setRowPages(Object.fromEntries(nextSelected.map((key) => [key, 1])))
+        const nextPages = Object.fromEntries(nextSelected.map((key) => [key, 1]))
+        rowPagesRef.current = nextPages
+        setRowPages(nextPages)
         setRows(cached.rows)
         setRowCanNext(cached.rowCanNext)
         setSectionsReady(true)
@@ -91,78 +134,38 @@ export function DiscoverPage() {
       return
     }
     if (selected.length === 0) {
+      for (const key of Object.keys(rowRequestSequences.current)) {
+        rowRequestSequences.current[key] += 1
+      }
       setRows({})
       setRowLoading({})
       setRowCanNext({})
       setRowErrors({})
-      setLoading(false)
       return
     }
-    let cancelled = false
-    setLoading(true)
-    setRowErrors({})
-    setRowLoading(Object.fromEntries(selected.map((key) => [key, true])))
-    setRows((current) => {
-      const next: Record<string, DiscoverItem[]> = {}
-      for (const key of selected) {
-        next[key] = current[key] ?? []
-      }
-      return next
-    })
-    let pending = selected.length
-    const markDone = () => {
-      pending -= 1
-      if (!cancelled && pending <= 0) setLoading(false)
-    }
+		const requestSequences = rowRequestSequences.current
+    setRows((current) => Object.fromEntries(selected.map((key) => [key, current[key] ?? []])))
+    setRowCanNext((current) => Object.fromEntries(
+      selected.filter((key) => key in current).map((key) => [key, current[key]]),
+    ))
+    setRowErrors((current) => Object.fromEntries(
+      selected.filter((key) => key in current).map((key) => [key, current[key]]),
+    ))
     for (const key of selected) {
-      const page = rowPages[key] ?? 1
-      discoverAPI
-        .feed([key], page)
-        .then((feed) => {
-          if (cancelled) return
-          const error = feed.meta[key]?.error
-          const nextItems = feed.items[key] ?? []
-          const nextCanNext = Boolean(feed.meta[key]?.has_next)
-          setRows((current) => {
-            if (error && nextItems.length === 0 && (current[key]?.length ?? 0) > 0) {
-              return current
-            }
-            return { ...current, [key]: nextItems }
-          })
-          setRowCanNext((current) => {
-            if (error && nextItems.length === 0 && key in current) {
-              return current
-            }
-            return { ...current, [key]: nextCanNext }
-          })
-          if (!error) {
-            writeCachedDiscoverRow(key, page, nextItems, nextCanNext)
-          }
-          setRowErrors((current) => updateDiscoverRowError(current, key, error))
-        })
-        .catch((err) => {
-          if (cancelled) return
-          const message = discoverRequestErrorMessage(err)
-          setRows((current) => ((current[key]?.length ?? 0) > 0 ? current : { ...current, [key]: [] }))
-          setRowCanNext((current) => (key in current ? current : { ...current, [key]: false }))
-          setRowErrors((current) => ({ ...current, [key]: message }))
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setRowLoading((current) => ({ ...current, [key]: false }))
-          }
-          markDone()
-        })
+      void loadDiscoverSection(key, rowPagesRef.current[key] ?? 1)
     }
     return () => {
-      cancelled = true
+      for (const key of selected) {
+        requestSequences[key] = (requestSequences[key] ?? 0) + 1
+      }
     }
-  }, [sections, sectionsReady, selected, rowPages, reloadSeq])
+  }, [loadDiscoverSection, sections, sectionsReady, selected])
 
   const sectionMap = useMemo(
     () => new Map(sections.map((section) => [section.key, section])),
     [sections],
   )
+  const loading = selected.some((key) => Boolean(rowLoading[key]))
   const hasContent = selected.some((key) => (rows[key] ?? []).length > 0)
   const sectionLabel = (key: string) => sectionMap.get(key)?.label ?? key
 	const searchGroups = useMemo(() => groupDiscoverSearchItems(searchItems), [searchItems])
@@ -200,9 +203,11 @@ export function DiscoverPage() {
 		const savedSelection = orderSelectedSections(saved.selected_sections, sections)
       setSelected(savedSelection)
 		setSectionPickerDraft(savedSelection)
-		setRowPages((current) => Object.fromEntries(
-			savedSelection.map((key) => [key, current[key] ?? 1]),
-		))
+		setRowPages((current) => {
+			const nextPages = Object.fromEntries(savedSelection.map((key) => [key, current[key] ?? 1]))
+			rowPagesRef.current = nextPages
+			return nextPages
+		})
 		setSectionPickerOpen(false)
     } catch (error) {
       setSelectionError(discoverPreferenceErrorMessage(error))
@@ -212,15 +217,17 @@ export function DiscoverPage() {
   }
 
   const changeDiscoverPage = (key: string, delta: number) => {
-    setRowPages((current) => {
-      const nextPage = Math.max(1, (current[key] ?? 1) + delta)
-      if (nextPage === (current[key] ?? 1)) return current
-      return { ...current, [key]: nextPage }
-    })
+    const currentPage = rowPagesRef.current[key] ?? 1
+    const nextPage = Math.max(1, currentPage + delta)
+    if (nextPage === currentPage) return
+    const nextPages = { ...rowPagesRef.current, [key]: nextPage }
+    rowPagesRef.current = nextPages
+    setRowPages(nextPages)
+    void loadDiscoverSection(key, nextPage)
   }
 
-  const refreshDiscover = () => {
-    setReloadSeq((current) => current + 1)
+  const refreshDiscoverSection = (key: string) => {
+    void loadDiscoverSection(key, rowPagesRef.current[key] ?? 1, true)
   }
 
 	const searchDiscoverCatalog = async () => {
@@ -285,7 +292,9 @@ export function DiscoverPage() {
 				? { ...entry, item: { ...entry.item, followed } }
 				: entry
 		)))
-		setReloadSeq((current) => current + 1)
+		for (const key of ['adult_followed_performers', 'adult_followed']) {
+			if (selected.includes(key)) refreshDiscoverSection(key)
+		}
 	}
 
   return (
@@ -293,12 +302,10 @@ export function DiscoverPage() {
       <DiscoverHeader
         selectedCount={selected.length}
         sectionsReady={sectionsReady}
-        loading={loading}
 		selectionSaving={selectionSaving}
 		searchQuery={searchQuery}
-		searchLoading={searchLoading}
+        searchLoading={searchLoading}
         searchActive={searchActive}
-        onRefresh={refreshDiscover}
 		onOpenSectionPicker={openSectionPicker}
 		onSearchQueryChange={setSearchQuery}
 		onSearch={() => void searchDiscoverCatalog()}
@@ -373,6 +380,7 @@ export function DiscoverPage() {
           hasContent={hasContent}
           sectionLabel={sectionLabel}
           onPageChange={changeDiscoverPage}
+          onRefresh={refreshDiscoverSection}
           onSelect={openRootModal}
         />
       )}

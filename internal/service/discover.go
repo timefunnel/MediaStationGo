@@ -9,6 +9,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -74,6 +75,7 @@ func (d *DiscoverService) TMDbSection(ctx context.Context, key string, pages ...
 			PosterURL:        item.PosterURL,
 			BackdropURL:      item.BackdropURL,
 			Year:             item.Year,
+			ReleaseDate:      item.ReleaseDate,
 			Rating:           item.Rating,
 			TMDbID:           item.TMDbID,
 			SubscribeKeyword: buildSubscribeKeyword(item.Title, item.Year),
@@ -81,6 +83,47 @@ func (d *DiscoverService) TMDbSection(ctx context.Context, key string, pages ...
 		})
 	}
 	return out, nil
+}
+
+// TMDbItemDetail returns enriched metadata for one Discover item. Results use
+// the same six-hour cache as Discover sections so repeatedly opening a detail
+// does not repeatedly request TMDb.
+func (d *DiscoverService) TMDbItemDetail(ctx context.Context, mediaType string, tmdbID int) (ExternalMediaResult, error) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType != "movie" && mediaType != "tv" {
+		return ExternalMediaResult{}, fmt.Errorf("unsupported tmdb media type: %s", mediaType)
+	}
+	if tmdbID <= 0 {
+		return ExternalMediaResult{}, errors.New("invalid tmdb id")
+	}
+	if d == nil || d.tmdb == nil {
+		return ExternalMediaResult{}, errors.New("tmdb provider is unavailable")
+	}
+
+	cacheKey := fmt.Sprintf("detail:tmdb:%s:%d", mediaType, tmdbID)
+	if cached, ok := d.CachedSection(cacheKey, 1); ok && len(cached) > 0 {
+		return cached[0], nil
+	}
+
+	var (
+		match *Match
+		err   error
+	)
+	if mediaType == "tv" {
+		match, err = d.tmdb.GetTVMatch(ctx, tmdbID)
+	} else {
+		match, err = d.tmdb.GetMovieMatch(ctx, tmdbID)
+	}
+	if err != nil {
+		return ExternalMediaResult{}, err
+	}
+	if match == nil || strings.TrimSpace(match.Title) == "" {
+		return ExternalMediaResult{}, errors.New("tmdb detail returned no usable metadata")
+	}
+
+	item := externalMediaResultFromMatch("tmdb", mediaType, match)
+	d.RememberSection(cacheKey, 1, []ExternalMediaResult{item})
+	return item, nil
 }
 
 // fetch is the shared helper that paginates page=1 only — that's all the
@@ -170,6 +213,7 @@ func (d *DiscoverService) Fetch(ctx context.Context, path string, pages ...int) 
 		if date == "" {
 			date = r.FirstAirDate
 		}
+		m.ReleaseDate = normalizeReleaseDate(date)
 		if len(date) >= 4 {
 			_, _ = fmt.Sscanf(date[:4], "%d", &m.Year)
 		}

@@ -12,6 +12,7 @@ export interface DiscoverItem extends Partial<Media> {
   title: string
   poster_url?: string
   backdrop_url?: string
+  preview_images?: string[]
   overview?: string
   year?: number
   rating?: number
@@ -62,6 +63,7 @@ export interface DiscoverFeedMeta {
   duration_ms?: number
   error?: string
   warning?: string
+  cached?: boolean
   stale?: boolean
   disabled?: boolean
 }
@@ -108,10 +110,10 @@ export const discoverAPI = {
     api
       .put<DiscoverPreference>('/discover/preferences', { selected_sections: selectedSections })
       .then((r) => r.data),
-  feed: (sectionKeys: string[], page = 1): Promise<DiscoverFeedResult> =>
+  feed: (sectionKeys: string[], page = 1, options?: { refresh?: boolean }): Promise<DiscoverFeedResult> =>
     api
       .get<Record<string, DiscoverItem[] | DiscoverFeedMeta | Record<string, DiscoverFeedMeta> | null>>('/discover/feed', {
-        params: { sections: sectionKeys.join(','), page },
+        params: { sections: sectionKeys.join(','), page, refresh: options?.refresh || undefined },
       })
       .then((r) => {
         const raw = r.data
@@ -127,6 +129,13 @@ export const discoverAPI = {
 		api
 			.get<DiscoverSearchResult>('/discover/search', { params: { q: query } })
 			.then((r) => ({ items: r.data.items ?? [], errors: r.data.errors ?? {} })),
+	itemDetail: (source: string, providerID: string | number, mediaType: string) =>
+		api
+			.get<DiscoverItem>(
+				`/discover/items/${encodeURIComponent(source)}/${encodeURIComponent(String(providerID))}`,
+				{ params: { media_type: mediaType } },
+			)
+			.then((r) => r.data),
 	adultFollows: () =>
 		api.get<{ items: AdultPerformerFollow[] }>('/discover/adult/follows').then((r) => r.data.items ?? []),
 	followAdultPerformer: (input: {

@@ -45,8 +45,38 @@ export function discoverItemSource(item: DiscoverItem): string {
   return item.source || (item.bangumi_id ? 'bangumi' : item.douban_id ? 'douban' : 'tmdb')
 }
 
+export function discoverMediaTypeLabel(mediaType?: string): string {
+  switch (mediaType?.trim().toLowerCase()) {
+    case 'movie':
+      return '电影'
+    case 'tv':
+      return '剧集'
+    case 'anime':
+      return '动漫'
+    case 'adult':
+      return '成人作品'
+    default:
+      return mediaType?.trim() || '推荐'
+  }
+}
+
 export function discoverCardMetaText(item: DiscoverItem): string {
-  return [item.media_type, item.release_date?.trim()].filter(Boolean).join(' · ') || '推荐'
+  const releaseText = item.release_date?.trim() || (item.year && item.year > 0 ? String(item.year) : '')
+  return [discoverMediaTypeLabel(item.media_type), releaseText].filter(Boolean).join(' · ')
+}
+
+export function discoverCardSecondaryText(item: DiscoverItem): string {
+  if (item.media_type === 'adult' || item.media_type === 'person') return ''
+  const originalName = item.original_name?.trim()
+  if (originalName && originalName.toLowerCase() !== item.title.trim().toLowerCase()) {
+    return originalName
+  }
+  if (item.rating && item.rating > 0) {
+    const source = discoverItemSource(item).toLowerCase()
+    const ratingLabel = source === 'douban' ? '豆瓣评分' : source === 'bangumi' ? 'Bangumi 评分' : '评分'
+    return `${ratingLabel} ${item.rating.toFixed(1)}`
+  }
+  return item.overview?.trim() || ''
 }
 
 export function readCachedDiscoverRows(selected: string[]): {

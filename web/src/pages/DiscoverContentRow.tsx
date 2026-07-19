@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, ChevronLeft, ChevronRight, Heart, Info } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Heart, ImageOff, Info, RefreshCw } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
-import { discoverCardMetaText, discoverItemSource } from './discoverPageModel'
+import { discoverCardMetaText, discoverCardSecondaryText, discoverItemSource } from './discoverPageModel'
 
 const discoverRowPreloadMargin = '0px'
 const discoverCardPreloadMargin = '0px'
@@ -58,9 +58,11 @@ export function ContentRow({
   canNext = false,
   imageVersion,
   refreshImageVersion,
+  refreshing = false,
   priority = false,
   cardSize = 'default',
   onPageChange,
+  onRefresh,
   onSelect,
 }: {
   title: string
@@ -69,9 +71,11 @@ export function ContentRow({
   canNext?: boolean
   imageVersion?: string
   refreshImageVersion?: string
+  refreshing?: boolean
   priority?: boolean
   cardSize?: 'default' | 'large'
   onPageChange?: (delta: number) => void
+  onRefresh?: () => void
   onSelect: (item: DiscoverItem) => void
 }) {
   const rowRef = useRef<HTMLElement>(null)
@@ -104,27 +108,43 @@ export function ContentRow({
     <section ref={rowRef} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
-        {onPageChange && (
+        {(onRefresh || onPageChange) && (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label={`${title} 上一页`}
-              disabled={page <= 1}
-              onClick={() => onPageChange(-1)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="min-w-10 text-center text-xs font-semibold text-sand-500">第 {page} 页</span>
-            <button
-              type="button"
-              aria-label={`${title} 下一页`}
-              disabled={!canNext}
-              onClick={() => onPageChange(1)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronRight size={16} />
-            </button>
+            {onRefresh && (
+              <button
+                type="button"
+                aria-label={`${title} 刷新`}
+                title="只刷新当前模块"
+                disabled={refreshing}
+                onClick={onRefresh}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+              </button>
+            )}
+            {onPageChange && (
+              <>
+                <button
+                  type="button"
+                  aria-label={`${title} 上一页`}
+                  disabled={refreshing || page <= 1}
+                  onClick={() => onPageChange(-1)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="min-w-10 text-center text-xs font-semibold text-sand-500">第 {page} 页</span>
+                <button
+                  type="button"
+                  aria-label={`${title} 下一页`}
+                  disabled={refreshing || !canNext}
+                  onClick={() => onPageChange(1)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -186,6 +206,7 @@ function DiscoverCard({
   const source = discoverItemSource(item)
 	const isPerson = item.media_type === 'person'
 	const isJavDBAdult = item.media_type === 'adult' && source.toLowerCase() === 'javdb'
+  const secondaryText = discoverCardSecondaryText(item)
   const imageCandidates = useMemo(
     () =>
       [item.poster_url, item.backdrop_url]
@@ -247,8 +268,6 @@ function DiscoverCard({
 
   const markPosterUnavailable = () => setPosterUnavailable(true)
 
-  if ((!posterSrc || posterUnavailable) && !isPerson) return null
-
   return (
     <button
       ref={cardRef}
@@ -286,6 +305,11 @@ function DiscoverCard({
 			<div className="flex h-28 w-28 items-center justify-center rounded-full bg-rose-100 text-sm font-semibold text-rose-500 ring-4 ring-white">
             女优
           </div>
+        ) : shouldLoadImage ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-surface-900 to-surface-800 px-4 text-center text-sand-400">
+            <ImageOff size={26} aria-hidden="true" />
+            <span className="text-xs font-semibold">封面暂不可用</span>
+          </div>
         ) : null}
         <div className="absolute left-1.5 top-1.5 rounded-xl border border-white/20 bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white backdrop-blur-sm">
           {source}
@@ -315,6 +339,11 @@ function DiscoverCard({
 		<p className={isPerson ? 'hidden' : 'text-[11px] text-sand-500'}>
           {discoverCardMetaText(item)}
         </p>
+		{!isPerson && (
+			<p className="h-4 truncate text-[10px] text-sand-400" title={secondaryText || undefined}>
+				{secondaryText || '\u00a0'}
+			</p>
+		)}
 		{isPerson && <p className="text-[11px] text-sand-500">女优</p>}
 		<p className={isPerson ? 'hidden' : 'flex items-center gap-1 pt-1 text-[10px] font-semibold text-brand-500'}>
           <Info size={10} />

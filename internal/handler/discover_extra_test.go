@@ -2,10 +2,14 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -15,6 +19,59 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
+
+func TestDiscoverFeedUsesServerCacheUnlessRefreshRequested(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	discover := service.NewDiscoverService(zap.NewNop(), nil)
+	discover.RememberSection("tmdb_latest_movie", 1, []service.ExternalMediaResult{{Title: "cached movie"}})
+	svc := &service.Container{Discover: discover}
+	router := gin.New()
+	router.GET("/discover/feed", discoverFeedHandler(svc))
+
+	request := httptest.NewRequest(http.MethodGet, "/discover/feed?sections=tmdb_latest_movie&page=1", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("cached feed status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var cachedPayload struct {
+		Items []service.ExternalMediaResult `json:"tmdb_latest_movie"`
+		Meta  map[string]struct {
+			Cached bool `json:"cached"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &cachedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(cachedPayload.Items) != 1 || cachedPayload.Items[0].Title != "cached movie" {
+		t.Fatalf("cached items = %#v", cachedPayload.Items)
+	}
+	if !cachedPayload.Meta["tmdb_latest_movie"].Cached {
+		t.Fatalf("cached meta = %#v", cachedPayload.Meta)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/discover/feed?sections=tmdb_latest_movie&page=1&refresh=true", nil)
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("refresh feed status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var refreshedPayload struct {
+		Items []service.ExternalMediaResult `json:"tmdb_latest_movie"`
+		Meta  map[string]struct {
+			Cached bool `json:"cached"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &refreshedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshedPayload.Items) != 0 {
+		t.Fatalf("refresh should bypass cached items, got %#v", refreshedPayload.Items)
+	}
+	if refreshedPayload.Meta["tmdb_latest_movie"].Cached {
+		t.Fatalf("refresh should not report a cache hit: %#v", refreshedPayload.Meta)
+	}
+}
 
 func TestDiscoverProviderEnabledHonorsAPIConfigToggle(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})

@@ -85,6 +85,7 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 		if page < 1 {
 			page = 1
 		}
+		refresh := c.Query("refresh") == "true"
 		keys := strings.Split(rawSections, ",")
 		out := gin.H{}
 		meta := gin.H{}
@@ -106,32 +107,39 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 				meta[k] = gin.H{"page": page, "has_next": false, "disabled": true}
 				continue
 			}
-			sectionTimeout := discoverSectionTimeout(k)
-			sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
-			started := time.Now()
-			items, err := discoverSectionItems(sectionCtx, svc, k, page, userID)
-			elapsed := time.Since(started)
-			cancel()
-			metaEntry := gin.H{"page": page, "has_next": false, "duration_ms": elapsed.Milliseconds()}
 			cacheKey := discoverSectionCacheKeyForUser(k, userID)
-			if err != nil {
-				logDiscoverFetchFailed(svc, k, page, elapsed, sectionTimeout, err)
-				if cached, ok := cachedDiscoverSection(svc, cacheKey, page); ok {
-					items = cached
-					metaEntry["stale"] = true
-					metaEntry["warning"] = discoverFeedStaleMessage(err)
-				} else if fallbackItems, fallbackKey, ok := fallbackDiscoverSectionItems(c.Request.Context(), svc, k, page, userID); ok {
-					items = fallbackItems
-					metaEntry["fallback"] = fallbackKey
-					metaEntry["warning"] = discoverFeedFallbackMessage(fallbackKey, err)
-					rememberDiscoverSection(svc, cacheKey, page, items)
-				} else {
-					metaEntry["error"] = discoverFeedErrorMessage(err)
-					items = nil
-				}
+			metaEntry := gin.H{"page": page, "has_next": false, "duration_ms": int64(0)}
+			items, cacheHit := cachedDiscoverSection(svc, cacheKey, page)
+			if !refresh && cacheHit {
+				metaEntry["cached"] = true
 			} else {
-				logDiscoverFetchSlow(svc, k, page, elapsed, len(items))
-				rememberDiscoverSection(svc, cacheKey, page, items)
+				sectionTimeout := discoverSectionTimeout(k)
+				sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
+				started := time.Now()
+				freshItems, err := discoverSectionItems(sectionCtx, svc, k, page, userID)
+				elapsed := time.Since(started)
+				cancel()
+				metaEntry["duration_ms"] = elapsed.Milliseconds()
+				items = freshItems
+				if err != nil {
+					logDiscoverFetchFailed(svc, k, page, elapsed, sectionTimeout, err)
+					if cacheHit {
+						items, _ = cachedDiscoverSection(svc, cacheKey, page)
+						metaEntry["stale"] = true
+						metaEntry["warning"] = discoverFeedStaleMessage(err)
+					} else if fallbackItems, fallbackKey, ok := fallbackDiscoverSectionItems(c.Request.Context(), svc, k, page, userID); ok {
+						items = fallbackItems
+						metaEntry["fallback"] = fallbackKey
+						metaEntry["warning"] = discoverFeedFallbackMessage(fallbackKey, err)
+						rememberDiscoverSection(svc, cacheKey, page, items)
+					} else {
+						metaEntry["error"] = discoverFeedErrorMessage(err)
+						items = nil
+					}
+				} else {
+					logDiscoverFetchSlow(svc, k, page, elapsed, len(items))
+					rememberDiscoverSection(svc, cacheKey, page, items)
+				}
 			}
 			service.EnrichExternalMediaLibraryLinks(
 				c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
@@ -150,6 +158,46 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			svc.Discover.WarmExternalArtwork(artworkItems)
 		}
 		c.JSON(http.StatusOK, out)
+	}
+}
+
+func discoverItemDetailHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !strings.EqualFold(strings.TrimSpace(c.Param("source")), "tmdb") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "暂不支持该资料源的作品详情"})
+			return
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(c.Query("media_type")))
+		if mediaType != "movie" && mediaType != "tv" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "作品类型无效"})
+			return
+		}
+		tmdbID, err := strconv.Atoi(strings.TrimSpace(c.Param("provider_id")))
+		if err != nil || tmdbID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "TMDb ID 无效"})
+			return
+		}
+		if svc == nil || svc.Discover == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "作品详情服务不可用"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), discoverFeedSectionTimeout)
+		defer cancel()
+		item, err := svc.Discover.TMDbItemDetail(ctx, mediaType, tmdbID)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":  "作品详情暂时无法加载",
+				"detail": err.Error(),
+			})
+			return
+		}
+		items := []service.ExternalMediaResult{item}
+		service.EnrichExternalMediaLibraryLinks(
+			c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
+		)
+		svc.Discover.WarmExternalArtwork(items)
+		c.JSON(http.StatusOK, items[0])
 	}
 }
 

@@ -9,12 +9,10 @@ type SectionLabel = (key: string) => string
 export function DiscoverHeader({
   selectedCount,
   sectionsReady,
-  loading,
 	selectionSaving,
 	searchQuery,
 	searchLoading,
   searchActive,
-  onRefresh,
 	onOpenSectionPicker,
 	onSearchQueryChange,
 	onSearch,
@@ -22,12 +20,10 @@ export function DiscoverHeader({
 }: {
   selectedCount: number
   sectionsReady: boolean
-  loading: boolean
 	selectionSaving: boolean
   searchQuery: string
   searchLoading: boolean
   searchActive: boolean
-  onRefresh: () => void
 	onOpenSectionPicker: () => void
 	onSearchQueryChange: (value: string) => void
 	onSearch: () => void
@@ -76,7 +72,7 @@ export function DiscoverHeader({
 				{searchLoading ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}
 				聚合搜索
 			</button>
-			{searchActive ? (
+			{searchActive && (
 				<button
 					type="button"
 					onClick={onClearSearch}
@@ -84,17 +80,6 @@ export function DiscoverHeader({
 				>
 					<ArrowLeft size={14} />
 					返回发现
-				</button>
-			) : (
-				<button
-					type="button"
-					onClick={onRefresh}
-					disabled={!sectionsReady || selectionSaving || selectedCount === 0}
-					className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-ink-600 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
-					title="重新拉取已选模块内容，图片继续使用缓存"
-				>
-					<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-					刷新
 				</button>
 			)}
 		</form>
@@ -121,6 +106,7 @@ export function DiscoverResults({
   hasContent,
   sectionLabel,
   onPageChange,
+  onRefresh,
   onSelect,
 }: {
   selected: string[]
@@ -133,14 +119,15 @@ export function DiscoverResults({
   hasContent: boolean
   sectionLabel: SectionLabel
   onPageChange: (key: string, delta: number) => void
+  onRefresh: (key: string) => void
   onSelect: (item: DiscoverItem) => void
 }) {
   const sectionTopOffset = 32
   const hasRowErrors = Object.keys(rowErrors).length > 0
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const navigableKeys = useMemo(
-    () => selected.filter((key) => rowLoading[key] || (rows[key]?.length ?? 0) > 0),
-    [rowLoading, rows, selected],
+    () => selected.filter((key) => rowLoading[key] || rowErrors[key] || (rows[key]?.length ?? 0) > 0),
+    [rowErrors, rowLoading, rows, selected],
   )
   const [activeKey, setActiveKey] = useState('')
 
@@ -256,6 +243,23 @@ export function DiscoverResults({
                   </div>
                 )
               }
+              if (rowErrors[key]) {
+                return (
+                  <div
+                    key={key}
+                    ref={(element) => { rowRefs.current[key] = element }}
+                    id={discoverSectionID(key)}
+                    className="scroll-mt-16"
+                  >
+                    <DiscoverUnavailableRow
+                      title={sectionLabel(key)}
+                      message={rowErrors[key]}
+                      refreshing={Boolean(rowLoading[key])}
+                      onRefresh={() => onRefresh(key)}
+                    />
+                  </div>
+                )
+              }
               return null
             }
             return (
@@ -270,17 +274,16 @@ export function DiscoverResults({
                   items={items}
                   page={rowPages[key] ?? 1}
                   canNext={Boolean(rowCanNext[key])}
+                  refreshing={Boolean(rowLoading[key])}
                   priority={rowIndex === 0}
                   onPageChange={(delta) => onPageChange(key, delta)}
+                  onRefresh={() => onRefresh(key)}
                   onSelect={onSelect}
                 />
+                {rowErrors[key] && <DiscoverRowWarning message={rowErrors[key]} />}
               </div>
             )
           })}
-
-          {hasRowErrors && (
-            <DiscoverRowErrors rowErrors={rowErrors} sectionLabel={sectionLabel} />
-          )}
 
           {!loading && !hasContent && !hasRowErrors && <DiscoverNoContent />}
         </div>
@@ -413,21 +416,44 @@ function discoverSectionID(key: string): string {
   return `discover-section-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
-function DiscoverRowErrors({
-  rowErrors,
-  sectionLabel,
+function DiscoverUnavailableRow({
+  title,
+  message,
+  refreshing,
+  onRefresh,
 }: {
-  rowErrors: Record<string, string>
-  sectionLabel: SectionLabel
+  title: string
+  message: string
+  refreshing: boolean
+  onRefresh: () => void
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
+        <button
+          type="button"
+          aria-label={`${title} 刷新`}
+          title="只刷新当前模块"
+          disabled={refreshing}
+          onClick={onRefresh}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      <DiscoverRowWarning message={message} />
+    </section>
+  )
+}
+
+function DiscoverRowWarning({ message }: { message: string }) {
+  return (
+    <div className="mt-3 flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
       <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
-      <div className="space-y-1 text-xs">
-        <p className="font-semibold">部分推荐源暂不可用，其他已加载内容不受影响。</p>
-        {Object.entries(rowErrors).map(([key, message]) => (
-          <p key={key}>{sectionLabel(key)}：{message}</p>
-        ))}
+      <div className="text-xs">
+        <p className="font-semibold">当前模块未获取到最新数据</p>
+        <p className="mt-1">{message}</p>
       </div>
     </div>
   )
