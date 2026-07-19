@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -70,6 +71,65 @@ func TestDiscoverFeedUsesServerCacheUnlessRefreshRequested(t *testing.T) {
 	}
 	if refreshedPayload.Meta["tmdb_latest_movie"].Cached {
 		t.Fatalf("refresh should not report a cache hit: %#v", refreshedPayload.Meta)
+	}
+}
+
+func TestDiscoverWorkPageUsesEighteenVisibleItemsAndOneNextProbe(t *testing.T) {
+	items := make([]service.ExternalMediaResult, discoverWorkPageSize+1)
+	for index := range items {
+		items[index].Title = strconv.Itoa(index + 1)
+	}
+	visible := discoverSectionVisibleItems("tmdb_latest_movie", items)
+	if len(visible) != discoverWorkPageSize {
+		t.Fatalf("visible items = %d, want %d", len(visible), discoverWorkPageSize)
+	}
+	if !discoverSectionHasNext("tmdb_latest_movie", len(items)) {
+		t.Fatal("19th item should enable the next page")
+	}
+	if discoverSectionHasNext("tmdb_latest_movie", discoverWorkPageSize) {
+		t.Fatal("exactly 18 items should not enable the next page")
+	}
+}
+
+func TestDiscoverPerformerSectionsKeepTheirOwnPageSize(t *testing.T) {
+	items := make([]service.ExternalMediaResult, 30)
+	visible := discoverSectionVisibleItems("adult_javdb_performers_monthly", items)
+	if len(visible) != len(items) {
+		t.Fatalf("performer items = %d, want %d", len(visible), len(items))
+	}
+	if discoverSectionHasNext("adult_javdb_performers_monthly", len(items)) {
+		t.Fatal("performer list should keep its existing non-paged behavior")
+	}
+}
+
+func TestDiscoverStaticSectionWindowKeepsContinuousItems(t *testing.T) {
+	items := make([]service.ExternalMediaResult, 30)
+	for index := range items {
+		items[index].Title = strconv.Itoa(index + 1)
+	}
+	window := discoverSectionWindow(items, 2)
+	if len(window) != 12 || window[0].Title != "19" || window[11].Title != "30" {
+		t.Fatalf("page 2 window = %#v", window)
+	}
+}
+
+func TestRememberDiscoverStaticWindowsPreloadsFollowingPages(t *testing.T) {
+	discover := service.NewDiscoverService(zap.NewNop(), nil)
+	svc := &service.Container{Discover: discover}
+	items := make([]service.ExternalMediaResult, 49)
+	rememberDiscoverStaticWindows(svc, "adult_javdb_popular", items)
+
+	page1, ok := discover.CachedSection("adult_javdb_popular", 1)
+	if !ok || len(page1) != discoverWorkPageSize+1 {
+		t.Fatalf("page 1 cache = %d, ok=%v", len(page1), ok)
+	}
+	page2, ok := discover.CachedSection("adult_javdb_popular", 2)
+	if !ok || len(page2) != discoverWorkPageSize+1 {
+		t.Fatalf("page 2 cache = %d, ok=%v", len(page2), ok)
+	}
+	page3, ok := discover.CachedSection("adult_javdb_popular", 3)
+	if !ok || len(page3) != 13 {
+		t.Fatalf("page 3 cache = %d, ok=%v", len(page3), ok)
 	}
 }
 

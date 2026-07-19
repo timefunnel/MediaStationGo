@@ -18,12 +18,13 @@ import (
 )
 
 var (
-	adultListStrongPattern  = regexp.MustCompile(`(?is)<strong[^>]*>(.*?)</strong>`)
-	adultListDatePattern    = regexp.MustCompile(`(?:19|20)\d{2}-\d{2}-\d{2}`)
-	adultListScorePattern   = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
-	adultPerformerIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-	adultMovieIDPattern     = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-	adultJavDBActorHeading  = regexp.MustCompile(`(?is)<h3\b[^>]*>(.*?)</h3>`)
+	adultListStrongPattern     = regexp.MustCompile(`(?is)<strong[^>]*>(.*?)</strong>`)
+	adultListDatePattern       = regexp.MustCompile(`(?:19|20)\d{2}-\d{2}-\d{2}`)
+	adultListScorePattern      = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
+	adultPerformerIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	adultMovieIDPattern        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	adultJavDBActorHeading     = regexp.MustCompile(`(?is)<h3\b[^>]*>(.*?)</h3>`)
+	errAdultPerformerPageEmpty = errors.New("adult performer page returned no usable works")
 )
 
 const adultJavDBPerformerSectionCacheTTL = 5 * time.Minute
@@ -51,7 +52,7 @@ func (p *AdultProvider) DiscoverJavDBPopular(ctx context.Context) ([]ExternalMed
 	items, err := p.discoverAdultList(ctx, "javdb", func(base string) string {
 		return base + "/rankings/movies?p=daily&t=censored"
 	}, parseJavDBMovieList)
-	return limitAdultDiscoveryItems(items, 30), err
+	return items, err
 }
 
 func (p *AdultProvider) DiscoverJavDBPerformerSection(ctx context.Context, section string) ([]ExternalMediaResult, error) {
@@ -354,7 +355,7 @@ func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sour
 	}
 	items := parseJavDBMovieList(body, base)
 	if len(items) == 0 {
-		return nil, fmt.Errorf("adult performer page returned no usable works")
+		return nil, errAdultPerformerPageEmpty
 	}
 	return limitAdultDiscoveryItems(items, 40), nil
 }
@@ -463,6 +464,9 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 	errs := make([]error, 0)
 	for fetched := range results {
 		if fetched.err != nil {
+			if errors.Is(fetched.err, errAdultPerformerPageEmpty) {
+				continue
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", fetched.follow.Name, fetched.err))
 			continue
 		}
@@ -495,6 +499,44 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 	}
 	if len(out) == 0 && len(errs) > 0 {
 		return nil, errors.Join(errs...)
+	}
+	return out, nil
+}
+
+// DiscoverFollowedPerformerWorksWindow maps the 40-item aggregate pages used
+// by the source scraper into continuous logical pages. It returns pageSize
+// items plus one extra item so the handler can expose an accurate next button.
+func (p *AdultProvider) DiscoverFollowedPerformerWorksWindow(
+	ctx context.Context,
+	follows []model.AdultPerformerFollow,
+	page int,
+	pageSize int,
+) ([]ExternalMediaResult, error) {
+	if pageSize <= 0 || len(follows) == 0 {
+		return []ExternalMediaResult{}, nil
+	}
+	const sourcePageSize = 40
+	sourcePage, sourceOffset := discoverWindowStart(page, pageSize, sourcePageSize)
+	targetSize := pageSize + 1
+	out := make([]ExternalMediaResult, 0, targetSize)
+	for len(out) < targetSize {
+		chunk, err := p.DiscoverFollowedPerformerWorks(ctx, follows, sourcePage)
+		if err != nil {
+			return nil, err
+		}
+		if sourceOffset < len(chunk) {
+			remaining := targetSize - len(out)
+			available := chunk[sourceOffset:]
+			if len(available) > remaining {
+				available = available[:remaining]
+			}
+			out = append(out, available...)
+		}
+		if len(chunk) < sourcePageSize {
+			break
+		}
+		sourcePage++
+		sourceOffset = 0
 	}
 	return out, nil
 }

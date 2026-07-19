@@ -51,6 +51,7 @@ var discoverSectionCatalog = []discoverSectionDef{
 const discoverFeedSectionTimeout = 20 * time.Second
 const discoverFeedBangumiTimeout = 30 * time.Second
 const discoverFeedSlowSectionThreshold = 2 * time.Second
+const discoverWorkPageSize = 18
 
 // discoverSectionsHandler returns the catalog of sections the UI can
 // pick from. The names match the upstream Vue UI so existing settings
@@ -141,16 +142,17 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 					rememberDiscoverSection(svc, cacheKey, page, items)
 				}
 			}
+			metaEntry["has_next"] = discoverSectionHasNext(k, len(items))
+			visibleItems := discoverSectionVisibleItems(k, items)
 			service.EnrichExternalMediaLibraryLinks(
-				c.Request.Context(), svc.Repo, items, mediaVisibilityForRequest(c, svc),
+				c.Request.Context(), svc.Repo, visibleItems, mediaVisibilityForRequest(c, svc),
 			)
-			warmItems := items
+			warmItems := visibleItems
 			if discoverSectionProvider(k) == "adult" && len(warmItems) > 12 {
 				warmItems = warmItems[:12]
 			}
 			artworkItems = append(artworkItems, warmItems...)
-			out[k] = items
-			metaEntry["has_next"] = discoverSectionHasNext(k, len(items))
+			out[k] = visibleItems
 			meta[k] = metaEntry
 		}
 		out["_meta"] = meta
@@ -383,25 +385,30 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 	switch k {
 	case "tmdb_trending_day", "tmdb_trending_week", "tmdb_latest_movie", "tmdb_latest_tv", "tmdb_popular_movie", "tmdb_popular_tv", "tmdb_top_rated_movie", "tmdb_upcoming_movie",
 		"trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
-		return svc.Discover.TMDbSection(ctx, k, page)
+		return svc.Discover.TMDbSectionWindow(ctx, k, page, discoverWorkPageSize)
 	case "douban_hot_movie", "douban_hot_tv", "douban_top_movie":
 		if svc.Douban == nil {
 			return []service.ExternalMediaResult{}, nil
 		}
-		return svc.Douban.Discover(ctx, k, page)
+		return svc.Douban.DiscoverWindow(ctx, k, page, discoverWorkPageSize)
 	case "bangumi_calendar":
 		if svc.Bangumi == nil {
 			return []service.ExternalMediaResult{}, nil
 		}
-		if page > 1 {
-			return []service.ExternalMediaResult{}, nil
+		items, err := svc.Bangumi.Calendar(ctx)
+		if err == nil {
+			rememberDiscoverStaticWindows(svc, k, items)
 		}
-		return svc.Bangumi.Calendar(ctx)
+		return discoverSectionWindow(items, page), err
 	case "adult_javdb_popular":
-		if svc.Adult == nil || page > 1 {
+		if svc.Adult == nil {
 			return []service.ExternalMediaResult{}, nil
 		}
-		return svc.Adult.DiscoverJavDBPopular(ctx)
+		items, err := svc.Adult.DiscoverJavDBPopular(ctx)
+		if err == nil {
+			rememberDiscoverStaticWindows(svc, k, items)
+		}
+		return discoverSectionWindow(items, page), err
 	case "adult_javdb_performers", "adult_javdb_performers_monthly":
 		if svc.Adult == nil || page > 1 {
 			return []service.ExternalMediaResult{}, nil
@@ -447,28 +454,57 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 		if err != nil {
 			return nil, err
 		}
-		return svc.Adult.DiscoverFollowedPerformerWorks(ctx, follows, page)
+		return svc.Adult.DiscoverFollowedPerformerWorksWindow(ctx, follows, page, discoverWorkPageSize)
 	default:
 		return []service.ExternalMediaResult{}, nil
 	}
 }
 
 func discoverSectionHasNext(key string, itemCount int) bool {
-	if itemCount <= 0 {
-		return false
+	return discoverSectionUsesWorkPaging(key) && itemCount > discoverWorkPageSize
+}
+
+func discoverSectionVisibleItems(key string, items []service.ExternalMediaResult) []service.ExternalMediaResult {
+	if !discoverSectionUsesWorkPaging(key) || len(items) <= discoverWorkPageSize {
+		return items
 	}
-	switch discoverSectionProvider(key) {
-	case "tmdb":
-		return itemCount >= 20
-	case "douban":
-		return itemCount >= 24
-	case "adult":
-		switch key {
-		case "adult_followed":
-			return itemCount >= 40
-		default:
-			return false
+	return items[:discoverWorkPageSize]
+}
+
+func discoverSectionWindow(items []service.ExternalMediaResult, page int) []service.ExternalMediaResult {
+	if page < 1 {
+		page = 1
+	}
+	start := (page - 1) * discoverWorkPageSize
+	if start >= len(items) {
+		return []service.ExternalMediaResult{}
+	}
+	end := start + discoverWorkPageSize + 1
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
+}
+
+func rememberDiscoverStaticWindows(svc *service.Container, key string, items []service.ExternalMediaResult) {
+	for page := 1; ; page++ {
+		window := discoverSectionWindow(items, page)
+		if len(window) == 0 {
+			return
 		}
+		rememberDiscoverSection(svc, key, page, window)
+		if len(window) <= discoverWorkPageSize {
+			return
+		}
+	}
+}
+
+func discoverSectionUsesWorkPaging(key string) bool {
+	switch key {
+	case "tmdb_trending_day", "tmdb_trending_week", "tmdb_latest_movie", "tmdb_latest_tv", "tmdb_popular_movie", "tmdb_popular_tv", "tmdb_top_rated_movie", "tmdb_upcoming_movie",
+		"trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie",
+		"douban_hot_movie", "douban_hot_tv", "douban_top_movie", "bangumi_calendar", "adult_javdb_popular", "adult_followed":
+		return true
 	default:
 		return false
 	}

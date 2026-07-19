@@ -9,6 +9,7 @@ const discoverRowPreloadMargin = '0px'
 const discoverCardPreloadMargin = '0px'
 const discoverPriorityPosterCount = 3
 
+export const discoverModulePageSize = 18
 export type DiscoverRefreshStatus = 'loading' | 'success' | 'error'
 
 const discoverCardVisibilityCallbacks = new Map<Element, () => void>()
@@ -62,6 +63,7 @@ export function ContentRow({
   refreshImageVersion,
   refreshing = false,
   refreshStatus,
+  fixedGrid = false,
   priority = false,
   cardSize = 'default',
   onPageChange,
@@ -76,6 +78,7 @@ export function ContentRow({
   refreshImageVersion?: string
   refreshing?: boolean
   refreshStatus?: DiscoverRefreshStatus
+  fixedGrid?: boolean
   priority?: boolean
   cardSize?: 'default' | 'large'
   onPageChange?: (delta: number) => void
@@ -85,9 +88,11 @@ export function ContentRow({
   const rowRef = useRef<HTMLElement>(null)
   const [imagesEnabled, setImagesEnabled] = useState(priority)
   const shouldRenderImages = priority || imagesEnabled
-  const gridClassName = cardSize === 'large'
-    ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(210px,1fr))]'
-    : 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]'
+  const gridClassName = fixedGrid
+    ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6'
+    : cardSize === 'large'
+      ? 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(210px,1fr))]'
+      : 'grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]'
 
   useEffect(() => {
     if (shouldRenderImages) return
@@ -216,8 +221,8 @@ export function DiscoverSkeleton() {
       {[1, 2, 3].map((section) => (
         <section key={section} className="space-y-4">
           <div className="h-8 w-48 animate-pulse rounded-xl bg-gray-100" />
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
-            {Array.from({ length: 24 }, (_, index) => index).map((item) => (
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            {Array.from({ length: discoverModulePageSize }, (_, index) => index).map((item) => (
               <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
             ))}
           </div>

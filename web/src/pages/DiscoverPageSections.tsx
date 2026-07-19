@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowLeft, ArrowUp, Layers3, List, LoaderCircle, Search, Sparkles } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
-import { ContentRow, DiscoverRefreshControl, type DiscoverRefreshStatus } from './DiscoverContentRow'
+import {
+  ContentRow,
+  DiscoverRefreshControl,
+  discoverModulePageSize,
+  type DiscoverRefreshStatus,
+} from './DiscoverContentRow'
 
 type SectionLabel = (key: string) => string
 
@@ -231,7 +236,9 @@ export function DiscoverResults({
 
         <div className={`min-w-0 space-y-16 ${navigableKeys.length > 1 ? 'pb-[60vh]' : ''}`}>
           {selected.map((key, rowIndex) => {
-            const items = rows[key] ?? []
+            const rowItems = rows[key] ?? []
+            const workRow = rowItems.some((item) => item.media_type !== 'person')
+            const items = workRow ? rowItems.slice(0, discoverModulePageSize) : rowItems
             if (items.length === 0) {
               if (rowLoading[key]) {
                 return (
@@ -283,6 +290,7 @@ export function DiscoverResults({
                   canNext={Boolean(rowCanNext[key])}
                   refreshing={Boolean(rowLoading[key])}
                   refreshStatus={rowRefreshStatus[key]}
+                  fixedGrid={workRow}
                   priority={rowIndex === 0}
                   onPageChange={(delta) => onPageChange(key, delta)}
                   onRefresh={() => onRefresh(key)}
@@ -497,8 +505,8 @@ function DiscoverRowSkeleton({
           />
         )}
       </div>
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
-        {Array.from({ length: 24 }, (_, index) => index).map((item) => (
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        {Array.from({ length: discoverModulePageSize }, (_, index) => index).map((item) => (
           <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
         ))}
       </div>

@@ -60,6 +60,44 @@ func (d *DiscoverService) TMDbSection(ctx context.Context, key string, pages ...
 	if err != nil {
 		return nil, err
 	}
+	return tmdbMatchesToExternal(path, matches), nil
+}
+
+// TMDbSectionWindow returns one logical Discover page plus one extra item used
+// by the handler to determine whether a following page exists. TMDb fixes its
+// upstream page size at 20, so logical 18-item pages can span two source pages.
+func (d *DiscoverService) TMDbSectionWindow(ctx context.Context, key string, page, pageSize int) ([]ExternalMediaResult, error) {
+	path := tmdbDiscoverPath(key)
+	if path == "" || pageSize <= 0 {
+		return []ExternalMediaResult{}, nil
+	}
+	const sourcePageSize = 20
+	sourcePage, sourceOffset := discoverWindowStart(page, pageSize, sourcePageSize)
+	targetSize := pageSize + 1
+	matches := make([]Match, 0, targetSize)
+	for len(matches) < targetSize {
+		chunk, err := d.Fetch(ctx, path, sourcePage)
+		if err != nil {
+			return nil, err
+		}
+		if sourceOffset < len(chunk) {
+			remaining := targetSize - len(matches)
+			available := chunk[sourceOffset:]
+			if len(available) > remaining {
+				available = available[:remaining]
+			}
+			matches = append(matches, available...)
+		}
+		if len(chunk) < sourcePageSize {
+			break
+		}
+		sourcePage++
+		sourceOffset = 0
+	}
+	return tmdbMatchesToExternal(path, matches), nil
+}
+
+func tmdbMatchesToExternal(path string, matches []Match) []ExternalMediaResult {
 	mediaType := "movie"
 	if strings.Contains(path, "/tv/") {
 		mediaType = "tv"
@@ -82,7 +120,7 @@ func (d *DiscoverService) TMDbSection(ctx context.Context, key string, pages ...
 			SubscribeAliases: buildSubscribeAliases(item.Title, item.OriginalName, item.Year),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // TMDbItemDetail returns enriched metadata for one Discover item. Results use
