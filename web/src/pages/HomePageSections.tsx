@@ -58,8 +58,9 @@ export function HomeFeaturedSection({
         <div className="theme-hero-bg h-full w-full" />
         {featuredVisual && (
           <img
-            src={imageURL(featuredVisual, featuredItem.updated_at)}
+            src={imageURL(featuredVisual, featuredItem.updated_at, { maxWidth: 1600, quality: 86 })}
             alt=""
+            decoding="async"
             className="absolute inset-0 h-full w-full scale-105 object-cover object-center opacity-[0.34] blur-[1px]"
             referrerPolicy="no-referrer"
             onError={(event) => { event.currentTarget.style.display = 'none' }}
@@ -127,8 +128,9 @@ export function HomeFeaturedSection({
             </div>
             {featuredPoster && (
               <img
-                src={imageURL(featuredPoster, featuredItem.updated_at)}
+                src={imageURL(featuredPoster, featuredItem.updated_at, { maxWidth: 640, quality: 88 })}
                 alt={featuredItem.title}
+                decoding="async"
                 className="absolute inset-2 h-[calc(100%-1rem)] w-[calc(100%-1rem)] rounded-[1.25rem] object-cover"
                 referrerPolicy="no-referrer"
                 onError={(event) => { event.currentTarget.style.display = 'none' }}
@@ -204,9 +206,10 @@ function ContinueCard({ media, progress }: { media: Media; progress: number }) {
       <div className="relative h-18 w-12 shrink-0 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)]">
         {poster ? (
           <img
-            src={imageURL(poster, media.updated_at)}
+            src={imageURL(poster, media.updated_at, { maxWidth: 96, quality: 78 })}
             alt=""
             loading="lazy"
+            decoding="async"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             referrerPolicy="no-referrer"
           />

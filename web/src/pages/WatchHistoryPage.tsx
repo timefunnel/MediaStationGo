@@ -114,8 +114,10 @@ export function WatchHistoryPage() {
               <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-900">
                 {poster ? (
                   <img
-                    src={imageURL(poster, m.updated_at)}
+                    src={imageURL(poster, m.updated_at, { maxWidth: 96, quality: 78 })}
                     alt={m.title}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover"
                     referrerPolicy="no-referrer"
                   />

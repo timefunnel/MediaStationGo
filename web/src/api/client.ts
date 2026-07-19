@@ -155,9 +155,17 @@ export type ImageURLOptions =
 
 export function imageURL(remote?: string, version?: string, options: ImageURLOptions = false): string {
   if (!remote) return ''
-  const versionQuery = version ? `v=${encodeURIComponent(version)}` : ''
   const retryFailed = typeof options === 'boolean' ? options : Boolean(options.retryFailed)
   const refreshCache = typeof options === 'boolean' ? false : Boolean(options.refreshCache)
+  // A remote image URL already identifies the artwork. Media updated_at also
+  // changes for playback/probe/metadata updates, so attaching it to remote
+  // artwork creates needless browser/CDN cache misses for unchanged images.
+  // Local and cloud sidecar paths still need the explicit version because the
+  // bytes can change while their path remains stable. An explicit refresh also
+  // retains its revision so the freshly fetched remote bytes are visible now.
+  const versionQuery = version && (!isRemoteProxyImage(remote) || refreshCache)
+    ? `v=${encodeURIComponent(version)}`
+    : ''
   const maxWidth = typeof options === 'boolean' ? 0 : positiveImageOption(options.maxWidth)
   const maxHeight = typeof options === 'boolean' ? 0 : positiveImageOption(options.maxHeight)
   const quality = typeof options === 'boolean' ? 0 : positiveImageOption(options.quality)
@@ -173,6 +181,15 @@ export function imageURL(remote?: string, version?: string, options: ImageURLOpt
   if (remote.startsWith('/api/cloud/play/')) return withQuery(withoutAuthQuery(remote), imageQuery)
   if (remote.startsWith('/api/')) return withQuery(withQuery(remote, tokenQuery()), imageQuery)
   return withQuery(`/api/img?url=${encodeURIComponent(remote)}`, imageQuery)
+}
+
+function isRemoteProxyImage(remote: string): boolean {
+  if (/^https?:\/\//i.test(remote)) return true
+  if (!remote.startsWith('/api/img')) return false
+  const queryIndex = remote.indexOf('?')
+  if (queryIndex < 0) return false
+  const raw = new URLSearchParams(remote.slice(queryIndex + 1)).get('url') ?? ''
+  return /^https?:\/\//i.test(raw)
 }
 
 function positiveImageOption(value?: number): number {

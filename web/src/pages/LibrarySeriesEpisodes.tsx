@@ -73,8 +73,10 @@ export function LibrarySeriesEpisodes({
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-50 text-brand-600 font-semibold text-sm">
                   {mediaBackdropArtworkURL(ep) ? (
                     <img
-                      src={imageURL(mediaBackdropArtworkURL(ep), ep.updated_at)}
+                      src={imageURL(mediaBackdropArtworkURL(ep), ep.updated_at, { maxWidth: 96, quality: 78 })}
                       alt=""
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover"
                       referrerPolicy="no-referrer"
                     />

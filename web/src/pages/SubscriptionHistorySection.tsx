@@ -56,7 +56,13 @@ export function SubscriptionHistorySection({
             <div className="flex gap-3">
               <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-primary-400/10">
                 {subscription.poster_url ? (
-                  <img src={imageURL(subscription.poster_url, subscription.updated_at)} alt={subscription.name} className="h-full w-full object-cover" />
+                  <img
+                    src={imageURL(subscription.poster_url, subscription.updated_at, { maxWidth: 128, quality: 80 })}
+                    alt={subscription.name}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <div className="flex h-full items-center justify-center text-brand-500">
                     <Film size={18} />

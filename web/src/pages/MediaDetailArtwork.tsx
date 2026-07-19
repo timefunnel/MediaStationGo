@@ -17,8 +17,9 @@ export function MediaDetailBackdrop({ media }: MediaDetailArtworkProps) {
     <div className="absolute inset-0 h-[480px] z-0 overflow-hidden">
       {backdrop ? (
         <img
-          src={imageURL(backdrop, media.updated_at)}
+          src={imageURL(backdrop, media.updated_at, { maxWidth: 1280, quality: 84 })}
           alt=""
+          decoding="async"
           className="w-full h-full object-cover opacity-[0.04] scale-110 blur-2xl"
           referrerPolicy="no-referrer"
         />
@@ -41,8 +42,9 @@ export function MediaDetailPoster({ media }: MediaDetailArtworkProps) {
       >
         {poster ? (
           <img
-            src={imageURL(poster, media.updated_at)}
+            src={imageURL(poster, media.updated_at, { maxWidth: 640, quality: 88 })}
             alt={media.title}
+            decoding="async"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             referrerPolicy="no-referrer"
           />

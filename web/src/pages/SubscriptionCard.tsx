@@ -17,7 +17,13 @@ export function SubscriptionCard({ subscription, onEdit, onRunNow, onRemove }: S
       <div className="relative flex gap-4 p-4">
         <div className="relative h-36 w-24 flex-shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-primary-400/15 to-surface-200 shadow-inner">
           {subscription.poster_url ? (
-            <img src={imageURL(subscription.poster_url, subscription.updated_at)} alt={subscription.name} className="h-full w-full object-cover" />
+            <img
+              src={imageURL(subscription.poster_url, subscription.updated_at, { maxWidth: 240, quality: 82 })}
+              alt={subscription.name}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-2 text-center text-xs font-semibold text-brand-500">
               <Film size={22} />

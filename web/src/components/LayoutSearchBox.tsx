@@ -121,8 +121,9 @@ function SearchResultItem({ card, onClick }: { card: SeriesCard; onClick: () => 
       <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg bg-[var(--app-panel-soft)]">
         {poster ? (
           <img
-            src={imageURL(poster, card.rep.updated_at)}
+            src={imageURL(poster, card.rep.updated_at, { maxWidth: 96, quality: 78 })}
             alt={card.rep.title}
+            decoding="async"
             className="h-full w-full object-cover"
           />
         ) : (

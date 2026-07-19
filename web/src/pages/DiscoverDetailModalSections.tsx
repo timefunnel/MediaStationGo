@@ -95,8 +95,12 @@ export function DiscoverArtworkPanel({
             onClick={onPreview}
           >
             <img
-              src={imageURL(item.poster_url)}
+              src={imageURL(item.poster_url, undefined, {
+                maxWidth: adultArtwork ? 1280 : 640,
+                quality: 88,
+              })}
               alt={item.title}
+              decoding="async"
               className={`${adultArtwork ? 'aspect-[3/2] object-contain' : 'aspect-[2/3] object-cover'} w-full transition duration-200 group-hover:scale-[1.01]`}
             />
             <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-black/65 px-2.5 py-1.5 text-xs font-medium text-white opacity-90 shadow-lg backdrop-blur-sm transition group-hover:bg-black/80">
@@ -116,7 +120,13 @@ export function DiscoverBackdropPanel({ item }: { item: DiscoverItem }) {
   if (!item.backdrop_url?.trim()) return null
   return (
     <div className="relative aspect-[16/7] overflow-hidden rounded-2xl bg-gray-100">
-      <img src={imageURL(item.backdrop_url)} alt="" className="h-full w-full object-cover" />
+      <img
+        src={imageURL(item.backdrop_url, undefined, { maxWidth: 1280, quality: 86 })}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-full w-full object-cover"
+      />
       <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
     </div>
   )

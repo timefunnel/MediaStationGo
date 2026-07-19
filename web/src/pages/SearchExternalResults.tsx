@@ -38,8 +38,10 @@ export function ExternalResults({
               <div className="h-28 w-20 shrink-0 overflow-hidden rounded-xl bg-gray-100">
                 {item.poster_url ? (
                   <img
-                    src={imageURL(item.poster_url)}
+                    src={imageURL(item.poster_url, undefined, { maxWidth: 160, quality: 82 })}
                     alt={item.title}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover"
                   />
                 ) : null}
@@ -107,7 +109,12 @@ function ExternalDetailModal({
         <div className="grid gap-0 md:grid-cols-[220px,1fr]">
           <div className="min-h-72 bg-gray-100">
             {item.poster_url ? (
-              <img src={imageURL(item.poster_url)} alt={item.title} className="h-full w-full object-cover" />
+              <img
+                src={imageURL(item.poster_url, undefined, { maxWidth: 640, quality: 88 })}
+                alt={item.title}
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <div className="flex h-full min-h-72 items-center justify-center text-brand-500">
                 <Info size={42} />
