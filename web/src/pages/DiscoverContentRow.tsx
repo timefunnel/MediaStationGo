@@ -166,14 +166,31 @@ export function ContentRow({
               />
             ))
           : items.map((item, index) => (
-              <div
+              <DiscoverCardPlaceholder
                 key={discoverKey(item, index)}
-                aria-hidden="true"
-                className="aspect-[2/3] rounded-xl bg-gray-100/70"
+                person={item.media_type === 'person'}
               />
             ))}
       </div>
     </section>
+  )
+}
+
+export function DiscoverCardPlaceholder({
+  person = false,
+  pulse = false,
+}: {
+  person?: boolean
+  pulse?: boolean
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`overflow-hidden rounded-xl border border-transparent bg-gray-100/70 xl:aspect-[2/3] ${pulse ? 'animate-pulse' : ''}`}
+    >
+      <div className={`${person ? 'aspect-square' : 'aspect-[2/3]'} bg-gray-100 xl:hidden`} />
+      <div className={`${person ? 'h-[72px]' : 'h-[90px]'} bg-gray-50/80 xl:hidden`} />
+    </div>
   )
 }
 

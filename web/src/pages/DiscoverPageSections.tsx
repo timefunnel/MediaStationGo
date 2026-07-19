@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, ArrowUp, Layers3, List, LoaderCircle, Search,
 import type { DiscoverItem } from '../api/discover'
 import {
   ContentRow,
+  DiscoverCardPlaceholder,
   DiscoverRefreshControl,
   discoverModulePageSize,
   type DiscoverRefreshStatus,
@@ -250,6 +251,7 @@ export function DiscoverResults({
                   >
                     <DiscoverRowSkeleton
                       title={sectionLabel(key)}
+                      personCards={discoverSectionUsesPersonCards(key)}
                       refreshStatus={rowRefreshStatus[key]}
                       onRefresh={() => onRefresh(key)}
                     />
@@ -485,10 +487,12 @@ function DiscoverNoContent() {
 
 function DiscoverRowSkeleton({
   title,
+  personCards,
   refreshStatus,
   onRefresh,
 }: {
   title: string
+  personCards: boolean
   refreshStatus?: DiscoverRefreshStatus
   onRefresh: () => void
 }) {
@@ -507,9 +511,13 @@ function DiscoverRowSkeleton({
       </div>
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {Array.from({ length: discoverModulePageSize }, (_, index) => index).map((item) => (
-          <div key={item} className="aspect-[2/3] animate-pulse rounded-xl bg-gray-100" />
+          <DiscoverCardPlaceholder key={item} person={personCards} pulse />
         ))}
       </div>
     </section>
   )
+}
+
+function discoverSectionUsesPersonCards(key: string): boolean {
+  return key === 'adult_followed_performers' || key.startsWith('adult_javdb_performers')
 }
