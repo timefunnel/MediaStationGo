@@ -5,6 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -14,6 +18,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	_ "golang.org/x/image/webp"
 )
 
 // transparent1x1PNG is a baseline 67-byte PNG used as a fallback when the
@@ -53,6 +58,47 @@ func validImageContentType(data []byte) (string, bool) {
 
 func isTransparentPlaceholderData(data []byte) bool {
 	return bytes.Equal(data, transparent1x1PNG)
+}
+
+func validRemoteImageContentType(host string, data []byte) (string, bool) {
+	ctype, ok := validImageContentType(data)
+	if !ok || isRemoteImagePlaceholderData(host, data) {
+		return "", false
+	}
+	return ctype, true
+}
+
+func isRemoteImagePlaceholderData(host string, data []byte) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host != "xximgs.cc" && !strings.HasSuffix(host, ".xximgs.cc") {
+		return false
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return false
+	}
+	const samples = 17
+	for yi := 0; yi < samples; yi++ {
+		y := bounds.Min.Y
+		if bounds.Dy() > 1 {
+			y += yi * (bounds.Dy() - 1) / (samples - 1)
+		}
+		for xi := 0; xi < samples; xi++ {
+			x := bounds.Min.X
+			if bounds.Dx() > 1 {
+				x += xi * (bounds.Dx() - 1) / (samples - 1)
+			}
+			r, g, b, a := img.At(x, y).RGBA()
+			if a < 0xff00 || r < 0xf800 || g < 0xf800 || b < 0xf800 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // servePlaceholder writes a 1x1 transparent PNG to w. Used as a fallback

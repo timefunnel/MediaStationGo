@@ -81,7 +81,7 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 	host := strings.ToLower(u.Host)
 	key, cachePath, failPath := p.remoteImageCachePathsForValidated(raw)
 	forceRefresh := r.URL.Query().Get("refresh") != ""
-	p.removeUnusableImageCache(cachePath, failPath)
+	p.removeUnusableRemoteImageCache(host, cachePath, failPath)
 	if !forceRefresh && p.serveCachedImageFile(w, r, key, cachePath) {
 		return nil
 	}
@@ -114,13 +114,18 @@ func (p *ImageProxy) serveRemoteImage(ctx context.Context, w http.ResponseWriter
 }
 
 func (p *ImageProxy) removeUnusableImageCache(cachePath, failPath string) {
+	p.removeUnusableRemoteImageCache("", cachePath, failPath)
+}
+
+func (p *ImageProxy) removeUnusableRemoteImageCache(host, cachePath, failPath string) {
 	data, err := os.ReadFile(cachePath) // #nosec G304 -- cachePath is SHA-derived under cacheDir.
 	if err != nil {
 		return
 	}
-	ctype := detectContentType(data)
-	if len(data) > 0 && isImageContentType(ctype) && !isTransparentPlaceholderData(data) {
-		return
+	if len(data) > 0 {
+		if _, ok := validRemoteImageContentType(host, data); ok {
+			return
+		}
 	}
 	_ = os.Remove(cachePath)
 	_ = os.Remove(failPath)
@@ -180,10 +185,9 @@ func (p *ImageProxy) Fetch(ctx context.Context, raw string) ([]byte, string, err
 	}
 	host := strings.ToLower(u.Host)
 	_, cachePath, failPath := p.remoteImageCachePathsForValidated(raw)
-	p.removeUnusableImageCache(cachePath, failPath)
+	p.removeUnusableRemoteImageCache(host, cachePath, failPath)
 	if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 { // #nosec G304 -- cachePath is SHA-derived under cacheDir.
-		ctype := detectContentType(data)
-		if isImageContentType(ctype) && !isTransparentPlaceholderData(data) {
+		if ctype, ok := validRemoteImageContentType(host, data); ok {
 			return data, ctype, nil
 		}
 		_ = os.Remove(cachePath)
