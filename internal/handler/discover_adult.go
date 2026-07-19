@@ -182,15 +182,24 @@ func adultMovieDetailHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "作品番号无效"})
 			return
 		}
-		item, err := svc.Adult.DiscoverMovieDetail(
-			c.Request.Context(), c.Param("source"), c.Param("provider_id"), code,
-		)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{
-				"error":  "作品详情暂时无法加载",
-				"detail": err.Error(),
-			})
-			return
+		source := strings.ToLower(strings.TrimSpace(c.Param("source")))
+		providerID := strings.TrimSpace(c.Param("provider_id"))
+		cacheKey := "detail:adult:" + source + ":" + providerID + ":" + strings.ToUpper(code)
+		cached, cacheHit := cachedDiscoverSection(svc, cacheKey, 1)
+		var item service.ExternalMediaResult
+		if cacheHit && len(cached) > 0 {
+			item = cached[0]
+		} else {
+			var err error
+			item, err = svc.Adult.DiscoverMovieDetail(c.Request.Context(), source, providerID, code)
+			if err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{
+					"error":  "作品详情暂时无法加载",
+					"detail": err.Error(),
+				})
+				return
+			}
+			rememberDiscoverSection(svc, cacheKey, 1, []service.ExternalMediaResult{item})
 		}
 		items := []service.ExternalMediaResult{item}
 		service.EnrichExternalMediaLibraryLinks(

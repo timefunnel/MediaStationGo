@@ -73,6 +73,8 @@ func TestParseAdultDetailHTMLReadsJavDBTileItemSample(t *testing.T) {
 	<h2 class="title"><strong>EBWH-348 Sample</strong></h2>
 	<img class="video-cover" src="https://c0.jdbstatic.com/covers/eb/EbPpD3.jpg">
 	<a data-caption="sample" href="https://c0.jdbstatic.com/samples/eb/EbPpD3_l_0.jpg" class="tile-item"><img src="sample.jpg"></a>
+	<a data-caption="sample" href="https://c0.jdbstatic.com/samples/eb/EbPpD3_s_1.jpg" class="tile-item"><img src="small.jpg"></a>
+	<a data-caption="sample" href="https://c0.jdbstatic.com/samples/eb/EbPpD3_l_1.jpg" class="tile-item"><img src="sample-2.jpg"></a>
 	</html>`
 
 	got := parseAdultDetailHTML(body, "EBWH-348", "javdb", "https://javdb.com/v/EbPpD3")
@@ -81,6 +83,9 @@ func TestParseAdultDetailHTMLReadsJavDBTileItemSample(t *testing.T) {
 	}
 	if got.BackdropURL != "https://c0.jdbstatic.com/samples/eb/EbPpD3_l_0.jpg" {
 		t.Fatalf("BackdropURL = %q", got.BackdropURL)
+	}
+	if len(got.PreviewImages) != 2 || got.PreviewImages[0] != "https://c0.jdbstatic.com/samples/eb/EbPpD3_l_0.jpg" || got.PreviewImages[1] != "https://c0.jdbstatic.com/samples/eb/EbPpD3_l_1.jpg" {
+		t.Fatalf("PreviewImages = %#v", got.PreviewImages)
 	}
 }
 

@@ -84,6 +84,7 @@ func (d *DoubanProvider) Discover(ctx context.Context, key string, pages ...int)
 			DoubanID:         subject.ID,
 			SubscribeKeyword: subject.Title,
 			SubscribeAliases: buildSubscribeAliases(subject.Title, "", 0),
+			ProviderURL:      subject.URL,
 		})
 	}
 	return out, nil

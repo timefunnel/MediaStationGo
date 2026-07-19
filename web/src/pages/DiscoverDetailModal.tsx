@@ -7,11 +7,13 @@ import { imageURL } from '../api/client'
 import { discoverItemSource } from './discoverPageModel'
 import {
   DiscoverArtworkPanel,
+  DiscoverBackdropPanel,
   DiscoverMetadataPanel,
   DiscoverModalHeader,
   DiscoverOverviewPanel,
+  DiscoverPreviewGallery,
 } from './DiscoverDetailModalSections'
-import { mergeDiscoverDetail, supportsAdultMovieDetail } from './discoverDetailModalModel'
+import { mergeDiscoverDetail, supportsAdultMovieDetail, supportsCatalogItemDetail } from './discoverDetailModalModel'
 import { DiscoverResourceAction } from './DiscoverResourceAction'
 
 export function DiscoverDetailModal({
@@ -24,9 +26,9 @@ export function DiscoverDetailModal({
   onSelectPerformer?: (item: DiscoverItem) => void
 }) {
   const [resolvedItem, setResolvedItem] = useState(item)
-  const [detailLoading, setDetailLoading] = useState(() => supportsAdultMovieDetail(item))
+  const [detailLoading, setDetailLoading] = useState(() => supportsAdultMovieDetail(item) || supportsCatalogItemDetail(item))
   const [detailError, setDetailError] = useState('')
-  const [artworkPreviewOpen, setArtworkPreviewOpen] = useState(false)
+  const [artworkPreviewURL, setArtworkPreviewURL] = useState('')
   const [resourceSidecarOpen, setResourceSidecarOpen] = useState(false)
   const [resourceSidecarRoot, setResourceSidecarRoot] = useState<HTMLDivElement | null>(null)
   const source = discoverItemSource(resolvedItem)
@@ -34,16 +36,20 @@ export function DiscoverDetailModal({
   useEffect(() => {
     setResolvedItem(item)
     setDetailError('')
-    setArtworkPreviewOpen(false)
+    setArtworkPreviewURL('')
     setResourceSidecarOpen(false)
-    if (!supportsAdultMovieDetail(item)) {
+    const loadAdultDetail = supportsAdultMovieDetail(item)
+    const loadCatalogDetail = supportsCatalogItemDetail(item)
+    if (!loadAdultDetail && !loadCatalogDetail) {
       setDetailLoading(false)
       return
     }
     let cancelled = false
     setDetailLoading(true)
-    discoverAPI
-      .adultMovieDetail(item.source!, item.provider_id!, item.original_name!)
+    const detailRequest = loadAdultDetail
+      ? discoverAPI.adultMovieDetail(item.source!, item.provider_id!, item.original_name!)
+      : discoverAPI.itemDetail(item.source!, item.tmdb_id!, item.media_type!)
+    detailRequest
       .then((detail) => {
         if (!cancelled) setResolvedItem(mergeDiscoverDetail(item, detail))
       })
@@ -61,13 +67,13 @@ export function DiscoverDetailModal({
   }, [item])
 
   useEffect(() => {
-    if (!artworkPreviewOpen) return
+    if (!artworkPreviewURL) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setArtworkPreviewOpen(false)
+      if (event.key === 'Escape') setArtworkPreviewURL('')
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [artworkPreviewOpen])
+  }, [artworkPreviewURL])
 
   const metadata = (
     <>
@@ -99,10 +105,15 @@ export function DiscoverDetailModal({
                   <DiscoverArtworkPanel
                     item={resolvedItem}
                     deferred={detailLoading}
-                    onPreview={() => setArtworkPreviewOpen(true)}
+                    onPreview={() => setArtworkPreviewURL(resolvedItem.poster_url || '')}
                   />
                   <div className="space-y-5">{metadata}</div>
                 </div>
+                <DiscoverPreviewGallery
+                  images={resolvedItem.preview_images}
+                  title={resolvedItem.title}
+                  onPreview={setArtworkPreviewURL}
+                />
                 <div className="mt-5 border-t border-gray-200 pt-5">
                   <DiscoverResourceAction
                     item={resolvedItem}
@@ -112,9 +123,10 @@ export function DiscoverDetailModal({
                 </div>
               </>
             ) : (
-              <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
-                <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewOpen(true)} />
-                <div className="space-y-5">
+              <div className="grid items-start gap-5 lg:grid-cols-[minmax(210px,240px)_minmax(0,1fr)]">
+                <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewURL(resolvedItem.poster_url || '')} />
+                <div className="min-w-0 space-y-4">
+                  <DiscoverBackdropPanel item={resolvedItem} />
                   {metadata}
                   <DiscoverResourceAction
                     item={resolvedItem}
@@ -133,18 +145,18 @@ export function DiscoverDetailModal({
           />
         )}
       </div>
-      {artworkPreviewOpen && resolvedItem.poster_url && (
+      {artworkPreviewURL && (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-black/90 p-4 sm:p-8"
           role="dialog"
           aria-modal="true"
           aria-label={`${resolvedItem.title} 大图预览`}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setArtworkPreviewOpen(false)
+            if (event.target === event.currentTarget) setArtworkPreviewURL('')
           }}
         >
           <img
-            src={imageURL(resolvedItem.poster_url)}
+            src={imageURL(artworkPreviewURL)}
             alt={resolvedItem.title}
             className="max-h-full max-w-full object-contain shadow-2xl"
           />
@@ -153,7 +165,7 @@ export function DiscoverDetailModal({
             className="absolute right-4 top-4 rounded-full border border-white/30 bg-black/55 p-2.5 text-white transition hover:bg-black/80 sm:right-6 sm:top-6"
             aria-label="关闭大图预览"
             title="关闭"
-            onClick={() => setArtworkPreviewOpen(false)}
+            onClick={() => setArtworkPreviewURL('')}
           >
             <X size={22} />
           </button>

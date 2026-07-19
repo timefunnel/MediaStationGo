@@ -400,6 +400,7 @@ func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, provide
 			Overview:         match.Overview,
 			PosterURL:        match.PosterURL,
 			BackdropURL:      match.BackdropURL,
+			PreviewImages:    match.PreviewImages,
 			Year:             match.Year,
 			ReleaseDate:      match.ReleaseDate,
 			Rating:           match.Rating,

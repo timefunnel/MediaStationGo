@@ -1,5 +1,5 @@
 import type { DiscoverItem } from '../api/discover'
-import { buildSubscribeKeyword } from './discoverPageModel'
+import { buildSubscribeKeyword, discoverMediaTypeLabel } from './discoverPageModel'
 
 export {
   discoverItemPeople,
@@ -8,6 +8,7 @@ export {
   discoverReleaseStatus,
   mergeDiscoverDetail,
   supportsAdultMovieDetail,
+  supportsCatalogItemDetail,
 } from './discoverDetailDataModel'
 
 export function discoverSubscriptionKeyword(item: DiscoverItem): string {
@@ -20,8 +21,8 @@ export function discoverResourceSearchKeyword(item: DiscoverItem): string {
 
 export function discoverItemMetaText(item: DiscoverItem): string {
   return [
-    item.media_type,
-    item.year && item.year > 0 ? item.year : '',
+    discoverMediaTypeLabel(item.media_type),
+    item.release_date?.trim() || (item.year && item.year > 0 ? item.year : ''),
     item.rating ? `★ ${item.rating.toFixed(1)}` : '',
   ]
     .filter(Boolean)

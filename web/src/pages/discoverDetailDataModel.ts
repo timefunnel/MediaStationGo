@@ -7,6 +7,13 @@ export function supportsAdultMovieDetail(item: DiscoverItem): boolean {
     && Boolean(item.original_name?.trim())
 }
 
+export function supportsCatalogItemDetail(item: DiscoverItem): boolean {
+  const mediaType = item.media_type?.trim().toLowerCase()
+  return item.source?.trim().toLowerCase() === 'tmdb'
+    && Boolean(item.tmdb_id && item.tmdb_id > 0)
+    && (mediaType === 'movie' || mediaType === 'tv')
+}
+
 export function mergeDiscoverDetail(item: DiscoverItem, detail: DiscoverItem): DiscoverItem {
   return {
     ...item,
@@ -16,6 +23,7 @@ export function mergeDiscoverDetail(item: DiscoverItem, detail: DiscoverItem): D
     overview: detail.overview?.trim() || item.overview,
     poster_url: detail.poster_url?.trim() || item.poster_url,
     backdrop_url: detail.backdrop_url?.trim() || item.backdrop_url,
+    preview_images: detail.preview_images?.length ? detail.preview_images : item.preview_images,
     release_date: detail.release_date?.trim() || item.release_date,
     year: detail.year && detail.year > 0 ? detail.year : item.year,
     rating: detail.rating && detail.rating > 0 ? detail.rating : item.rating,

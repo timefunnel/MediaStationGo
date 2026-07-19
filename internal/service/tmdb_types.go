@@ -14,6 +14,7 @@ type Match struct {
 	Overview        string           `json:"overview"`
 	PosterURL       string           `json:"poster_url"`
 	BackdropURL     string           `json:"backdrop_url"`
+	PreviewImages   []string         `json:"preview_images,omitempty"`
 	Year            int              `json:"year"`
 	ReleaseDate     string           `json:"release_date,omitempty"`
 	Rating          float32          `json:"rating"`

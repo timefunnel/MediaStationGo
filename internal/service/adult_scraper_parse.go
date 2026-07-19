@@ -32,6 +32,9 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	if sample := firstAdultSampleURL(body); sample != "" {
 		match.BackdropURL = absolutizeURL(detailURL, sample)
 	}
+	if source == "javdb" {
+		match.PreviewImages = adultJavDBPreviewImageURLs(body, detailURL)
+	}
 	if dmmPoster := adultDMMPosterFromSampleURL(match.BackdropURL); dmmPoster != "" {
 		match.PosterURL = dmmPoster
 	}
@@ -73,6 +76,49 @@ func firstAdultSampleURL(body string) string {
 		}
 	}
 	return ""
+}
+
+func adultJavDBPreviewImageURLs(body, detailURL string) []string {
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		class := " " + strings.ToLower(strings.Join(strings.Fields(attrs["class"]), " ")) + " "
+		if !strings.Contains(class, " sample-box ") && !strings.Contains(class, " tile-item ") {
+			continue
+		}
+		candidate := absolutizeURL(detailURL, attrs["href"])
+		if !isLargeJavDBPreviewImageURL(candidate) {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func isLargeJavDBPreviewImageURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	if !strings.Contains(path, "/samples/") {
+		return false
+	}
+	for _, marker := range []string{"/thumb", "/small", "thumbnail", "_s_", "_t_", "-small."} {
+		if strings.Contains(path, marker) {
+			return false
+		}
+	}
+	return strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") ||
+		strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".webp")
 }
 
 func adultPanelDate(body string) string {

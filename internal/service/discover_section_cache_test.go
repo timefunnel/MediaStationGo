@@ -11,6 +11,7 @@ func TestDiscoverSectionCacheReturnsClone(t *testing.T) {
 		Title:            "第一部",
 		SubscribeAliases: []string{"别名"},
 		MissingEpisodes:  []int{1},
+		PreviewImages:    []string{"https://img.example/preview.jpg"},
 		Languages:        []string{"zh"},
 	}})
 
@@ -22,12 +23,14 @@ func TestDiscoverSectionCacheReturnsClone(t *testing.T) {
 	got[0].Title = "被修改"
 	got[0].SubscribeAliases[0] = "别名被改"
 	got[0].MissingEpisodes[0] = 9
+	got[0].PreviewImages[0] = "https://img.example/changed.jpg"
 	got[0].Languages[0] = "en"
 	again, ok := cache.Get("douban_hot_movie", 1)
 	if !ok ||
 		again[0].Title != "第一部" ||
 		again[0].SubscribeAliases[0] != "别名" ||
 		again[0].MissingEpisodes[0] != 1 ||
+		again[0].PreviewImages[0] != "https://img.example/preview.jpg" ||
 		again[0].Languages[0] != "zh" {
 		t.Fatalf("cache should return a clone, got %#v", again)
 	}

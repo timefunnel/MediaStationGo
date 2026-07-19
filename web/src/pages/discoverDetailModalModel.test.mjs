@@ -8,6 +8,7 @@ import {
   discoverReleaseStatus,
   mergeDiscoverDetail,
   supportsAdultMovieDetail,
+  supportsCatalogItemDetail,
 } from './discoverDetailDataModel.ts'
 
 test('成人作品详情只对可信 JavDB 作品引用启用', () => {
@@ -27,6 +28,12 @@ test('成人作品详情只对可信 JavDB 作品引用启用', () => {
   }), false)
 })
 
+test('普通作品详情只对有明确类型和 ID 的 TMDb 项启用', () => {
+  assert.equal(supportsCatalogItemDetail({ title: '电影', source: 'tmdb', media_type: 'movie', tmdb_id: 42 }), true)
+  assert.equal(supportsCatalogItemDetail({ title: '剧集', source: 'tmdb', media_type: 'tv', tmdb_id: 43 }), true)
+  assert.equal(supportsCatalogItemDetail({ title: '豆瓣作品', source: 'douban', media_type: 'movie', tmdb_id: 42 }), false)
+})
+
 test('详情合并保留列表已有字段并补充时长片商女优', () => {
   const merged = mergeDiscoverDetail(
     { title: '列表标题', release_date: '2026-08-04', in_library: true, media_id: 'media-1' },
@@ -34,6 +41,7 @@ test('详情合并保留列表已有字段并补充时长片商女优', () => {
       title: '详情标题',
       duration_minutes: 240,
       maker: 'MOODYZ',
+      preview_images: ['https://img.example/sample-1.jpg', 'https://img.example/sample-2.jpg'],
       people: [{ name: '石川澪', source: 'javdb', source_id: 'QV0p9' }],
     },
   )
@@ -41,6 +49,7 @@ test('详情合并保留列表已有字段并补充时长片商女优', () => {
   assert.equal(merged.release_date, '2026-08-04')
   assert.equal(merged.duration_minutes, 240)
   assert.equal(merged.maker, 'MOODYZ')
+  assert.deepEqual(merged.preview_images, ['https://img.example/sample-1.jpg', 'https://img.example/sample-2.jpg'])
   assert.equal(merged.in_library, true)
   assert.equal(merged.media_id, 'media-1')
   assert.equal(discoverItemPeople(merged)[0].name, '石川澪')

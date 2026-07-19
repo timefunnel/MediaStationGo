@@ -18,6 +18,7 @@ type ExternalMediaResult struct {
 	Overview           string           `json:"overview,omitempty"`
 	PosterURL          string           `json:"poster_url,omitempty"`
 	BackdropURL        string           `json:"backdrop_url,omitempty"`
+	PreviewImages      []string         `json:"preview_images,omitempty"`
 	Year               int              `json:"year,omitempty"`
 	ReleaseDate        string           `json:"release_date,omitempty"`
 	Rating             float32          `json:"rating,omitempty"`
@@ -122,6 +123,7 @@ func externalMediaResultFromMatch(source, mediaType string, match *Match) Extern
 		Overview:         match.Overview,
 		PosterURL:        match.PosterURL,
 		BackdropURL:      match.BackdropURL,
+		PreviewImages:    match.PreviewImages,
 		Year:             match.Year,
 		ReleaseDate:      match.ReleaseDate,
 		Rating:           match.Rating,

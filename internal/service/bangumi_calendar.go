@@ -63,10 +63,12 @@ func (b *BangumiProvider) Calendar(ctx context.Context) ([]ExternalMediaResult, 
 				Overview:         item.Summary,
 				PosterURL:        poster,
 				Year:             year,
+				ReleaseDate:      normalizeReleaseDate(item.AirDate),
 				Rating:           item.Rating.Score,
 				BangumiID:        item.ID,
 				SubscribeKeyword: buildSubscribeKeyword(title, year),
 				SubscribeAliases: buildSubscribeAliases(title, item.Name, year),
+				ProviderURL:      "https://bgm.tv/subject/" + strconv.Itoa(item.ID),
 			})
 			if len(out) >= 24 {
 				return out, nil

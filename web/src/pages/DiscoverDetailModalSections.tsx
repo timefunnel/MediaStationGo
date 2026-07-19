@@ -1,9 +1,15 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Building2,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
+  Database,
   ExternalLink,
+  Globe2,
   Hash,
+  Languages,
   LoaderCircle,
   Star,
   Tags,
@@ -87,10 +93,116 @@ export function DiscoverArtworkPanel({
           <div className={`flex items-center justify-center text-sand-500 ${adultArtwork ? 'aspect-[3/2]' : 'aspect-[2/3]'}`}>无海报</div>
         )}
       </div>
-      {!adultArtwork && item.backdrop_url && (
-        <img src={imageURL(item.backdrop_url)} alt="" className="h-24 w-full rounded-2xl object-cover" />
-      )}
     </div>
+  )
+}
+
+export function DiscoverBackdropPanel({ item }: { item: DiscoverItem }) {
+  if (!item.backdrop_url?.trim()) return null
+  return (
+    <div className="relative aspect-[16/7] overflow-hidden rounded-2xl bg-gray-100">
+      <img src={imageURL(item.backdrop_url)} alt="" className="h-full w-full object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+    </div>
+  )
+}
+
+export function DiscoverPreviewGallery({
+  images,
+  title,
+  onPreview,
+}: {
+  images?: string[]
+  title: string
+  onPreview: (url: string) => void
+}) {
+  const previewImages = useMemo(
+    () => (images ?? []).map((url) => url.trim()).filter((url, index, values) => Boolean(url) && values.indexOf(url) === index),
+    [images],
+  )
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller || previewImages.length === 0) return
+    const updateScrollState = () => {
+      setCanScrollLeft(scroller.scrollLeft > 2)
+      setCanScrollRight(scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2)
+    }
+    const frame = window.requestAnimationFrame(updateScrollState)
+    scroller.addEventListener('scroll', updateScrollState, { passive: true })
+    window.addEventListener('resize', updateScrollState)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      scroller.removeEventListener('scroll', updateScrollState)
+      window.removeEventListener('resize', updateScrollState)
+    }
+  }, [previewImages])
+
+  if (previewImages.length === 0) return null
+
+  const scroll = (direction: -1 | 1) => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    scroller.scrollBy({ left: direction * Math.max(320, scroller.clientWidth * 0.82), behavior: 'smooth' })
+  }
+
+  return (
+    <section className="mt-5 space-y-3 border-t border-gray-200 pt-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold text-ink-600">作品详情预览</h3>
+          <p className="mt-0.5 text-xs text-sand-500">{previewImages.length} 张大图，点击可查看原图</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="向左浏览作品详情图"
+            disabled={!canScrollLeft}
+            onClick={() => scroll(-1)}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="向右浏览作品详情图"
+            disabled={!canScrollRight}
+            onClick={() => scroll(1)}
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </div>
+      <div
+        ref={scrollerRef}
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-2 [scrollbar-width:thin]"
+      >
+        {previewImages.map((url, index) => (
+          <button
+            key={url}
+            type="button"
+            className="group relative aspect-video min-w-[82%] snap-start overflow-hidden rounded-2xl border border-gray-200 bg-gray-950 text-left sm:min-w-[420px] lg:min-w-[480px]"
+            aria-label={`查看 ${title} 详情大图 ${index + 1}`}
+            onClick={() => onPreview(url)}
+          >
+            <img
+              src={imageURL(url, undefined, { maxWidth: 960, quality: 88 })}
+              alt={`${title} 详情图 ${index + 1}`}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-contain transition duration-200 group-hover:scale-[1.01]"
+            />
+            <span className="absolute bottom-2 right-2 rounded-full bg-black/65 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm">
+              {index + 1} / {previewImages.length}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -106,42 +218,65 @@ export function DiscoverMetadataPanel({
   onSelectPerformer?: (item: DiscoverItem) => void
 }) {
   const people = discoverItemPeople(item)
-  const peopleLabel = item.media_type === 'adult' ? '女优' : '演员'
+  const adultItem = item.media_type === 'adult'
+  const peopleLabel = adultItem ? '女优' : '演员'
   const genres = discoverItemValues(item.genres).filter((value) => !['adult', item.source?.toLowerCase()].includes(value.toLowerCase()))
+  const countries = discoverItemValues(item.countries)
+  const languages = discoverItemValues(item.languages)
   const releaseStatus = discoverReleaseStatus(item.release_date)
+  const catalogID = item.tmdb_id
+    ? `TMDb ${item.tmdb_id}`
+    : item.douban_id
+      ? `豆瓣 ${item.douban_id}`
+      : item.bangumi_id
+        ? `Bangumi ${item.bangumi_id}`
+        : ''
+  const releaseLabel = adultItem ? '发行日期' : item.media_type === 'tv' || item.media_type === 'anime' ? '首播日期' : '上映日期'
 
   return (
-    <section className="space-y-4 border-y border-gray-200 py-4">
+    <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink-600">作品资料</h3>
         {loading && (
           <span className="inline-flex items-center gap-1.5 text-xs text-sand-500">
             <LoaderCircle size={14} className="animate-spin" />
-            正在补充 JavDB 详情…
+            {adultItem ? '正在补充 JavDB 详情…' : '正在补充作品资料…'}
           </span>
         )}
       </div>
 
       <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
         {item.original_name?.trim() && (
-          <MetadataValue icon={<Hash size={15} />} label="番号" value={item.original_name.trim()} mono />
+          <MetadataValue icon={<Hash size={15} />} label={adultItem ? '番号' : '原名'} value={item.original_name.trim()} mono={adultItem} />
         )}
         {item.release_date?.trim() && (
           <MetadataValue
             icon={<CalendarDays size={15} />}
-            label="发行日期"
+            label={releaseLabel}
             value={item.release_date.trim()}
             suffix={releaseStatus === 'upcoming' ? '未发行' : undefined}
           />
+        )}
+        {!item.release_date?.trim() && item.year && item.year > 0 && (
+          <MetadataValue icon={<CalendarDays size={15} />} label="年份" value={String(item.year)} />
         )}
         {item.duration_minutes && item.duration_minutes > 0 && (
           <MetadataValue icon={<Clock3 size={15} />} label="时长" value={`${item.duration_minutes} 分钟`} />
         )}
         {item.maker?.trim() && (
-          <MetadataValue icon={<Building2 size={15} />} label="片商" value={item.maker.trim()} />
+          <MetadataValue icon={<Building2 size={15} />} label={adultItem ? '片商' : '出品方'} value={item.maker.trim()} />
         )}
         {item.rating && item.rating > 0 && (
           <MetadataValue icon={<Star size={15} />} label="评分" value={item.rating.toFixed(1)} />
+        )}
+        {catalogID && (
+          <MetadataValue icon={<Database size={15} />} label="资料编号" value={catalogID} mono />
+        )}
+        {countries.length > 0 && (
+          <MetadataValue icon={<Globe2 size={15} />} label="国家 / 地区" value={countries.join(' / ')} />
+        )}
+        {languages.length > 0 && (
+          <MetadataValue icon={<Languages size={15} />} label="语言" value={languages.join(' / ')} />
         )}
       </div>
 
@@ -153,8 +288,10 @@ export function DiscoverMetadataPanel({
           </div>
           <div className="flex flex-wrap gap-2">
             {people.map((person) => {
-              const selectable = Boolean(onSelectPerformer && person.source_id?.trim())
-              const className = 'inline-flex min-h-8 items-center gap-1.5 rounded-md border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700'
+              const selectable = Boolean(adultItem && onSelectPerformer && person.source_id?.trim())
+              const className = adultItem
+                ? 'inline-flex min-h-8 items-center gap-1.5 rounded-md border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700'
+                : 'inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary-100 bg-primary-50 px-2.5 py-1 text-xs font-medium text-brand-600'
               return selectable ? (
                 <button
                   key={`${person.source || 'person'}-${person.source_id || person.name}`}
