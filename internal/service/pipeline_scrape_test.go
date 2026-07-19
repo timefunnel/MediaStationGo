@@ -169,6 +169,14 @@ func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
 	if err := repos.DB.Create(&media).Error; err != nil {
 		t.Fatal(err)
 	}
+	candidates, err := scraper.ManualSearch(t.Context(), &media, "FC2-PPV-4516148", "adult", "adult")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("FD2 manual candidates = %#v, source requests = %d", candidates, flareCalls)
+	}
+	flareCalls = 0
 
 	result, err := svc.Scrape(t.Context(), media.ID, PipelineScrapeRequest{
 		Category:  "adult",
@@ -181,7 +189,7 @@ func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Mode != PipelineScrapeModeApply || result.AppliedCount != 1 {
-		t.Fatalf("unexpected result: %#v", result)
+		t.Fatalf("unexpected result: %#v, source requests = %d", result, flareCalls)
 	}
 	if flareCalls != 1 {
 		t.Fatalf("FD2 requests = %d, want 1", flareCalls)
