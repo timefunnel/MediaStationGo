@@ -99,10 +99,6 @@ func (s *ScraperService) manualRequestMatch(ctx context.Context, req ManualScrap
 				return mergeManualRequestIntoMatch(match, req), nil
 			}
 		}
-	case source == "adult":
-		if match := s.manualAdultMatch(ctx, firstText(req.OriginalName, req.Title)); match != nil {
-			return mergeManualRequestIntoMatch(match, req), nil
-		}
 	}
 	return fallback()
 }

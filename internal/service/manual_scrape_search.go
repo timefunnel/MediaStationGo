@@ -63,13 +63,15 @@ func (s *ScraperService) ManualSearch(ctx context.Context, media *model.Media, q
 	}
 
 	if providers.want("adult") {
+		adultQueries := make([]string, 0, len(queries))
 		for _, candidateQuery := range queries {
 			if externalIDHintsFromText(candidateQuery).useful() {
 				continue
 			}
-			for _, match := range s.manualAdultMatches(ctx, media, candidateQuery) {
-				add("adult", "adult", match)
-			}
+			adultQueries = append(adultQueries, candidateQuery)
+		}
+		for _, match := range s.manualAdultMatches(ctx, media, adultQueries) {
+			add("adult", "adult", match)
 		}
 	}
 	if providers.want("tmdb") {

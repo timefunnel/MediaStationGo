@@ -121,8 +121,8 @@ func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 	if got.Title != "correct title" || got.ScrapeStatus != "matched" {
 		t.Fatalf("manual match was not applied: title=%q status=%q", got.Title, got.ScrapeStatus)
 	}
-	if searchCalls != 2 || detailCalls != 2 {
-		t.Fatalf("non-FD2 adult flow changed: search calls=%d detail calls=%d, want 2 each", searchCalls, detailCalls)
+	if searchCalls != 1 || detailCalls != 1 {
+		t.Fatalf("pipeline repeated resolved adult lookup: search calls=%d detail calls=%d, want 1 each", searchCalls, detailCalls)
 	}
 }
 

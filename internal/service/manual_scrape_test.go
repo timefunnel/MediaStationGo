@@ -577,6 +577,49 @@ func TestApplyManualMatchSavesSelectedCloudMatchWhenDetailsSlow(t *testing.T) {
 	}
 }
 
+func TestApplyManualAdultMatchUsesSelectedCandidateWithoutRefetch(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		http.Error(w, "adult source must not be requested during apply", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	withAdultDefaultBases(t, []string{upstream.URL})
+
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	scraper := NewScraperService(&config.Config{}, log, repos, nil, nil, nil, nil, NewHub(log), NewAdultProvider(log, nil))
+
+	lib := model.Library{Name: "Adult", Path: "cloud://openlist/115/adult", Type: "adult", Enabled: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{LibraryID: lib.ID, Title: "MIDE-949", Path: "cloud://openlist/115/adult/MIDE-949/MIDE-949.mp4"}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scraper.ApplyManualMatch(t.Context(), media.ID, ManualScrapeRequest{
+		Source:       "adult",
+		MediaType:    "adult",
+		Title:        "Selected adult title",
+		OriginalName: "MIDE-949",
+		PosterURL:    "https://img.example/mide949.jpg",
+		Genres:       []string{"Adult", "javdb"},
+		NSFW:         true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstreamCalls != 0 {
+		t.Fatalf("adult apply source calls = %d, want 0", upstreamCalls)
+	}
+	if got == nil || got.Title != "Selected adult title" || got.PosterURL != "https://img.example/mide949.jpg" || got.ScrapeStatus != "matched" {
+		t.Fatalf("selected adult match was not applied: %+v", got)
+	}
+}
+
 func TestApplyManualMovieMatchClearsEpisodeMarkers(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {

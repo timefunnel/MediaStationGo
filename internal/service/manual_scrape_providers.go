@@ -82,8 +82,8 @@ func manualTMDbSearchTypes(mediaType string) []string {
 	}
 }
 
-func (s *ScraperService) manualAdultMatches(ctx context.Context, media *model.Media, query string) []*Match {
-	candidates := []string{query}
+func (s *ScraperService) manualAdultMatches(ctx context.Context, media *model.Media, queries []string) []*Match {
+	candidates := append([]string(nil), queries...)
 	if media != nil {
 		candidates = append(candidates, media.Path, media.OriginalName, media.Title)
 	}

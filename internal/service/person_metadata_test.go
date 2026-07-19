@@ -140,7 +140,7 @@ func TestPersistPeopleUpsertsAndPreservesExistingImage(t *testing.T) {
 	}
 }
 
-func TestPipelineManualScrapeRequestPreservesPeople(t *testing.T) {
+func TestPipelineResolvedMatchPreservesPeople(t *testing.T) {
 	person := PersonMetadata{
 		Name:       "Actor One",
 		ImageURL:   "https://images.example.test/actor-one.jpg",
@@ -148,12 +148,12 @@ func TestPipelineManualScrapeRequestPreservesPeople(t *testing.T) {
 		Source:     "tmdb",
 		SourceID:   "123",
 	}
-	request := pipelineManualScrapeRequestFromMatch(ExternalMediaResult{
+	match := pipelineMatchFromExternalResult(ExternalMediaResult{
 		Title:  "Movie",
 		Actors: []string{"Actor One"},
 		People: []PersonMetadata{person},
 	})
-	if len(request.People) != 1 || request.People[0] != person {
-		t.Fatalf("request people = %#v", request.People)
+	if len(match.People) != 1 || match.People[0] != person {
+		t.Fatalf("match people = %#v", match.People)
 	}
 }
