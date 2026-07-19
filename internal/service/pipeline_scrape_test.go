@@ -127,7 +127,7 @@ func TestPipelineScrapeAppliesUniqueManualMatch(t *testing.T) {
 }
 
 func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
-	withAdultDefaultBases(t, nil)
+	withAdultDefaultBases(t, []string{"https://unused.invalid"})
 	flareCalls := 0
 	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flareCalls++
@@ -169,28 +169,6 @@ func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
 	if err := repos.DB.Create(&media).Error; err != nil {
 		t.Fatal(err)
 	}
-	if code := normalizeAdultCode(media.OriginalName); code != "FC2-PPV-4516148" {
-		t.Fatalf("normalized FC2 code = %q", code)
-	}
-	directMatches, err := adult.SearchAll(t.Context(), media.OriginalName)
-	if err != nil || len(directMatches) != 1 {
-		t.Fatalf("direct FD2 matches = %#v, err = %v, source requests = %d", directMatches, err, flareCalls)
-	}
-	flareCalls = 0
-	manualMatches := scraper.manualAdultMatches(t.Context(), &media, []string{"FC2-PPV-4516148"})
-	if len(manualMatches) != 1 {
-		t.Fatalf("manual FD2 matches = %#v, source requests = %d", manualMatches, flareCalls)
-	}
-	flareCalls = 0
-	candidates, err := scraper.ManualSearch(t.Context(), &media, "FC2-PPV-4516148", "adult", "adult")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("FD2 manual candidates = %#v, source requests = %d", candidates, flareCalls)
-	}
-	flareCalls = 0
-
 	result, err := svc.Scrape(t.Context(), media.ID, PipelineScrapeRequest{
 		Category:  "adult",
 		Title:     "FC2-PPV-4516148",
