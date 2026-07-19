@@ -154,13 +154,17 @@ async function rescrapeMedia(
 
 async function reprobeMedia(media: Media | null, refresh: () => Promise<void>): Promise<void> {
   if (!media) return
+  const toastID = toast.loading('正在探测媒体轨，请稍候…')
   try {
     const result = await api.post(`/media/${media.id}/probe`)
-    if (result.data?.code === 0) toast.success('重新探测成功')
-    else toast.error(result.data?.error || '探测失败')
+    if (result.data?.code !== 0) {
+      toast.error(result.data?.error || '探测失败', { id: toastID })
+      return
+    }
     await refresh()
+    toast.success('媒体轨探测完成，信息已刷新', { id: toastID })
   } catch (err: unknown) {
-    toast.error(apiErrorMessage(err, '探测失败，请检查 ffprobe 是否已安装'))
+    toast.error(apiErrorMessage(err, '探测失败，请检查 ffprobe 是否已安装'), { id: toastID })
   }
 }
 

@@ -1,4 +1,5 @@
-import { Database, FileText, FolderInput, Image, Pencil, Search, Sparkles, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Database, FileText, FolderInput, Image, LoaderCircle, Pencil, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { EpisodeArtworkToggle } from '../components/EpisodeArtworkToggle'
 import type { Media } from '../types'
@@ -11,7 +12,7 @@ type MediaDetailAdminPanelProps = {
   onManualScrape: () => void
   onMetadataEdit: () => void
   onOrganize: () => void
-  onProbe: () => void
+  onProbe: () => void | Promise<void>
   onGenerateArtwork: () => void
   onExportNFO: () => void
   onSoftDelete: () => void
@@ -30,6 +31,18 @@ export function MediaDetailAdminPanel({
   onExportNFO,
   onSoftDelete,
 }: MediaDetailAdminPanelProps) {
+  const [probing, setProbing] = useState(false)
+
+  const handleProbe = async () => {
+    if (probing) return
+    setProbing(true)
+    try {
+      await onProbe()
+    } finally {
+      setProbing(false)
+    }
+  }
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-gray-50/50 p-5 space-y-3">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#c9954a]">系统后台高级控制面板</p>
@@ -58,9 +71,16 @@ export function MediaDetailAdminPanel({
           <FolderInput size={13} className="text-[#c9954a]" />
           <span>整理入库</span>
         </button>
-        <button onClick={onProbe} className="btn-outline py-2 px-3.5 text-xs gap-1.5 border-gray-200 hover:border-brand-500/50 hover:bg-brand-50">
-          <Database size={13} className="text-gray-600" />
-          <span>探测媒体轨 (ffprobe)</span>
+        <button
+          type="button"
+          onClick={() => void handleProbe()}
+          disabled={probing}
+          className="btn-outline py-2 px-3.5 text-xs gap-1.5 border-gray-200 hover:border-brand-500/50 hover:bg-brand-50 disabled:cursor-wait disabled:opacity-70"
+        >
+          {probing
+            ? <LoaderCircle size={13} className="animate-spin text-[#c9954a]" />
+            : <Database size={13} className="text-gray-600" />}
+          <span>{probing ? '探测中…' : '探测媒体轨 (ffprobe)'}</span>
         </button>
         {canGenerateArtwork(media) && (
           <button onClick={onGenerateArtwork} className="btn-outline py-2 px-3.5 text-xs gap-1.5 border-gray-200 hover:border-brand-500/50 hover:bg-brand-50">
