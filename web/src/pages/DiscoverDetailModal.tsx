@@ -31,6 +31,7 @@ export function DiscoverDetailModal({
   const [artworkPreviewURL, setArtworkPreviewURL] = useState('')
   const [resourceSidecarOpen, setResourceSidecarOpen] = useState(false)
   const [resourceSidecarRoot, setResourceSidecarRoot] = useState<HTMLDivElement | null>(null)
+  const [titleActionRoot, setTitleActionRoot] = useState<HTMLDivElement | null>(null)
   const source = discoverItemSource(resolvedItem)
 
   useEffect(() => {
@@ -75,17 +76,15 @@ export function DiscoverDetailModal({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [artworkPreviewURL])
 
-  const metadata = (
-    <>
-      <DiscoverMetadataPanel
-        item={resolvedItem}
-        loading={detailLoading}
-        error={detailError}
-        onSelectPerformer={onSelectPerformer}
-      />
-      <DiscoverOverviewPanel overview={resolvedItem.overview} />
-    </>
+  const metadataPanel = (
+    <DiscoverMetadataPanel
+      item={resolvedItem}
+      loading={detailLoading}
+      error={detailError}
+      onSelectPerformer={onSelectPerformer}
+    />
   )
+  const overviewPanel = <DiscoverOverviewPanel overview={resolvedItem.overview} />
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-2 backdrop-blur-sm sm:p-4">
@@ -96,7 +95,12 @@ export function DiscoverDetailModal({
       >
         <div className="flex max-h-[calc(100dvh-1rem)] min-w-0 flex-[3_1_0%] flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-2xl sm:max-h-[92vh] lg:max-w-5xl">
           <div className="shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <DiscoverModalHeader item={resolvedItem} source={source} onClose={onClose} />
+            <DiscoverModalHeader
+              item={resolvedItem}
+              source={source}
+              onClose={onClose}
+              setTitleActionRoot={setTitleActionRoot}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
             {resolvedItem.media_type === 'adult' ? (
@@ -107,7 +111,10 @@ export function DiscoverDetailModal({
                     deferred={detailLoading}
                     onPreview={() => setArtworkPreviewURL(resolvedItem.poster_url || '')}
                   />
-                  <div className="space-y-5">{metadata}</div>
+                  <div className="space-y-5">
+                    {metadataPanel}
+                    {overviewPanel}
+                  </div>
                 </div>
                 <DiscoverPreviewGallery
                   images={resolvedItem.preview_images}
@@ -123,16 +130,20 @@ export function DiscoverDetailModal({
                 </div>
               </>
             ) : (
-              <div className="grid items-start gap-5 lg:grid-cols-[minmax(210px,240px)_minmax(0,1fr)]">
-                <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewURL(resolvedItem.poster_url || '')} />
+              <div className="grid items-start gap-5 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
                 <div className="min-w-0 space-y-4">
-                  <DiscoverBackdropPanel item={resolvedItem} />
-                  {metadata}
+                  <DiscoverArtworkPanel item={resolvedItem} onPreview={() => setArtworkPreviewURL(resolvedItem.poster_url || '')} />
+                  {overviewPanel}
                   <DiscoverResourceAction
                     item={resolvedItem}
                     sidecarRoot={resourceSidecarRoot}
+                    subscriptionActionRoot={titleActionRoot}
                     onSidecarOpenChange={setResourceSidecarOpen}
                   />
+                </div>
+                <div className="min-w-0 space-y-4">
+                  <DiscoverBackdropPanel item={resolvedItem} />
+                  {metadataPanel}
                 </div>
               </div>
             )}

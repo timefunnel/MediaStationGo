@@ -17,10 +17,12 @@ import { mergeResourceImportTasks } from './resourceImportModel'
 export function DiscoverResourceAction({
   item,
   sidecarRoot,
+  subscriptionActionRoot,
   onSidecarOpenChange,
 }: {
   item: DiscoverItem
   sidecarRoot?: HTMLElement | null
+  subscriptionActionRoot?: HTMLElement | null
   onSidecarOpenChange?: (open: boolean) => void
 }) {
   const [libraries, setLibraries] = useState<Library[]>([])
@@ -91,6 +93,17 @@ export function DiscoverResourceAction({
   const enabledRoots = (selectedLibrary?.roots ?? []).filter((root) => root.enabled)
   const effectiveSubscriptionRootID = subscriptionRootID || (enabledRoots.length === 1 ? enabledRoots[0].id : '')
   const canSubscribe = isAdmin && ['tv', 'anime', 'variety'].includes((item.media_type || '').toLowerCase())
+  const subscriptionButton = canSubscribe && selectedLibrary ? (
+    <button
+      type="button"
+      className="btn-outline h-9 gap-1.5 px-3 text-xs"
+      disabled={!effectiveSubscriptionRootID || subscribing || subscribed}
+      onClick={() => void createSubscription()}
+    >
+      {subscribing ? <LoaderCircle size={14} className="animate-spin" /> : subscribed ? <Check size={14} /> : <BellPlus size={14} />}
+      {subscribed ? '已订阅' : '订阅追更'}
+    </button>
+  ) : null
   const acceptTask = useCallback((task: ResourceImportTask) => {
     setTasks((current) => mergeResourceImportTasks(current, [task]))
   }, [])
@@ -211,7 +224,7 @@ export function DiscoverResourceAction({
               </button>
             )}
           </div>
-          {canSubscribe && selectedLibrary && (
+          {canSubscribe && selectedLibrary && (enabledRoots.length > 1 || !subscriptionActionRoot) && (
             <div className="flex flex-wrap items-end gap-2">
               {enabledRoots.length > 1 && (
                 <label className="min-w-56 flex-1 text-xs text-sand-500">
@@ -226,15 +239,7 @@ export function DiscoverResourceAction({
                   </select>
                 </label>
               )}
-              <button
-                type="button"
-                className="btn-outline gap-2"
-                disabled={!effectiveSubscriptionRootID || subscribing || subscribed}
-                onClick={() => void createSubscription()}
-              >
-                {subscribing ? <LoaderCircle size={15} className="animate-spin" /> : subscribed ? <Check size={15} /> : <BellPlus size={15} />}
-                {subscribed ? '已订阅' : '订阅追更'}
-              </button>
+              {!subscriptionActionRoot && subscriptionButton}
             </div>
           )}
           {selectedLibrary && (
@@ -261,6 +266,7 @@ export function DiscoverResourceAction({
         </>
       )}
       </section>
+      {subscriptionActionRoot && subscriptionButton ? createPortal(subscriptionButton, subscriptionActionRoot) : null}
       {wideLayout && sidecarOpen && sidecarRoot && resourceSearch ? createPortal(resourceSearch, sidecarRoot) : null}
     </>
   )

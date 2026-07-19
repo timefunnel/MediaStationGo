@@ -28,12 +28,27 @@ import {
   discoverReleaseStatus,
 } from './discoverDetailModalModel'
 
-export function DiscoverModalHeader({ item, source, onClose }: { item: DiscoverItem; source: string; onClose: () => void }) {
+export function DiscoverModalHeader({
+  item,
+  source,
+  onClose,
+  setTitleActionRoot,
+}: {
+  item: DiscoverItem
+  source: string
+  onClose: () => void
+  setTitleActionRoot?: (element: HTMLDivElement | null) => void
+}) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
-      <div>
+      <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-widest text-brand-500">{source}</p>
-        <h2 className="font-display text-2xl font-bold text-ink-600">{item.title}</h2>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h2 className="font-display text-2xl font-bold text-ink-600">{item.title}</h2>
+          {['tv', 'anime', 'variety'].includes((item.media_type || '').toLowerCase()) && (
+            <div ref={setTitleActionRoot} className="shrink-0" />
+          )}
+        </div>
         <p className="mt-1 text-sm text-sand-500">{discoverItemMetaText(item)}</p>
       </div>
       <button
