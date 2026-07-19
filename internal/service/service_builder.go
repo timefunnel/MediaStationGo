@@ -127,6 +127,9 @@ func (b *serviceContainerBuilder) initProviderServices() {
 	b.c.RecognitionWords = NewRecognitionWordsService(b.log, b.repos)
 
 	b.c.Adult = NewAdultProvider(b.log, b.c.APIConfig)
+	if b.cfg.FlareSolverr.Enabled {
+		b.c.Adult.SetFlareSolverr(b.cfg.FlareSolverr.URL, b.cfg.FlareSolverr.Timeout)
+	}
 	b.c.Scraper = NewScraperService(
 		b.cfg, b.log, b.repos,
 		b.c.TMDb, b.c.Bangumi, b.c.TheTVDB, b.c.Fanart,

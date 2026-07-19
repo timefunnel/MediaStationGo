@@ -50,6 +50,8 @@ type AdultProvider struct {
 	log                    *zap.Logger
 	client                 *http.Client
 	apiConfig              *APIConfigService
+	flareSolverrURL        string
+	flareSolverrTimeout    int
 	javDBPerformerSections adultJavDBPerformerSectionCache
 }
 
@@ -59,6 +61,14 @@ func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvid
 		apiConfig: apiConfig,
 		client:    NewExternalHTTPClient(12 * time.Second),
 	}
+}
+
+func (p *AdultProvider) SetFlareSolverr(rawURL string, timeout int) {
+	if p == nil {
+		return
+	}
+	p.flareSolverrURL = strings.TrimSpace(rawURL)
+	p.flareSolverrTimeout = timeout
 }
 
 func (p *AdultProvider) Enabled() bool {
@@ -83,6 +93,20 @@ func (p *AdultProvider) SearchAll(ctx context.Context, code string) ([]*Match, e
 		return nil, nil
 	}
 	var lastErr error
+	if adultFC2Number(code) != "" && p.flareSolverrURL != "" {
+		match, err := p.scrapeFD2PPV(ctx, code)
+		if err != nil {
+			if p.log != nil {
+				p.log.Warn("fd2ppv adult scrape failed", zap.String("code", code), zap.Error(err))
+			}
+			return nil, err
+		} else if match != nil {
+			match.OriginalName = code
+			match.NSFW = true
+			return []*Match{match}, nil
+		}
+		return nil, nil
+	}
 	out := make([]*Match, 0, len(bases))
 	seen := map[string]struct{}{}
 	for _, base := range bases {

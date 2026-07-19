@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -56,6 +57,7 @@ type FlareSolverrSolution struct {
 // FetchURLWithFlareSolverr uses FlareSolverr to fetch a URL,
 // bypassing Cloudflare/WAF challenges.
 func FetchURLWithFlareSolverr(flareSolverrURL string, targetURL string, cookieStr string, timeout int, proxyURL string, log *zap.Logger) (string, error) {
+	flareSolverrURL = normalizeFlareSolverrEndpoint(flareSolverrURL)
 	if flareSolverrURL == "" {
 		return "", fmt.Errorf("FlareSolverr URL not configured")
 	}
@@ -105,9 +107,27 @@ func FetchURLWithFlareSolverr(flareSolverrURL string, targetURL string, cookieSt
 	}
 
 	if fsResp.Solution != nil {
+		if fsResp.Solution.Status >= http.StatusBadRequest {
+			return "", fmt.Errorf("FlareSolverr target returned %d", fsResp.Solution.Status)
+		}
 		return fsResp.Solution.Response, nil
 	}
 	return "", fmt.Errorf("FlareSolverr returned no solution")
+}
+
+func normalizeFlareSolverrEndpoint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return raw
+	}
+	if strings.TrimSpace(u.Path) == "" || u.Path == "/" {
+		u.Path = "/v1"
+	}
+	return u.String()
 }
 
 // parseCookiesForFlareSolverr converts a cookie header string to FlareSolverr format.

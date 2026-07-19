@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -344,5 +345,135 @@ func TestParseOneJavDetailHTML(t *testing.T) {
 	}
 	if got.Title != "FC2-PPV-4661145" || got.OriginalName != "FC2-PPV-4661145" || got.PosterURL != "https://onejav.com/fc2.jpg" {
 		t.Fatalf("unexpected onejav match: %+v", got)
+	}
+}
+
+func TestParseFD2PPVDetailHTML(t *testing.T) {
+	body := `<html>
+		<h1 class="work-title">3780016 <span>copy</span></h1>
+		<div class="work-brief">【#102】色白コスメ店員の作品タイトル</div>
+		<div class="work-original-photos">
+			https://storage.example/cover.jpg
+			https://preview.example/ps1.webp
+			https://preview.example/ps2.webp
+		</div>
+		<div class="work-meta-label">カテゴリ</div><div class="work-meta-value"><span>流出</span></div>
+		<div class="work-meta-label">モザイク</div><div class="work-meta-value"><span>無</span></div>
+		<div class="work-meta-label">顔出し</div><div class="work-meta-value"><span>○</span></div>
+		<div class="work-meta-label">配信日</div><div class="work-meta-value">2023-09-07</div>
+		<div class="work-meta-label">収録時間</div><div class="work-meta-value" id="duration">00:48:57</div>
+		<div class="work-meta-label">販売者</div><div class="work-meta-value"><a href="/channels/test">趣味はめ</a></div>
+		<h3 class="artist-name"><a href="/actresses/1669" class="artistUrl" data-actress="1669">中田ゆめ</a></h3>
+	</html>`
+
+	got := parseFD2PPVDetailHTML(body, "FC2-PPV-3780016", "https://fd2ppv.cc/articles/3780016")
+	if got == nil {
+		t.Fatal("parseFD2PPVDetailHTML returned nil")
+	}
+	if got.Title != "【#102】色白コスメ店員の作品タイトル" || got.OriginalName != "FC2-PPV-3780016" {
+		t.Fatalf("titles = %q / %q", got.Title, got.OriginalName)
+	}
+	if got.ReleaseDate != "2023-09-07" || got.Year != 2023 || got.DurationMinutes != 48 || got.Maker != "趣味はめ" {
+		t.Fatalf("detail fields = %+v", got)
+	}
+	if got.PosterURL != "https://storage.example/cover.jpg" || got.BackdropURL != got.PosterURL {
+		t.Fatalf("artwork = poster %q backdrop %q", got.PosterURL, got.BackdropURL)
+	}
+	if len(got.PreviewImages) != 2 || got.PreviewImages[0] != "https://preview.example/ps1.webp" {
+		t.Fatalf("preview images = %#v", got.PreviewImages)
+	}
+	if len(got.Actors) != 1 || got.Actors[0] != "中田ゆめ" || len(got.People) != 1 {
+		t.Fatalf("people = %#v actors = %#v", got.People, got.Actors)
+	}
+	if got.People[0].Source != "fd2ppv" || got.People[0].SourceID != "1669" || got.People[0].ProfileURL != "https://fd2ppv.cc/actresses/1669" {
+		t.Fatalf("person source = %+v", got.People[0])
+	}
+	if len(got.Genres) != 5 || got.Genres[2] != "流出" || got.Genres[3] != "无码" || got.Genres[4] != "露脸" {
+		t.Fatalf("genres = %#v", got.Genres)
+	}
+}
+
+func TestParseFD2PPVDetailHTMLRejectsMismatchedWork(t *testing.T) {
+	body := `<h1 class="work-title">3780017</h1><div class="work-brief">wrong work</div>`
+	if got := parseFD2PPVDetailHTML(body, "FC2-PPV-3780016", "https://fd2ppv.cc/articles/3780016"); got != nil {
+		t.Fatalf("mismatched work = %+v", got)
+	}
+}
+
+func TestAdultProviderUsesFD2PPVForFC2BeforeLegacySources(t *testing.T) {
+	withAdultDefaultBases(t, []string{"https://unused.invalid"})
+	requestedURL := ""
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1" {
+			t.Fatalf("FlareSolverr path = %q", r.URL.Path)
+		}
+		var request struct {
+			Cmd string `json:"cmd"`
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Cmd != "request.get" {
+			t.Fatalf("FlareSolverr cmd = %q", request.Cmd)
+		}
+		requestedURL = request.URL
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status": 200,
+				"response": `<h1 class="work-title">3780016</h1>
+					<div class="work-brief">FD2 rich title</div>
+					<div class="work-original-photos">https://img.example/fd2.jpg</div>
+					<div class="work-meta-label">配信日</div><div class="work-meta-value">2023-09-07</div>`,
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	match, err := provider.Search(context.Background(), "FC2-PPV-3780016")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestedURL != "https://fd2ppv.cc/articles/3780016" {
+		t.Fatalf("target URL = %q", requestedURL)
+	}
+	if match == nil || match.Title != "FD2 rich title" || match.PosterURL != "https://img.example/fd2.jpg" {
+		t.Fatalf("fd2ppv match = %+v", match)
+	}
+	if len(match.Genres) < 2 || match.Genres[1] != "fd2ppv" {
+		t.Fatalf("match genres = %#v", match.Genres)
+	}
+}
+
+func TestAdultProviderDoesNotHideFD2PPVFailureBehindLegacyFC2Match(t *testing.T) {
+	legacyCalls := 0
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		legacyCalls++
+		_, _ = w.Write([]byte(`<title>FC2PPV3780016 - OneJAV.com</title><img class="image" src="/cover.jpg">`))
+	}))
+	defer legacy.Close()
+	withAdultDefaultBases(t, []string{legacy.URL})
+
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "error",
+			"message": "challenge failed",
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	match, err := provider.Search(context.Background(), "FC2-PPV-3780016")
+	if err == nil || match != nil {
+		t.Fatalf("match = %+v, err = %v", match, err)
+	}
+	if legacyCalls != 0 {
+		t.Fatalf("legacy FC2 source calls = %d, want 0", legacyCalls)
 	}
 }
