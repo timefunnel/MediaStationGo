@@ -184,6 +184,7 @@ export function DiscoverPage() {
 	const searchGroups = useMemo(() => groupDiscoverSearchItems(searchItems), [searchItems])
 	const searchActive = searchLoading || searchDone
 	const showSearchArea = sectionsReady && searchActive
+	const adultSearchAvailable = sections.some((section) => section.group === 'adult')
 
   const openSectionPicker = () => {
 		setSectionPickerDraft(selected)
@@ -346,6 +347,7 @@ export function DiscoverPage() {
 		searchQuery={searchQuery}
         searchLoading={searchLoading}
         searchActive={searchActive}
+		adultSearchAvailable={adultSearchAvailable}
 		onOpenSectionPicker={openSectionPicker}
 		onSearchQueryChange={setSearchQuery}
 		onSearch={() => void searchDiscoverCatalog()}
@@ -383,7 +385,7 @@ export function DiscoverPage() {
 
 			{sectionsReady && searchLoading && (
 				<div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-brand-500">
-					正在聚合搜索 TMDb、豆瓣、Bangumi{sections.some((section) => section.group === 'adult') ? ' 与 JavDB' : ''}…
+					正在聚合搜索 TMDb、豆瓣、Bangumi{adultSearchAvailable ? ' 与 JavDB' : ''}…
 				</div>
 			)}
 
@@ -399,7 +401,9 @@ export function DiscoverPage() {
 
 			{sectionsReady && searchDone && !searchLoading && Object.keys(searchErrors).length === 0 && searchItems.length === 0 && (
 				<div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
-					没有找到匹配的电影、剧集、动漫、女优或成人作品
+					{adultSearchAvailable
+						? '没有找到匹配的电影、剧集、动漫、女优或成人作品'
+						: '没有找到匹配的电影、剧集或动漫'}
 				</div>
 			)}
 		</div>}

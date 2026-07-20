@@ -17,8 +17,9 @@ export function DiscoverHeader({
   sectionsReady,
 	selectionSaving,
 	searchQuery,
-	searchLoading,
+  searchLoading,
   searchActive,
+	adultSearchAvailable,
 	onOpenSectionPicker,
 	onSearchQueryChange,
 	onSearch,
@@ -30,6 +31,7 @@ export function DiscoverHeader({
   searchQuery: string
   searchLoading: boolean
   searchActive: boolean
+	adultSearchAvailable: boolean
 	onOpenSectionPicker: () => void
 	onSearchQueryChange: (value: string) => void
 	onSearch: () => void
@@ -66,7 +68,7 @@ export function DiscoverHeader({
 				type="search"
 				value={searchQuery}
 				onChange={(event) => onSearchQueryChange(event.target.value)}
-				placeholder="搜索电影、剧集、动漫、女优或番号"
+				placeholder={adultSearchAvailable ? '搜索电影、剧集、动漫、女优或番号' : '搜索电影、剧集或动漫'}
 				aria-label="聚合搜索"
 				className="h-11 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-4 text-base text-ink-600 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100 sm:text-sm"
 			/>
