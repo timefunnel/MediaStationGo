@@ -11,6 +11,7 @@ import { requestPassword } from '../components/requestPassword'
 import { AdminUsersForm } from './AdminUsersForm'
 import { AdminUserLibraryAccessModal } from './AdminUserLibraryAccessModal'
 import { AdminUserMenuPermissionModal } from './AdminUserMenuPermissionModal'
+import { AdminUserHistoryModal } from './AdminUserHistoryModal'
 import { AdminUsersTable } from './AdminUsersTable'
 
 export function AdminUsersPanel() {
@@ -30,6 +31,8 @@ export function AdminUsersPanel() {
   const [loadingPermissionID, setLoadingPermissionID] = useState<string | null>(null)
   const [savingPermission, setSavingPermission] = useState(false)
   const [resettingPermission, setResettingPermission] = useState(false)
+  const [updatingAdultContentID, setUpdatingAdultContentID] = useState<string | null>(null)
+  const [historyUser, setHistoryUser] = useState<User | null>(null)
   const refresh = async () => {
     const [nextUsers, nextLicense] = await Promise.all([
       adminAPI.listUsers(),
@@ -166,6 +169,32 @@ export function AdminUsersPanel() {
     }
   }
 
+  const toggleAdultContentBlocked = async (u: User) => {
+    if (u.role === 'admin' || updatingAdultContentID) return
+    const blocked = !u.adult_content_blocked
+    const confirmed = await confirmAction({
+      title: blocked ? '屏蔽成人内容' : '解除成人内容屏蔽',
+      message: blocked
+        ? `屏蔽「${u.username}」后，首页、最近入库、搜索、媒体详情、播放及第三方客户端都会立即过滤成人作品。`
+        : `解除「${u.username}」的管理员强制屏蔽后，仍会继续遵循全局开关和播放配置。`,
+      confirmText: blocked ? '确认屏蔽' : '解除屏蔽',
+    })
+    if (!confirmed) return
+    setUpdatingAdultContentID(u.id)
+    try {
+      const updated = await adminAPI.setUserAdultContentBlocked(u.id, blocked)
+      setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      toast.success(blocked ? '已严格屏蔽该用户的成人内容' : '已解除管理员强制屏蔽')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        '更新成人内容限制失败'
+      toast.error(msg)
+    } finally {
+      setUpdatingAdultContentID(null)
+    }
+  }
+
   const openLibraryAccess = async (user: User) => {
     if (user.role === 'admin' || loadingLibraryAccessID) return
     setLoadingLibraryAccessID(user.id)
@@ -265,6 +294,9 @@ export function AdminUsersPanel() {
         onManageLibraries={openLibraryAccess}
         loadingPermissionID={loadingPermissionID}
         onManagePermissions={openMenuPermission}
+        updatingAdultContentID={updatingAdultContentID}
+        onToggleAdultContentBlocked={toggleAdultContentBlocked}
+        onViewHistory={setHistoryUser}
       />
 
       {libraryAccessUser && (
@@ -291,6 +323,14 @@ export function AdminUsersPanel() {
           }}
           onSave={saveMenuPermission}
           onReset={resetMenuPermission}
+        />
+      )}
+
+      {historyUser && (
+        <AdminUserHistoryModal
+          key={historyUser.id}
+          user={historyUser}
+          onClose={() => setHistoryUser(null)}
         />
       )}
     </div>

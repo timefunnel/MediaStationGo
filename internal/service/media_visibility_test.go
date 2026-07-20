@@ -240,6 +240,60 @@ func TestUserLibraryAccessIsHardLimitForDefaultProfile(t *testing.T) {
 	}
 }
 
+func TestAdminBlockedUserFiltersAdultWorksInsideMixedLibrary(t *testing.T) {
+	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Media{}, &model.Setting{}, &model.PlayProfile{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "综合媒体库", Path: "/media/mixed", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	viewer := &model.User{
+		Base:                model.Base{ID: "blocked-viewer"},
+		Username:            "blocked-viewer",
+		PasswordHash:        "hash",
+		Role:                "user",
+		HideAdult:           false,
+		AdultContentBlocked: true,
+	}
+	if err := repos.User.Create(t.Context(), viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.PlayProfile{
+		UserID: viewer.ID, Name: "允许成人的默认配置", IsDefault: true, AllowAdult: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&[]model.Media{
+		{LibraryID: lib.ID, Title: "普通作品", Path: "/media/mixed/safe.mkv"},
+		{LibraryID: lib.ID, Title: "成人作品", Path: "/media/mixed/adult.mkv", NSFW: true},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	visibility := UserDefaultMediaVisibility(t.Context(), repos, viewer.ID)
+	if visibility.IncludeNSFW {
+		t.Fatal("administrator block must override user preference and an adult-enabled play profile")
+	}
+	if !LibraryVisibleForUser(t.Context(), repos, lib, visibility) {
+		t.Fatal("a mixed library must remain visible when only its adult works are blocked")
+	}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+	items, err := svc.SearchMediaVisible(t.Context(), "作品", 20, visibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sortedMediaTitles(items); !slices.Equal(got, []string{"普通作品"}) {
+		t.Fatalf("blocked search leaked adult works: %#v", got)
+	}
+	recent, err := svc.ListRecentSeriesCards(t.Context(), 20, visibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 1 || recent[0].Rep.Title != "普通作品" {
+		t.Fatalf("blocked recent additions leaked adult works: %#v", recent)
+	}
+}
+
 func TestSearchMediaVisibleHonorsLargePosterWallLimit(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
 	repos := repository.New(db)

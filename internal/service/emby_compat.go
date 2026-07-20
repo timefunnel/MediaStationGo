@@ -60,8 +60,9 @@ type EmbyService struct {
 	virtualSeasons map[string]embySeasonCacheEntry
 	virtualArtwork map[string]embyArtworkCacheEntry
 
-	visibilityMu    sync.RWMutex
-	visibilityCache map[string]embyVisibilityCacheEntry
+	visibilityMu      sync.RWMutex
+	visibilityCache   map[string]embyVisibilityCacheEntry
+	visibilityVersion map[string]uint64
 
 	cloudProbeMu       sync.Mutex
 	cloudProbeInFlight map[string]struct{}

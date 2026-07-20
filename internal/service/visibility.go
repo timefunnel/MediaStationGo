@@ -32,13 +32,22 @@ func AdultContentEnabled(ctx context.Context, repo *repository.Container) bool {
 	}
 }
 
-// UserHidesAdult reports whether a user's own lock overrides all profiles.
+// UserHidesAdult reports whether either the user's own preference or an
+// administrator-enforced restriction overrides all playback profiles.
 func UserHidesAdult(ctx context.Context, repo *repository.Container, userID string) bool {
 	if strings.TrimSpace(userID) == "" || repo == nil || repo.User == nil {
 		return false
 	}
 	user, err := repo.User.FindByID(ctx, userID)
-	return err == nil && user != nil && user.HideAdult
+	if err != nil {
+		// Adult visibility is a security boundary. A failed policy lookup must
+		// not silently turn adult content back on for an authenticated user.
+		return true
+	}
+	if user == nil {
+		return false
+	}
+	return user.HideAdult || user.AdultContentBlocked
 }
 
 // UserDefaultMediaVisibility is the visibility policy used by clients that
@@ -202,15 +211,6 @@ func LibraryVisibleForUser(ctx context.Context, repo *repository.Container, lib 
 	}
 	if LibraryLooksAdult(lib) {
 		return false
-	}
-	if repo != nil && repo.DB != nil {
-		var count int64
-		_ = repo.DB.WithContext(ctx).Model(&model.Media{}).
-			Where("library_id = ? AND nsfw = ?", lib.ID, true).
-			Count(&count).Error
-		if count > 0 {
-			return false
-		}
 	}
 	return true
 }

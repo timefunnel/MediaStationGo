@@ -69,6 +69,20 @@ func TestEmbyReadCacheFlightWaiterReadsOwnerCache(t *testing.T) {
 	}
 }
 
+func TestInvalidateUserVisibilityChangesEmbyReadCacheKeys(t *testing.T) {
+	svc := NewEmbyService(&config.Config{}, zap.NewNop(), nil)
+	params := ItemsParams{UserID: "viewer", Limit: 20}
+	itemsBefore := svc.embyItemsCacheKey("items", params)
+	latestBefore := svc.embyLatestCacheKey("viewer", "", 20)
+	svc.InvalidateUserVisibility("viewer")
+	if itemsAfter := svc.embyItemsCacheKey("items", params); itemsAfter == itemsBefore {
+		t.Fatal("items cache key must change immediately after a visibility update")
+	}
+	if latestAfter := svc.embyLatestCacheKey("viewer", "", 20); latestAfter == latestBefore {
+		t.Fatal("latest cache key must change immediately after a visibility update")
+	}
+}
+
 func TestEmbyLatestItemsCacheReturnsIndependentPayload(t *testing.T) {
 	svc := newTestEmbyService(t)
 	svc.SetRuntimeCache(NewRuntimeCacheService(&config.Config{}, zap.NewNop()))

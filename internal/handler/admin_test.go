@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -96,5 +97,81 @@ func TestUpdateUserLibrariesPersistsValidatedScope(t *testing.T) {
 	router.ServeHTTP(badW, badReq)
 	if badW.Code != http.StatusBadRequest {
 		t.Fatalf("invalid library status = %d body=%s", badW.Code, badW.Body.String())
+	}
+}
+
+func TestUpdateUserAdultContentPersistsAdministratorBlock(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.New(db)
+	viewer := model.User{Base: model.Base{ID: "viewer"}, Username: "viewer", PasswordHash: "x", Role: "user", IsActive: true}
+	if err := repos.User.Create(t.Context(), &viewer); err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	router.PATCH("/admin/users/:id/adult-content", updateUserAdultContentHandler(&service.Container{Repo: repos}))
+	req := httptest.NewRequest(http.MethodPatch, "/admin/users/viewer/adult-content", bytes.NewBufferString(`{"blocked":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	updated, err := repos.User.FindByID(t.Context(), viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.AdultContentBlocked {
+		t.Fatal("administrator adult content block was not persisted")
+	}
+}
+
+func TestAdminCanListSpecifiedUserPlaybackHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Media{}, &model.PlaybackHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.New(db)
+	viewer := model.User{Base: model.Base{ID: "viewer-history"}, Username: "viewer", PasswordHash: "x", Role: "user", IsActive: true}
+	media := model.Media{Base: model.Base{ID: "adult-media"}, LibraryID: "mixed", Title: "成人作品", Path: "/mixed/adult.mkv", NSFW: true}
+	if err := repos.User.Create(t.Context(), &viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	history := model.PlaybackHistory{UserID: viewer.ID, MediaID: media.ID, PositionMs: 12_000, DurationMs: 60_000, WatchedAt: time.Now()}
+	if err := repos.DB.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.Container{Repo: repos, Playback: service.NewPlaybackService(zap.NewNop(), repos)}
+	router := gin.New()
+	router.GET("/admin/users/:id/history", listUserHistoryHandler(svc))
+	req := httptest.NewRequest(http.MethodGet, "/admin/users/viewer-history/history?page=1&page_size=20", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Items []service.HistoryItem `json:"items"`
+		Total int64                 `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 || payload.Items[0].Media == nil || payload.Items[0].Media.ID != media.ID {
+		t.Fatalf("unexpected history payload: %#v", payload)
 	}
 }

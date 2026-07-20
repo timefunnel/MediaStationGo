@@ -25,6 +25,11 @@ func recordProgressHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		media, err := svc.Media.GetMedia(c.Request.Context(), req.MediaID)
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
 		uid, _ := c.Get(middleware.CtxUserID)
 		if err := svc.Playback.RecordProgress(
 			c.Request.Context(), uid.(string), req.MediaID, req.PositionMs, req.DurationMs,
@@ -59,6 +64,11 @@ func recentHistoryHandler(svc *service.Container) gin.HandlerFunc {
 
 func toggleFavouriteHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
 		uid, _ := c.Get(middleware.CtxUserID)
 		state, err := svc.Playback.ToggleFavourite(
 			c.Request.Context(), uid.(string), c.Param("id"),
@@ -162,6 +172,11 @@ func addPlaylistItemHandler(svc *service.Container) gin.HandlerFunc {
 		var req playlistItemReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		media, err := svc.Media.GetMedia(c.Request.Context(), req.MediaID)
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
 		if err := svc.Playback.AddToPlaylist(

@@ -8,6 +8,7 @@ export interface User {
   avatar_url?: string
   allowed_library_ids?: string[]
   hide_adult?: boolean
+  adult_content_blocked?: boolean
   force_password_reset: boolean
   is_active: boolean
   is_default_admin?: boolean

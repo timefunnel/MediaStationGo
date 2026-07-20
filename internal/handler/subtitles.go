@@ -28,6 +28,11 @@ type subtitleCandidateRequest struct {
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
 		tracks, err := svc.Subtitle.Discover(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -42,6 +47,11 @@ func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
 
 func serveSubtitleHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
 		path := c.Query("path")
 		if path == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing path"})

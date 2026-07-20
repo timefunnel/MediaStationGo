@@ -96,8 +96,23 @@ func (e *EmbyService) InvalidateUserVisibility(userID string) {
 		return
 	}
 	e.visibilityMu.Lock()
-	delete(e.visibilityCache, strings.TrimSpace(userID))
+	key := strings.TrimSpace(userID)
+	delete(e.visibilityCache, key)
+	if e.visibilityVersion == nil {
+		e.visibilityVersion = make(map[string]uint64)
+	}
+	e.visibilityVersion[key]++
 	e.visibilityMu.Unlock()
+}
+
+func (e *EmbyService) userVisibilityVersion(userID string) uint64 {
+	if e == nil {
+		return 0
+	}
+	e.visibilityMu.RLock()
+	version := e.visibilityVersion[strings.TrimSpace(userID)]
+	e.visibilityMu.RUnlock()
+	return version
 }
 
 func (e *EmbyService) mergedLibraryIDs(ctx context.Context, libraryID string) []string {

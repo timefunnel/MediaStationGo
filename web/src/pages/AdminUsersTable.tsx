@@ -1,4 +1,4 @@
-import { KeyRound, LibraryBig, Loader2, Pencil, ShieldCheck, SlidersHorizontal, Trash2, UserCheck, UserX, X } from 'lucide-react'
+import { History as HistoryIcon, KeyRound, LibraryBig, Loader2, Pencil, Shield, ShieldCheck, ShieldOff, SlidersHorizontal, Trash2, UserCheck, UserX, X } from 'lucide-react'
 
 import type { User } from '../types'
 
@@ -9,6 +9,7 @@ type AdminUsersTableProps = {
   resettingPasswordID: string | null
   loadingLibraryAccessID: string | null
   loadingPermissionID: string | null
+  updatingAdultContentID: string | null
   onEditingUsernameChange: (value: string) => void
   onSaveEdit: (id: string) => void
   onCancelEdit: () => void
@@ -18,6 +19,8 @@ type AdminUsersTableProps = {
   onDeleteUser: (user: User) => void
   onManageLibraries: (user: User) => void
   onManagePermissions: (user: User) => void
+  onToggleAdultContentBlocked: (user: User) => void
+  onViewHistory: (user: User) => void
 }
 
 export function AdminUsersTable({
@@ -27,6 +30,7 @@ export function AdminUsersTable({
   resettingPasswordID,
   loadingLibraryAccessID,
   loadingPermissionID,
+  updatingAdultContentID,
   onEditingUsernameChange,
   onSaveEdit,
   onCancelEdit,
@@ -36,6 +40,8 @@ export function AdminUsersTable({
   onDeleteUser,
   onManageLibraries,
   onManagePermissions,
+  onToggleAdultContentBlocked,
+  onViewHistory,
 }: AdminUsersTableProps) {
   return (
     <div className="glass-panel overflow-x-auto">
@@ -74,7 +80,7 @@ export function AdminUsersTable({
               <td className="text-ink-50">
                 {u.role === 'admin'
                   ? '全部管理权限 · 全部媒体库'
-                  : `仅浏览/播放 · ${(u.allowed_library_ids ?? []).length > 0 ? `${u.allowed_library_ids?.length} 个媒体库` : '全部媒体库'}`}
+                  : `仅浏览/播放 · ${(u.allowed_library_ids ?? []).length > 0 ? `${u.allowed_library_ids?.length} 个媒体库` : '全部媒体库'}${u.adult_content_blocked ? ' · 成人内容已屏蔽' : ''}`}
               </td>
               <td className="text-ink-50">
                 <span className="inline-flex flex-wrap items-center gap-2">
@@ -122,6 +128,38 @@ export function AdminUsersTable({
                   onClick={() => onManagePermissions(u)}
                 >
                   {loadingPermissionID === u.id ? <Loader2 size={12} className="animate-spin" /> : <SlidersHorizontal size={12} />}
+                </button>
+                <button
+                  className={
+                    'rounded-lg border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ' +
+                    (u.adult_content_blocked
+                      ? 'border-red-400/50 bg-red-400/10 text-red-500 hover:bg-red-400/15'
+                      : 'border-gray-300 text-ink-50 hover:bg-gray-100')
+                  }
+                  title={
+                    u.role === 'admin'
+                      ? '管理员账号不使用成人内容强制屏蔽'
+                      : u.adult_content_blocked
+                        ? '已严格屏蔽成人内容，点击解除'
+                        : '严格屏蔽该用户的成人内容'
+                  }
+                  disabled={u.role === 'admin' || updatingAdultContentID !== null}
+                  onClick={() => onToggleAdultContentBlocked(u)}
+                >
+                  {updatingAdultContentID === u.id ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : u.adult_content_blocked ? (
+                    <ShieldOff size={12} />
+                  ) : (
+                    <Shield size={12} />
+                  )}
+                </button>
+                <button
+                  className="rounded-lg border border-cyan-400/40 px-2 py-1 text-xs text-cyan-600 hover:bg-cyan-400/10"
+                  title="查看播放记录"
+                  onClick={() => onViewHistory(u)}
+                >
+                  <HistoryIcon size={12} />
                 </button>
                 <button
                   className="rounded-lg border border-amber-400/40 px-2 py-1 text-xs text-amber-500 hover:bg-amber-400/10"

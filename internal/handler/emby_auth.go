@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,27 @@ func embyAuthRequiredWithSessionFallback(secret string) gin.HandlerFunc {
 			}
 		}
 		required(c)
+	}
+}
+
+func embyAuthenticatedUserScopeRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authenticatedUserID := embyUserID(c)
+		if authenticatedUserID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"Code": 40101, "Message": "User not found"})
+			return
+		}
+		if requestedUserID := strings.TrimSpace(c.Param("userId")); requestedUserID != "" && requestedUserID != authenticatedUserID {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"Code": 40304, "Message": "User scope denied"})
+			return
+		}
+		for _, key := range []string{"UserId", "userId", "userid"} {
+			if requestedUserID := strings.TrimSpace(c.Query(key)); requestedUserID != "" && requestedUserID != authenticatedUserID {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"Code": 40304, "Message": "User scope denied"})
+				return
+			}
+		}
+		c.Next()
 	}
 }
 

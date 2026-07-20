@@ -36,6 +36,7 @@ func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		kind,
 		p.UserID,
+		strconv.FormatUint(e.userVisibilityVersion(p.UserID), 10),
 		p.ParentID,
 		strings.Join(ids, ","),
 		strings.Join(personIDs, ","),
@@ -53,7 +54,13 @@ func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
 }
 
 func (e *EmbyService) embyLatestCacheKey(userID, parentID string, limit int) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{"latest", userID, parentID, strconv.Itoa(limit)}, "|")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		"latest",
+		userID,
+		strconv.FormatUint(e.userVisibilityVersion(userID), 10),
+		parentID,
+		strconv.Itoa(limit),
+	}, "|")))
 	return "media:emby:" + hex.EncodeToString(sum[:])
 }
 

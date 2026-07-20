@@ -88,10 +88,7 @@ func embyPlayingProgressHandler(svc *service.Container) gin.HandlerFunc {
 
 func embyFavoriteHandler(svc *service.Container, fav bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uid := c.Param("userId")
-		if uid == "" {
-			uid = embyUserID(c)
-		}
+		uid := embyUserID(c)
 		mid := c.Param("itemId")
 		if uid == "" || mid == "" {
 			c.Status(http.StatusBadRequest)
@@ -112,10 +109,7 @@ func embyFavoriteHandler(svc *service.Container, fav bool) gin.HandlerFunc {
 
 func embyMarkPlayedHandler(svc *service.Container, played bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uid := c.Param("userId")
-		if uid == "" {
-			uid = embyUserID(c)
-		}
+		uid := embyUserID(c)
 		mid := c.Param("itemId")
 		if uid == "" || mid == "" {
 			c.Status(http.StatusBadRequest)
@@ -140,10 +134,7 @@ func embyMarkPlayedHandler(svc *service.Container, played bool) gin.HandlerFunc 
 
 func embyHideFromResumeHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uid := c.Param("userId")
-		if uid == "" {
-			uid = embyUserID(c)
-		}
+		uid := embyUserID(c)
 		mid := c.Param("itemId")
 		if mid == "" {
 			mid = c.Param("id")

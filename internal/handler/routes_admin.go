@@ -30,11 +30,13 @@ func registerAdminRoutes(api *gin.RouterGroup, cfg *config.Config, svc *service.
 
 func registerAdminUserRoutes(admin *gin.RouterGroup, svc *service.Container) {
 	admin.GET("/users", listUsersHandler(svc))
+	admin.GET("/users/:id/history", listUserHistoryHandler(svc))
 	admin.POST("/users", createUserHandler(svc))
 	admin.PATCH("/users/:id", updateUserHandler(svc))
 	admin.PATCH("/users/:id/password", resetUserPasswordHandler(svc))
 	admin.PATCH("/users/:id/status", updateUserStatusHandler(svc))
 	admin.PUT("/users/:id/libraries", updateUserLibrariesHandler(svc))
+	admin.PATCH("/users/:id/adult-content", updateUserAdultContentHandler(svc))
 	admin.PATCH("/users/:id/role", adminUpdateRoleHandler(svc))
 	admin.DELETE("/users/:id", deleteUserHandler(svc))
 	admin.GET("/settings", listSettingsHandler(svc))
