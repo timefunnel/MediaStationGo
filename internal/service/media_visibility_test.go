@@ -167,7 +167,10 @@ func TestConfiguredAdultLibrariesDoNotHideSafeLibraryWithNSFWItems(t *testing.T)
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	viewer := &model.User{Username: "viewer", PasswordHash: "hash", Role: "user", HideAdult: true}
+	viewer := &model.User{
+		Username: "viewer", PasswordHash: "hash", Role: "user", HideAdult: true,
+		AllowedLibraryIDs: []string{safe.ID, adult.ID},
+	}
 	if err := repos.User.Create(t.Context(), viewer); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +243,68 @@ func TestUserLibraryAccessIsHardLimitForDefaultProfile(t *testing.T) {
 	}
 }
 
+func TestUnassignedUserCannotSeeAnyLibraryAndProfileCannotExpandScope(t *testing.T) {
+	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Media{}, &model.Setting{}, &model.PlayProfile{})
+	repos := repository.New(db)
+	lib := model.Library{Base: model.Base{ID: "library-unassigned"}, Name: "未分配库", Path: "/media/unassigned", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	viewer := &model.User{
+		Base:         model.Base{ID: "viewer-unassigned"},
+		Username:     "viewer-unassigned",
+		PasswordHash: "hash",
+		Role:         "user",
+	}
+	if err := repos.User.Create(t.Context(), viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.PlayProfile{
+		UserID: viewer.ID, Name: "尝试扩权", IsDefault: true, AllowAdult: true, AllowedLibraryIDs: `["library-unassigned"]`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Media{LibraryID: lib.ID, Title: "未分配作品", Path: "/media/unassigned/movie.mkv"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	visibility := UserDefaultMediaVisibility(t.Context(), repos, viewer.ID)
+	if visibility.Allows(&model.Media{LibraryID: lib.ID}) {
+		t.Fatal("an unassigned user must not gain library access from a play profile")
+	}
+	if LibraryVisibleForUser(t.Context(), repos, lib, visibility) {
+		t.Fatal("an unassigned library card must stay hidden")
+	}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+	items, err := svc.SearchMediaVisible(t.Context(), "", 20, visibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unassigned search leaked media: %#v", items)
+	}
+	recent, err := svc.ListRecentSeriesCards(t.Context(), 20, visibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 0 {
+		t.Fatalf("unassigned recent additions leaked media: %#v", recent)
+	}
+}
+
+func TestAdministratorWithoutAssignmentsRemainsUnrestricted(t *testing.T) {
+	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Setting{}, &model.PlayProfile{})
+	repos := repository.New(db)
+	admin := &model.User{Base: model.Base{ID: "admin"}, Username: "admin", PasswordHash: "hash", Role: "admin"}
+	if err := repos.User.Create(t.Context(), admin); err != nil {
+		t.Fatal(err)
+	}
+	visibility := UserDefaultMediaVisibility(t.Context(), repos, admin.ID)
+	if !visibility.Allows(&model.Media{LibraryID: "any-library"}) {
+		t.Fatal("administrators must remain unrestricted")
+	}
+}
+
 func TestAdminBlockedUserFiltersAdultWorksInsideMixedLibrary(t *testing.T) {
 	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Media{}, &model.Setting{}, &model.PlayProfile{})
 	repos := repository.New(db)
@@ -252,6 +317,7 @@ func TestAdminBlockedUserFiltersAdultWorksInsideMixedLibrary(t *testing.T) {
 		Username:            "blocked-viewer",
 		PasswordHash:        "hash",
 		Role:                "user",
+		AllowedLibraryIDs:   []string{lib.ID},
 		HideAdult:           false,
 		AdultContentBlocked: true,
 	}

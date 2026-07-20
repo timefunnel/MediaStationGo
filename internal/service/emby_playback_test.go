@@ -13,6 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
+func setTestUserLibraries(t *testing.T, svc *EmbyService, user *model.User, libraryIDs ...string) {
+	t.Helper()
+	user.AllowedLibraryIDs = append([]string(nil), libraryIDs...)
+	if err := svc.repo.DB.Save(user).Error; err != nil {
+		t.Fatalf("assign test user libraries: %v", err)
+	}
+}
+
 func TestEmbyRootItemsExposeLibraries(t *testing.T) {
 	svc := newTestEmbyService(t)
 	for _, lib := range []model.Library{
@@ -206,6 +214,7 @@ func TestEmbyItemsFiltersFavorites(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, lib.ID)
 	favorite := model.Media{Base: model.Base{ID: "fav-1"}, LibraryID: lib.ID, Title: "收藏电影", Path: `/media/movies/fav.mkv`}
 	normal := model.Media{Base: model.Base{ID: "normal-1"}, LibraryID: lib.ID, Title: "普通电影", Path: `/media/movies/normal.mkv`}
 	if err := svc.repo.DB.Create(&favorite).Error; err != nil {
@@ -250,6 +259,7 @@ func TestEmbyItemsFiltersResumableForHome(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, lib.ID)
 	resumable := model.Media{Base: model.Base{ID: "resume-1"}, LibraryID: lib.ID, Title: "继续观看", Path: `/media/movies/resume.mkv`, DurationSec: 120}
 	normal := model.Media{Base: model.Base{ID: "normal-1"}, LibraryID: lib.ID, Title: "普通电影", Path: `/media/movies/normal.mkv`, DurationSec: 120}
 	if err := svc.repo.DB.Create(&resumable).Error; err != nil {
@@ -300,6 +310,7 @@ func TestEmbyResumableItemsDefaultToDatePlayed(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, lib.ID)
 	oldWatchNewRelease := model.Media{
 		Base:        model.Base{ID: "old-watch-new-release"},
 		LibraryID:   lib.ID,
@@ -378,6 +389,7 @@ func TestEmbyResumeItemsDefaultsToTenAndIncludesLastPlayedDate(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, lib.ID)
 	base := time.Now().UTC()
 	for i := 0; i < 12; i++ {
 		media := model.Media{
@@ -435,6 +447,7 @@ func TestEmbyResumeItemsSkipsInvalidHistoryBeforePaging(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, lib.ID)
 	base := time.Now().UTC()
 	validRows := []model.Media{
 		{Base: model.Base{ID: "valid-new"}, LibraryID: lib.ID, Title: "Valid New", Path: `/media/movies/valid-new.mkv`, DurationSec: 120},
@@ -534,6 +547,7 @@ func TestEmbyHidesAdultLibrariesForUserLock(t *testing.T) {
 	if err := svc.repo.Library.Create(t.Context(), &adult); err != nil {
 		t.Fatalf("create adult library: %v", err)
 	}
+	setTestUserLibraries(t, svc, viewer, safe.ID, adult.ID)
 	if err := svc.repo.Setting.Set(t.Context(), AdultLibraryIDsSettingKey, `["`+adult.ID+`"]`); err != nil {
 		t.Fatalf("set adult libraries: %v", err)
 	}

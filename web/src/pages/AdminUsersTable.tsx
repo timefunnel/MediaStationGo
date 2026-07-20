@@ -80,7 +80,7 @@ export function AdminUsersTable({
               <td className="text-ink-50">
                 {u.role === 'admin'
                   ? '全部管理权限 · 全部媒体库'
-                  : `仅浏览/播放 · ${(u.allowed_library_ids ?? []).length > 0 ? `${u.allowed_library_ids?.length} 个媒体库` : '全部媒体库'}${u.adult_content_blocked ? ' · 成人内容已屏蔽' : ''}`}
+                  : `仅浏览/播放 · ${(u.allowed_library_ids ?? []).length > 0 ? `${u.allowed_library_ids?.length} 个媒体库` : '未分配媒体库'}${u.adult_content_blocked ? ' · 成人内容已屏蔽' : ''}`}
               </td>
               <td className="text-ink-50">
                 <span className="inline-flex flex-wrap items-center gap-2">

@@ -156,7 +156,7 @@ export function AdminUsersPanel() {
     setSavingLibraryAccess(true)
     try {
       await adminAPI.setUserLibraries(libraryAccessUser.id, allowedLibraryIDs)
-      toast.success(allowedLibraryIDs.length === 0 ? '已允许访问全部媒体库' : '媒体库访问范围已更新')
+      toast.success(allowedLibraryIDs.length === 0 ? '已清空媒体库访问权限' : '媒体库访问范围已更新')
       setLibraryAccessUser(null)
       await refresh()
     } catch (err: unknown) {

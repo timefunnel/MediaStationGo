@@ -23,15 +23,7 @@ export function AdminUserLibraryAccessModal({
   const configuredIDs = user.allowed_library_ids ?? []
   const initialIDs = configuredIDs.filter((id) => availableIDs.has(id))
   const unavailableIDs = configuredIDs.filter((id) => !availableIDs.has(id))
-  const [allowAll, setAllowAll] = useState(configuredIDs.length === 0)
   const [selectedIDs, setSelectedIDs] = useState<string[]>(initialIDs)
-
-  const toggleAll = (checked: boolean) => {
-    setAllowAll(checked)
-    if (!checked && selectedIDs.length === 0) {
-      setSelectedIDs(libraries.map((library) => library.id))
-    }
-  }
 
   const toggleLibrary = (id: string) => {
     setSelectedIDs((current) =>
@@ -40,14 +32,8 @@ export function AdminUserLibraryAccessModal({
   }
 
   const save = () => {
-    if (allowAll) {
-      onSave([])
-      return
-    }
     onSave(selectedIDs)
   }
-
-  const canSave = allowAll || selectedIDs.length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true">
@@ -66,25 +52,29 @@ export function AdminUserLibraryAccessModal({
         </div>
 
         <div className="space-y-4 p-4">
-          <label className="flex items-center justify-between gap-4 border-b border-gray-200 pb-3">
-            <span>
-              <span className="block text-sm font-medium text-ink-600">全部媒体库</span>
-              <span className="block text-xs text-ink-50">以后新建的媒体库也会自动开放</span>
-            </span>
-            <AdminAccessSwitch
-              checked={allowAll}
-              disabled={saving}
-              label="允许访问全部媒体库"
-              onChange={toggleAll}
-            />
-          </label>
+          <div className="flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
+            <p className="text-xs text-ink-50">仅已选媒体库可见；以后新建的媒体库不会自动开放。</p>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2 py-1 text-xs text-ink-100"
+                disabled={saving}
+                onClick={() => setSelectedIDs(libraries.map((library) => library.id))}
+              >
+                全选当前
+              </button>
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-2 py-1 text-xs text-ink-100"
+                disabled={saving}
+                onClick={() => setSelectedIDs([])}
+              >
+                清空
+              </button>
+            </div>
+          </div>
 
-          <div
-            className={`h-64 overflow-y-auto rounded-lg border border-gray-200 p-2 transition-opacity ${
-              allowAll ? 'bg-gray-50 opacity-60' : 'bg-white'
-            }`}
-            aria-disabled={allowAll}
-          >
+          <div className="h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2">
             <div className="grid gap-1 sm:grid-cols-2">
               {libraries.map((library) => (
                 <div key={library.id} className="flex min-w-0 items-center justify-between gap-3 border-b border-gray-100 px-2 py-2.5">
@@ -94,7 +84,7 @@ export function AdminUserLibraryAccessModal({
                   </span>
                   <AdminAccessSwitch
                     checked={selectedIDs.includes(library.id)}
-                    disabled={allowAll || saving}
+                    disabled={saving}
                     label={`${selectedIDs.includes(library.id) ? '关闭' : '开放'} ${library.name}`}
                     onChange={() => toggleLibrary(library.id)}
                   />
@@ -105,8 +95,8 @@ export function AdminUserLibraryAccessModal({
           </div>
 
           <div className="min-h-5 text-xs">
-            {!allowAll && selectedIDs.length === 0 && (
-              <p className="text-red-500">请至少选择一个媒体库，或允许访问全部媒体库。</p>
+            {selectedIDs.length === 0 && (
+              <p className="text-amber-600">未分配媒体库；保存后该用户不会看到任何作品。</p>
             )}
             {unavailableIDs.length > 0 && (
               <p className="text-amber-600">
@@ -120,7 +110,7 @@ export function AdminUserLibraryAccessModal({
           <button type="button" className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-ink-100" onClick={onClose} disabled={saving}>
             取消
           </button>
-          <button type="button" className="neon-button inline-flex items-center gap-2" onClick={save} disabled={saving || !canSave}>
+          <button type="button" className="neon-button inline-flex items-center gap-2" onClick={save} disabled={saving}>
             <Save size={15} />
             {saving ? '保存中' : '保存'}
           </button>

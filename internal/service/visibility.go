@@ -90,7 +90,9 @@ func UserDefaultMediaVisibility(ctx context.Context, repo *repository.Container,
 }
 
 // UserAllowedLibraryIDs returns the administrator-enforced library scope.
-// An empty slice means unrestricted; administrators are always unrestricted.
+// Administrators are unrestricted. A normal user with no explicit assignment
+// receives a deny-all sentinel so new or unassigned libraries never become
+// visible implicitly.
 func UserAllowedLibraryIDs(ctx context.Context, repo *repository.Container, userID string) []string {
 	if strings.TrimSpace(userID) == "" || repo == nil || repo.User == nil {
 		return nil
@@ -107,7 +109,11 @@ func UserAllowedLibraryIDs(ctx context.Context, repo *repository.Container, user
 	if user == nil || user.Role == "admin" {
 		return nil
 	}
-	return NormalizeAllowedLibraryIDs(user.AllowedLibraryIDs)
+	ids := NormalizeAllowedLibraryIDs(user.AllowedLibraryIDs)
+	if len(ids) == 0 {
+		return []string{noLibraryAccessID}
+	}
+	return ids
 }
 
 // NormalizeAllowedLibraryIDs trims and de-duplicates persisted/request IDs.

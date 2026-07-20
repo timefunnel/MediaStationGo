@@ -98,6 +98,22 @@ func TestUpdateUserLibrariesPersistsValidatedScope(t *testing.T) {
 	if badW.Code != http.StatusBadRequest {
 		t.Fatalf("invalid library status = %d body=%s", badW.Code, badW.Body.String())
 	}
+
+	emptyBody := []byte(`{"allowed_library_ids":[]}`)
+	emptyReq := httptest.NewRequest(http.MethodPut, "/admin/users/viewer/libraries", bytes.NewReader(emptyBody))
+	emptyReq.Header.Set("Content-Type", "application/json")
+	emptyW := httptest.NewRecorder()
+	router.ServeHTTP(emptyW, emptyReq)
+	if emptyW.Code != http.StatusOK {
+		t.Fatalf("empty library status = %d body=%s", emptyW.Code, emptyW.Body.String())
+	}
+	updated, err = repos.User.FindByID(t.Context(), viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.AllowedLibraryIDs) != 0 {
+		t.Fatalf("cleared allowed libraries = %#v, want none", updated.AllowedLibraryIDs)
+	}
 }
 
 func TestUpdateUserAdultContentPersistsAdministratorBlock(t *testing.T) {
