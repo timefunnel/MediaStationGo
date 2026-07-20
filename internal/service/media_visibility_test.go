@@ -17,29 +17,24 @@ func TestMediaVisibilityFiltersNSFWAndLibraries(t *testing.T) {
 	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
 
 	libA := model.Library{Name: "电影", Path: "/media/movies", Type: "movie", Enabled: true}
-	libB := model.Library{Name: "成人", Path: "/media/adult", Type: "movie", Enabled: true}
+	libB := model.Library{Name: "成人", Path: "/media/adult", Type: "adult", Enabled: true}
 	if err := db.Create(&libA).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&libB).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.Setting.Set(t.Context(), AdultLibraryIDsSettingKey, `["`+libB.ID+`"]`); err != nil {
-		t.Fatal(err)
-	}
 	rows := []model.Media{
 		{LibraryID: libA.ID, Title: "普通电影", Path: "/media/movies/a.mkv"},
 		{LibraryID: libA.ID, Title: "成人电影", Path: "/media/movies/b.mkv", NSFW: true},
-		{LibraryID: libB.ID, Title: "限制媒体库电影", Path: "/media/adult/c.mkv"},
+		{LibraryID: libB.ID, Title: "限制媒体库电影", Path: "/media/adult/c.mkv", NSFW: true},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	hiddenAdultLibraries := AdultLibraryIDs(t.Context(), repos)
 	items, err := svc.SearchMediaVisible(t.Context(), "电影", 20, MediaVisibility{
-		IncludeNSFW:      false,
-		HiddenLibraryIDs: hiddenAdultLibraries,
+		IncludeNSFW: false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -60,8 +55,7 @@ func TestMediaVisibilityFiltersNSFWAndLibraries(t *testing.T) {
 	}
 
 	listed, total, err := svc.ListMediaVisible(t.Context(), libA.ID, 1, 20, MediaVisibility{
-		IncludeNSFW:      false,
-		HiddenLibraryIDs: hiddenAdultLibraries,
+		IncludeNSFW: false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -71,8 +65,7 @@ func TestMediaVisibilityFiltersNSFWAndLibraries(t *testing.T) {
 	}
 
 	listed, total, err = svc.ListMediaVisible(t.Context(), libB.ID, 1, 20, MediaVisibility{
-		IncludeNSFW:      false,
-		HiddenLibraryIDs: hiddenAdultLibraries,
+		IncludeNSFW: false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -145,25 +138,22 @@ func TestMediaVisibilityHidesDeprecatedNativeCloudLibraries(t *testing.T) {
 	}
 }
 
-func TestConfiguredAdultLibrariesDoNotHideSafeLibraryWithNSFWItems(t *testing.T) {
+func TestExplicitAdultLibraryDoesNotHideSafeLibraryWithNSFWItems(t *testing.T) {
 	db := newServiceTestDB(t, &model.User{}, &model.Library{}, &model.Media{}, &model.Setting{}, &model.PlayProfile{})
 	repos := repository.New(db)
 
 	safe := model.Library{Name: "电影", Path: "/media/movie", Type: "movie", Enabled: true}
-	adult := model.Library{Name: "9KG", Path: "/media/9KG", Type: "movie", Enabled: true}
+	adult := model.Library{Name: "9KG", Path: "/media/9KG", Type: "adult", Enabled: true}
 	if err := repos.Library.Create(t.Context(), &safe); err != nil {
 		t.Fatal(err)
 	}
 	if err := repos.Library.Create(t.Context(), &adult); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.Setting.Set(t.Context(), AdultLibraryIDsSettingKey, `["`+adult.ID+`"]`); err != nil {
-		t.Fatal(err)
-	}
 	if err := db.Create(&[]model.Media{
 		{LibraryID: safe.ID, Title: "普通电影", Path: "/media/movie/a.mkv"},
 		{LibraryID: safe.ID, Title: "误入普通库的成人条目", Path: "/media/movie/b.mkv", NSFW: true},
-		{LibraryID: adult.ID, Title: "成人影片", Path: "/media/9KG/c.mkv"},
+		{LibraryID: adult.ID, Title: "成人影片", Path: "/media/9KG/c.mkv", NSFW: true},
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +180,20 @@ func TestConfiguredAdultLibrariesDoNotHideSafeLibraryWithNSFWItems(t *testing.T)
 	}
 	if got := sortedMediaTitles(items); !slices.Equal(got, []string{"普通电影"}) {
 		t.Fatalf("safe library should stay visible while NSFW media is filtered, got %#v", got)
+	}
+}
+
+func TestLibraryIsAdultRequiresExplicitType(t *testing.T) {
+	if !LibraryIsAdult(model.Library{Type: "adult"}) {
+		t.Fatal("explicit adult library type should be recognised")
+	}
+	for _, lib := range []model.Library{
+		{Name: "成人", Path: "/media/adult", Type: "movie"},
+		{Name: "JAV", Path: "/media/jav", Type: "tv"},
+	} {
+		if LibraryIsAdult(lib) {
+			t.Fatalf("library name/path must not imply adult type: %#v", lib)
+		}
 	}
 }
 

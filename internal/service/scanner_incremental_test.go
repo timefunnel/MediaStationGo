@@ -144,6 +144,95 @@ func TestScanLibrarySkipsUnchangedExistingLocalMedia(t *testing.T) {
 	}
 }
 
+func TestScanAdultLibraryMarksAndRepairsLocalMediaNSFW(t *testing.T) {
+	scanner, repos := newScannerTestEnv(t)
+	root := t.TempDir()
+	library := model.Library{Name: "Adult", Path: root, Type: "adult", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &library); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "ABF-363.mp4")
+	if err := os.WriteFile(path, []byte("same-size"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := scanner.ScanLibrary(t.Context(), library.ID)
+	if err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if first.Added != 1 {
+		t.Fatalf("first scan = %#v, want added=1", first)
+	}
+	var media model.Media
+	if err := repos.DB.First(&media, "path = ?", path).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !media.NSFW {
+		t.Fatal("adult library scan must mark new local media as NSFW")
+	}
+
+	if err := repos.DB.Model(&media).Update("nsfw", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	second, err := scanner.ScanLibrary(t.Context(), library.ID)
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if second.Updated != 1 || second.Skipped != 0 {
+		t.Fatalf("second scan = %#v, want the stale NSFW flag repaired", second)
+	}
+	if err := repos.DB.First(&media, "path = ?", path).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !media.NSFW {
+		t.Fatal("adult library rescan must repair a missing local NSFW flag")
+	}
+}
+
+func TestIngestAdultCloudFileMarksAndRepairsNSFW(t *testing.T) {
+	scanner, repos := newScannerTestEnv(t)
+	library := model.Library{Name: "Adult Cloud", Path: "cloud://openlist/adult", Type: "adult", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &library); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		ref  = "/adult/ABF-363/ABF-363.mp4"
+		path = "cloud://openlist/adult/ABF-363/ABF-363.mp4"
+	)
+	probeBudget := 0
+	first := &ScanResult{LibraryID: library.ID}
+	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, nil, nil, &probeBudget, first)
+	if first.Added != 1 || first.ErrorCount != 0 {
+		t.Fatalf("first cloud ingest = %#v, want added=1", first)
+	}
+	var media model.Media
+	if err := repos.DB.First(&media, "path = ?", path).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !media.NSFW {
+		t.Fatal("adult library scan must mark new cloud media as NSFW")
+	}
+
+	if err := repos.DB.Model(&media).Update("nsfw", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	existing, err := scanner.existingCloudMediaSnapshot(t.Context(), library.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := &ScanResult{LibraryID: library.ID}
+	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, existing, nil, &probeBudget, second)
+	if second.Updated != 1 || second.Skipped != 0 || second.ErrorCount != 0 {
+		t.Fatalf("second cloud ingest = %#v, want the stale NSFW flag repaired", second)
+	}
+	if err := repos.DB.First(&media, "path = ?", path).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !media.NSFW {
+		t.Fatal("adult library rescan must repair a missing cloud NSFW flag")
+	}
+}
+
 func TestScanLibraryUpdatesExistingPathFromOverlappingLibrary(t *testing.T) {
 	sc, repos := newScannerTestEnv(t)
 	root := t.TempDir()

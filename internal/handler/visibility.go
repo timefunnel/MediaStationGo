@@ -38,11 +38,6 @@ func mediaVisibilityForRequest(c *gin.Context, svc *service.Container) service.M
 		service.UserAllowedLibraryIDs(c.Request.Context(), svc.Repo, userID),
 		profileAllowedLibraryIDs(*profile),
 	)
-	if !visibility.IncludeNSFW {
-		visibility.HiddenLibraryIDs = service.AdultLibraryIDs(c.Request.Context(), svc.Repo)
-	} else {
-		visibility.HiddenLibraryIDs = nil
-	}
 	return visibility
 }
 

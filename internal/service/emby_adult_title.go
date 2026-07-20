@@ -51,11 +51,6 @@ func (e *EmbyService) mediaLooksAdultForEmbyTitle(ctx context.Context, m *model.
 	if m.NSFW {
 		return true
 	}
-	for _, id := range AdultLibraryIDs(ctx, e.repo) {
-		if id == m.LibraryID {
-			return true
-		}
-	}
 	if e == nil || e.repo == nil || e.repo.Library == nil || strings.TrimSpace(m.LibraryID) == "" {
 		return false
 	}
@@ -63,7 +58,7 @@ func (e *EmbyService) mediaLooksAdultForEmbyTitle(ctx context.Context, m *model.
 	if err != nil || lib == nil {
 		return false
 	}
-	return LibraryLooksAdult(*lib)
+	return LibraryIsAdult(*lib)
 }
 
 func adultDisplayTitleSuffix(name, code string) (string, bool) {

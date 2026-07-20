@@ -9,8 +9,6 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
-const AdultLibraryIDsSettingKey = "adult.library_ids"
-
 const noLibraryAccessID = "__no_library_access__"
 
 // AdultContentEnabled reads the global Adult / NSFW switch.
@@ -64,7 +62,6 @@ func UserDefaultMediaVisibility(ctx context.Context, repo *repository.Container,
 	if UserHidesAdult(ctx, repo, userID) {
 		visibility.IncludeNSFW = false
 	}
-	visibility.HiddenLibraryIDs = hiddenAdultLibraryIDs(ctx, repo, visibility.IncludeNSFW)
 	if userID == "" || repo.PlayProfile == nil {
 		return visibility
 	}
@@ -83,7 +80,6 @@ func UserDefaultMediaVisibility(ctx context.Context, repo *repository.Container,
 			adminAllowedLibraryIDs,
 			DecodeAllowedLibraryIDs(row.AllowedLibraryIDs),
 		)
-		visibility.HiddenLibraryIDs = hiddenAdultLibraryIDs(ctx, repo, visibility.IncludeNSFW)
 		break
 	}
 	return visibility
@@ -180,9 +176,9 @@ func DecodeAllowedLibraryIDs(raw string) []string {
 	return out
 }
 
-// LibraryVisibleForUser applies profile library limits and adult-directory
+// LibraryVisibleForUser applies library limits and explicit adult-library
 // hiding to a library card/folder.
-func LibraryVisibleForUser(ctx context.Context, repo *repository.Container, lib model.Library, visibility MediaVisibility) bool {
+func LibraryVisibleForUser(_ context.Context, _ *repository.Container, lib model.Library, visibility MediaVisibility) bool {
 	if !lib.Enabled {
 		return false
 	}
@@ -198,57 +194,19 @@ func LibraryVisibleForUser(ctx context.Context, repo *repository.Container, lib 
 			return false
 		}
 	}
-	if visibility.IncludeNSFW {
-		return true
-	}
-	hiddenLibraryIDs := visibility.HiddenLibraryIDs
-	configuredAdultLibraryIDs := AdultLibraryIDs(ctx, repo)
-	hasConfiguredAdultLibraries := len(hiddenLibraryIDs) > 0 || len(configuredAdultLibraryIDs) > 0
-	if len(hiddenLibraryIDs) == 0 {
-		hiddenLibraryIDs = configuredAdultLibraryIDs
-	}
-	for _, id := range hiddenLibraryIDs {
+	for _, id := range visibility.HiddenLibraryIDs {
 		if id == lib.ID {
 			return false
 		}
 	}
-	if hasConfiguredAdultLibraries {
-		return true
-	}
-	if LibraryLooksAdult(lib) {
+	if !visibility.IncludeNSFW && LibraryIsAdult(lib) {
 		return false
 	}
 	return true
 }
 
-// LibraryLooksAdult catches adult-only roots even before all rows are scraped.
-func LibraryLooksAdult(lib model.Library) bool {
-	text := strings.ToLower(strings.TrimSpace(lib.Name + " " + lib.Path + " " + lib.Type))
-	if text == "" {
-		return false
-	}
-	for _, token := range []string{"成人", "限制级", "nsfw", "adult", "jav", "javdb", "javbus", "9kg", "里番", "番号"} {
-		if strings.Contains(text, token) {
-			return true
-		}
-	}
-	return false
-}
-
-func AdultLibraryIDs(ctx context.Context, repo *repository.Container) []string {
-	if repo == nil || repo.Setting == nil {
-		return nil
-	}
-	raw, err := repo.Setting.Get(ctx, AdultLibraryIDsSettingKey)
-	if err != nil {
-		return nil
-	}
-	return DecodeAllowedLibraryIDs(raw)
-}
-
-func hiddenAdultLibraryIDs(ctx context.Context, repo *repository.Container, includeNSFW bool) []string {
-	if includeNSFW {
-		return nil
-	}
-	return AdultLibraryIDs(ctx, repo)
+// LibraryIsAdult recognises only the explicit adult library type. Media inside
+// mixed libraries is controlled independently by Media.NSFW.
+func LibraryIsAdult(lib model.Library) bool {
+	return strings.EqualFold(strings.TrimSpace(lib.Type), "adult")
 }

@@ -65,6 +65,9 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 	if preserveSourceTitle {
 		preserveSourceTitleIdentity(m, name)
 	}
+	if LibraryIsAdult(*lib) {
+		m.NSFW = true
+	}
 	if _, hints := pathHintMetadata(path, librarySupportsSeasons(lib) || parsedSeason > 0 || parsedEpisode > 0); hints.useful() {
 		if hints.TMDbID > 0 && m.TMDbID <= 0 {
 			m.TMDbID = hints.TMDbID

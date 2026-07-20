@@ -178,6 +178,9 @@ func (s *ScannerService) buildLocalScanMedia(in localScanMediaInput) *model.Medi
 	if preserveSourceTitle {
 		preserveSourceTitleIdentity(media, in.path)
 	}
+	if LibraryIsAdult(*in.lib) {
+		media.NSFW = true
+	}
 	return media
 }
 

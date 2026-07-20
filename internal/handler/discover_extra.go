@@ -552,13 +552,8 @@ func discoverAdultAllowed(c *gin.Context, svc *service.Container) bool {
 	if err != nil {
 		return false
 	}
-	configured := map[string]struct{}{}
-	for _, id := range service.AdultLibraryIDs(c.Request.Context(), svc.Repo) {
-		configured[id] = struct{}{}
-	}
 	for _, library := range libraries {
-		_, explicitlyAdult := configured[library.ID]
-		if !explicitlyAdult && !service.LibraryLooksAdult(library) {
+		if !service.LibraryIsAdult(library) {
 			continue
 		}
 		if service.LibraryVisibleForUser(c.Request.Context(), svc.Repo, library, visibility) {

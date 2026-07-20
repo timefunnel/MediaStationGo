@@ -186,6 +186,33 @@ func TestMediaUpsertMatchedIncomingRefreshesScrapedMetadata(t *testing.T) {
 	}
 }
 
+func TestMediaUpsertPromotesNSFWWithoutMatchedMetadata(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repos := New(db)
+	path := "/media/adult/ABF-363.mp4"
+	existing := model.Media{LibraryID: "adult", Title: "ABF-363", Path: path, ScrapeStatus: "pending"}
+	if err := repos.Media.Upsert(t.Context(), &existing); err != nil {
+		t.Fatal(err)
+	}
+	incoming := model.Media{LibraryID: "adult", Title: "ABF-363", Path: path, ScrapeStatus: "pending", NSFW: true}
+	if err := repos.Media.Upsert(t.Context(), &incoming); err != nil {
+		t.Fatal(err)
+	}
+	var got model.Media
+	if err := repos.DB.Where("path = ?", path).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !got.NSFW {
+		t.Fatal("scanner upsert must be able to promote NSFW before metadata is matched")
+	}
+}
+
 func TestListByLibraryOrdersByReleaseDate(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

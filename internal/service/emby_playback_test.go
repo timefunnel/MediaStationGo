@@ -540,7 +540,7 @@ func TestEmbyHidesAdultLibrariesForUserLock(t *testing.T) {
 		t.Fatalf("create viewer: %v", err)
 	}
 	safe := model.Library{Name: "电影", Path: `/media/movies`, Type: "movie", Enabled: true}
-	adult := model.Library{Name: "9KG 成人", Path: `/media/9KG`, Type: "movie", Enabled: true}
+	adult := model.Library{Name: "9KG 成人", Path: `/media/9KG`, Type: "adult", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &safe); err != nil {
 		t.Fatalf("create safe library: %v", err)
 	}
@@ -548,13 +548,10 @@ func TestEmbyHidesAdultLibrariesForUserLock(t *testing.T) {
 		t.Fatalf("create adult library: %v", err)
 	}
 	setTestUserLibraries(t, svc, viewer, safe.ID, adult.ID)
-	if err := svc.repo.Setting.Set(t.Context(), AdultLibraryIDsSettingKey, `["`+adult.ID+`"]`); err != nil {
-		t.Fatalf("set adult libraries: %v", err)
-	}
 	if err := svc.repo.DB.Create(&model.Media{LibraryID: safe.ID, Title: "安全电影", Path: `/media/movies/a.mkv`}).Error; err != nil {
 		t.Fatalf("create safe media: %v", err)
 	}
-	if err := svc.repo.DB.Create(&model.Media{LibraryID: adult.ID, Title: "成人电影", Path: `/media/9KG/a.mkv`}).Error; err != nil {
+	if err := svc.repo.DB.Create(&model.Media{LibraryID: adult.ID, Title: "成人电影", Path: `/media/9KG/a.mkv`, NSFW: true}).Error; err != nil {
 		t.Fatalf("create adult media: %v", err)
 	}
 

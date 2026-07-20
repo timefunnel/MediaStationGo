@@ -190,6 +190,9 @@ func cloudDerivedMetadataNeedsRefresh(existing existingCloudMedia, incoming *mod
 	if incoming == nil {
 		return false
 	}
+	if incoming.NSFW && !existing.NSFW {
+		return true
+	}
 	return scanDerivedMetadataNeedsRefresh(scanDerivedMetadata{
 		Title:        existing.Title,
 		ScrapeStatus: existing.ScrapeStatus,
@@ -207,6 +210,9 @@ func cloudDerivedMetadataNeedsRefresh(existing existingCloudMedia, incoming *mod
 func localDerivedMetadataNeedsRefresh(existing existingLocalMedia, incoming *model.Media) bool {
 	if incoming == nil {
 		return false
+	}
+	if incoming.NSFW && !existing.NSFW {
+		return true
 	}
 	if incoming.LibraryRootID != "" && incoming.LibraryRootID != existing.LibraryRootID {
 		return true

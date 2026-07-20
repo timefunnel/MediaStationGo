@@ -108,6 +108,9 @@ func addMediaFileScanUpdates(updates map[string]any, existing, incoming model.Me
 	setIfChanged(updates, "audio_channel_layout", existing.AudioChannelLayout, incoming.AudioChannelLayout)
 	setIfChanged(updates, "audio_sample_rate", existing.AudioSampleRate, incoming.AudioSampleRate)
 	setIfChanged(updates, "media_probe_version", existing.MediaProbeVersion, incoming.MediaProbeVersion)
+	if incoming.NSFW && !existing.NSFW {
+		updates["nsfw"] = true
+	}
 	if existing.DeletedAt.Valid {
 		updates["deleted_at"] = nil
 	}
@@ -202,9 +205,6 @@ func addMatchedMediaDetailUpdates(updates map[string]any, existing, incoming mod
 	}
 	if incoming.ReleaseDate != "" {
 		setIfChanged(updates, "release_date", existing.ReleaseDate, incoming.ReleaseDate)
-	}
-	if incoming.NSFW && !existing.NSFW {
-		updates["nsfw"] = true
 	}
 }
 
