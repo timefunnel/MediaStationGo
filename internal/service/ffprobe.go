@@ -56,6 +56,18 @@ func (f *FFprobeService) SetMaxConcurrent(n int) {
 	f.limiter = make(chan struct{}, normalizeFFprobeMaxConcurrent(n))
 }
 
+func (f *FFprobeService) MaxConcurrent() int {
+	if f == nil {
+		return 0
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.limiter == nil {
+		return 1
+	}
+	return cap(f.limiter)
+}
+
 // ProbeResult is the subset of ffprobe output consumed by the scanner.
 type ProbeResult struct {
 	DurationSec        int

@@ -20,6 +20,7 @@ const (
 	TaskKindUpdate       = "update"
 	TaskKindArtwork      = "artwork"
 	TaskKindTitleCleanup = "title_cleanup"
+	TaskKindProbe        = "probe"
 )
 
 // BackgroundTask is the compact, operator-facing shape shown on the live tasks
@@ -83,8 +84,17 @@ func NewTaskTrackerService(log *zap.Logger, hub *Hub) *TaskTrackerService {
 }
 
 func (t *TaskTrackerService) Start(kind, name string, update TaskUpdate) *TaskHandle {
+	handle, _ := t.start(kind, name, update, false)
+	return handle
+}
+
+func (t *TaskTrackerService) StartUnique(kind, name string, update TaskUpdate) (*TaskHandle, bool) {
+	return t.start(kind, name, update, true)
+}
+
+func (t *TaskTrackerService) start(kind, name string, update TaskUpdate, unique bool) (*TaskHandle, bool) {
 	if t == nil {
-		return nil
+		return nil, false
 	}
 	now := t.currentTime()
 	task := &BackgroundTask{
@@ -101,11 +111,26 @@ func (t *TaskTrackerService) Start(kind, name string, update TaskUpdate) *TaskHa
 		UpdatedAt:  now,
 	}
 	t.mu.Lock()
+	if unique {
+		for _, active := range t.active {
+			if active.Kind == kind {
+				t.mu.Unlock()
+				return nil, false
+			}
+		}
+	}
 	t.active[task.ID] = task
 	snapshot := cloneBackgroundTask(*task)
 	t.mu.Unlock()
 	t.publish(snapshot)
-	return &TaskHandle{tracker: t, id: task.ID}
+	return &TaskHandle{tracker: t, id: task.ID}, true
+}
+
+func (h *TaskHandle) ID() string {
+	if h == nil {
+		return ""
+	}
+	return h.id
 }
 
 func (h *TaskHandle) Update(update TaskUpdate) {

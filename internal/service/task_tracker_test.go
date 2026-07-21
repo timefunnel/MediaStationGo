@@ -41,3 +41,18 @@ func TestTaskTrackerCancelMovesTaskToRecent(t *testing.T) {
 		t.Fatalf("canceled task = %#v", snapshot.Recent[0])
 	}
 }
+
+func TestTaskTrackerStartUniqueRejectsDuplicateKind(t *testing.T) {
+	tracker := NewTaskTrackerService(nil, nil)
+	first, started := tracker.StartUnique(TaskKindProbe, "first", TaskUpdate{Stage: "queued"})
+	if !started || first == nil || first.ID() == "" {
+		t.Fatal("first unique task was not started")
+	}
+	if second, started := tracker.StartUnique(TaskKindProbe, "second", TaskUpdate{Stage: "queued"}); started || second != nil {
+		t.Fatal("duplicate unique task should not start")
+	}
+	first.Finish(nil, TaskUpdate{Stage: "completed"})
+	if next, started := tracker.StartUnique(TaskKindProbe, "next", TaskUpdate{Stage: "queued"}); !started || next == nil {
+		t.Fatal("completed unique task should allow a new task")
+	}
+}
