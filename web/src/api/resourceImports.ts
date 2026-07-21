@@ -24,6 +24,7 @@ export interface ResourceSearchCandidate {
   subtitle?: string
   resource_type?: string
   summary?: string
+  compatibility_warning?: string
 }
 
 export interface ResourceSearchResponse {

@@ -368,6 +368,25 @@ func TestStoredResourceSearchDoesNotExposePipelineCandidateID(t *testing.T) {
 	}
 }
 
+func TestResourceCandidateCompatibilityWarningMarksDolbyVideoAndAudio(t *testing.T) {
+	tests := []struct {
+		title string
+		want  string
+	}{
+		{"Movie.2160p.DV.HDR.TrueHD.Atmos", "杜比视界 + 杜比全景声，部分设备可能无法兼容"},
+		{"Movie.2160p.DoVi.HDR", "杜比视界，部分设备可能无法兼容"},
+		{"Movie.1080p.EAC3.DDP", "杜比音频，部分设备可能无法兼容"},
+		{"Movie.DVD.1080p.DTS", ""},
+	}
+
+	for _, test := range tests {
+		candidate := ResourceSearchCandidate{Title: test.title}
+		if got := resourceCandidateCompatibilityWarning(candidate); got != test.want {
+			t.Fatalf("warning for %q = %q, want %q", test.title, got, test.want)
+		}
+	}
+}
+
 func TestResourceImportPersistsPipelineCandidateIDForCreate(t *testing.T) {
 	pipeline := &fakeResourcePipeline{}
 	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)

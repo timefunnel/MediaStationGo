@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 	"github.com/ShukeBta/MediaStationGo/internal/model"
@@ -76,17 +77,18 @@ type ResourceSearchCapabilities struct {
 }
 
 type ResourceSearchCandidate struct {
-	Index        int    `json:"index"`
-	Title        string `json:"title"`
-	SizeBytes    int64  `json:"size_bytes,omitempty"`
-	SizeText     string `json:"size_text,omitempty"`
-	Source       string `json:"source,omitempty"`
-	Seeders      int    `json:"seeders,omitempty"`
-	Resolution   string `json:"resolution,omitempty"`
-	Subtitle     string `json:"subtitle,omitempty"`
-	ResourceType string `json:"resource_type,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-	CandidateID  string `json:"-"`
+	Index                int    `json:"index"`
+	Title                string `json:"title"`
+	SizeBytes            int64  `json:"size_bytes,omitempty"`
+	SizeText             string `json:"size_text,omitempty"`
+	Source               string `json:"source,omitempty"`
+	Seeders              int    `json:"seeders,omitempty"`
+	Resolution           string `json:"resolution,omitempty"`
+	Subtitle             string `json:"subtitle,omitempty"`
+	ResourceType         string `json:"resource_type,omitempty"`
+	Summary              string `json:"summary,omitempty"`
+	CompatibilityWarning string `json:"compatibility_warning,omitempty"`
+	CandidateID          string `json:"-"`
 }
 
 type ResourceSearchRoot struct {
@@ -1028,6 +1030,43 @@ func resourceCandidateSearchText(candidate ResourceSearchCandidate) string {
 	}, " ")
 }
 
+func resourceCandidateCompatibilityWarning(candidate ResourceSearchCandidate) string {
+	text := strings.ToLower(resourceCandidateSearchText(candidate))
+	hasVision := strings.Contains(text, "dolby vision") || strings.Contains(text, "杜比视界") ||
+		resourceCandidateHasToken(text, "dovi") || resourceCandidateHasToken(text, "dv")
+	hasAtmos := strings.Contains(text, "atmos") || strings.Contains(text, "杜比全景声")
+	hasDolbyAudio := hasAtmos || strings.Contains(text, "truehd") || strings.Contains(text, "true hd") ||
+		strings.Contains(text, "eac3") || strings.Contains(text, "e-ac-3") ||
+		strings.Contains(text, "ddp") || strings.Contains(text, "dd+") ||
+		resourceCandidateHasToken(text, "ac3") || strings.Contains(text, "ac-3") ||
+		strings.Contains(text, "dolby digital") || strings.Contains(text, "杜比音频")
+
+	parts := make([]string, 0, 2)
+	if hasVision {
+		parts = append(parts, "杜比视界")
+	}
+	if hasAtmos {
+		parts = append(parts, "杜比全景声")
+	} else if hasDolbyAudio {
+		parts = append(parts, "杜比音频")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " + ") + "，部分设备可能无法兼容"
+}
+
+func resourceCandidateHasToken(text, target string) bool {
+	for _, token := range strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if token == target {
+			return true
+		}
+	}
+	return false
+}
+
 func resourceCandidateResolution(candidate ResourceSearchCandidate) string {
 	text := strings.ToLower(resourceCandidateSearchText(candidate))
 	switch {
@@ -1084,19 +1123,22 @@ func normalizeResourceCandidates(items []map[string]any) ([]storedResourceCandid
 		if title == "" || candidateID == "" {
 			return nil, errors.New("media-pipeline search returned an invalid candidate")
 		}
+		candidate := ResourceSearchCandidate{
+			Index:        index,
+			Title:        title,
+			SizeBytes:    resourceInt64(raw, "size_bytes", "size"),
+			SizeText:     resourceString(raw, "size_text", "size_label"),
+			Source:       resourceString(raw, "source", "indexer", "source_name"),
+			Seeders:      int(resourceInt64(raw, "seeders", "seed")),
+			Resolution:   resourceString(raw, "resolution", "quality"),
+			Subtitle:     resourceString(raw, "subtitle", "subtitles"),
+			ResourceType: resourceString(raw, "resource_type", "type"),
+			Summary:      truncateResourceText(resourceString(raw, "summary", "description"), 600),
+		}
+		candidate.CompatibilityWarning = resourceCandidateCompatibilityWarning(candidate)
 		out = append(out, storedResourceCandidate{
-			ResourceSearchCandidate: ResourceSearchCandidate{
-				Index: index, Title: title,
-				SizeBytes:    resourceInt64(raw, "size_bytes", "size"),
-				SizeText:     resourceString(raw, "size_text", "size_label"),
-				Source:       resourceString(raw, "source", "indexer", "source_name"),
-				Seeders:      int(resourceInt64(raw, "seeders", "seed")),
-				Resolution:   resourceString(raw, "resolution", "quality"),
-				Subtitle:     resourceString(raw, "subtitle", "subtitles"),
-				ResourceType: resourceString(raw, "resource_type", "type"),
-				Summary:      truncateResourceText(resourceString(raw, "summary", "description"), 600),
-			},
-			CandidateID: candidateID,
+			ResourceSearchCandidate: candidate,
+			CandidateID:             candidateID,
 		})
 	}
 	return out, nil

@@ -904,6 +904,12 @@ function ResourceCandidateRow({
             </div>
           )}
           {candidate.summary && <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-ink-50">{candidate.summary}</p>}
+          {candidate.compatibility_warning && (
+            <p className="mt-2 inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium leading-5 text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>{candidate.compatibility_warning}</span>
+            </p>
+          )}
         </div>
         <button
           type="button"
