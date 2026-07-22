@@ -40,6 +40,7 @@ func AllModels() []interface{} {
 		&Person{},
 		&AdultPerformerFollow{},
 		&UserDiscoverPreference{},
+		&UserMediaPlaybackPreference{},
 		&PlaybackHistory{},
 		&Favorite{},
 		&Playlist{},
