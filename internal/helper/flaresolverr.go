@@ -57,17 +57,37 @@ type FlareSolverrSolution struct {
 // FetchURLWithFlareSolverr uses FlareSolverr to fetch a URL,
 // bypassing Cloudflare/WAF challenges.
 func FetchURLWithFlareSolverr(flareSolverrURL string, targetURL string, cookieStr string, timeout int, proxyURL string, log *zap.Logger) (string, error) {
+	solution, err := FetchURLWithFlareSolverrResult(
+		flareSolverrURL,
+		targetURL,
+		parseCookiesForFlareSolverr(cookieStr),
+		timeout,
+		proxyURL,
+		log,
+	)
+	if err != nil {
+		return "", err
+	}
+	return solution.Response, nil
+}
+
+// FetchURLWithFlareSolverrResult returns the complete FlareSolverr solution so
+// callers that maintain an authenticated browser identity can reuse the
+// returned cookies and user agent. Cookie values are never logged here.
+func FetchURLWithFlareSolverrResult(
+	flareSolverrURL string,
+	targetURL string,
+	cookies []FlareSolverrCookie,
+	timeout int,
+	proxyURL string,
+	log *zap.Logger,
+) (*FlareSolverrSolution, error) {
 	flareSolverrURL = normalizeFlareSolverrEndpoint(flareSolverrURL)
 	if flareSolverrURL == "" {
-		return "", fmt.Errorf("FlareSolverr URL not configured")
+		return nil, fmt.Errorf("FlareSolverr URL not configured")
 	}
 	if timeout <= 0 {
 		timeout = 60
-	}
-
-	var cookies []FlareSolverrCookie
-	if cookieStr != "" {
-		cookies = parseCookiesForFlareSolverr(cookieStr)
 	}
 
 	reqBody := FlareSolverrRequest{
@@ -82,37 +102,37 @@ func FetchURLWithFlareSolverr(flareSolverrURL string, targetURL string, cookieSt
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal FlareSolverr request: %w", err)
+		return nil, fmt.Errorf("failed to marshal FlareSolverr request: %w", err)
 	}
 
 	client := &http.Client{Timeout: time.Duration(timeout+10) * time.Second}
 	resp, err := client.Post(flareSolverrURL, "application/json", strings.NewReader(string(jsonBody)))
 	if err != nil {
-		return "", fmt.Errorf("FlareSolverr request failed: %w", err)
+		return nil, fmt.Errorf("FlareSolverr request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read FlareSolverr response: %w", err)
+		return nil, fmt.Errorf("failed to read FlareSolverr response: %w", err)
 	}
 
 	var fsResp FlareSolverrResponse
 	if err := json.Unmarshal(body, &fsResp); err != nil {
-		return "", fmt.Errorf("failed to parse FlareSolverr response: %w", err)
+		return nil, fmt.Errorf("failed to parse FlareSolverr response: %w", err)
 	}
 
 	if fsResp.Status != "ok" {
-		return "", fmt.Errorf("FlareSolverr error: %s", fsResp.Message)
+		return nil, fmt.Errorf("FlareSolverr error: %s", fsResp.Message)
 	}
 
 	if fsResp.Solution != nil {
 		if fsResp.Solution.Status >= http.StatusBadRequest {
-			return "", fmt.Errorf("FlareSolverr target returned %d", fsResp.Solution.Status)
+			return nil, fmt.Errorf("FlareSolverr target returned %d", fsResp.Solution.Status)
 		}
-		return fsResp.Solution.Response, nil
+		return fsResp.Solution, nil
 	}
-	return "", fmt.Errorf("FlareSolverr returned no solution")
+	return nil, fmt.Errorf("FlareSolverr returned no solution")
 }
 
 func normalizeFlareSolverrEndpoint(raw string) string {

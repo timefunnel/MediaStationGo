@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -10,6 +12,31 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
+
+func TestFD2PPVConfigKeepsPasswordEncryptedAndFullyMasked(t *testing.T) {
+	db := newServiceTestDB(t, &model.APIConfig{})
+	repos := repository.New(db)
+	svc := NewAPIConfigService(zap.NewNop(), repos, NewCryptoService("test-secret", zap.NewNop()))
+	username := "fd2-user"
+	password := "fd2-password"
+	if _, err := svc.Update(context.Background(), "fd2ppv", APIConfigPatch{APIKey: &password, Extra: &username}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Get(context.Background(), "fd2ppv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view == nil || !view.HasKey || view.MaskedKey != "••••••••" || view.Extra != username {
+		t.Fatalf("public view = %#v", view)
+	}
+	var row model.APIConfig
+	if err := db.Where("provider = ?", "fd2ppv").First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.APIKey == password || !strings.HasPrefix(row.APIKey, encPrefix) {
+		t.Fatalf("fd2ppv password was not encrypted")
+	}
+}
 
 func TestDiscoverOpenAICompatibleModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,9 +67,9 @@ func TestDiscoverOpenAICompatibleModels(t *testing.T) {
 
 func TestAIModelsEndpointAcceptsVersionedAndCompletionBaseURLs(t *testing.T) {
 	for input, want := range map[string]string{
-		"https://api.openai.com/v1":                  "https://api.openai.com/v1/models",
-		"https://api.deepseek.com/":                  "https://api.deepseek.com/models",
-		"https://example.test/v1/chat/completions":   "https://example.test/v1/models",
+		"https://api.openai.com/v1":                "https://api.openai.com/v1/models",
+		"https://api.deepseek.com/":                "https://api.deepseek.com/models",
+		"https://example.test/v1/chat/completions": "https://example.test/v1/models",
 	} {
 		if got := aiModelsEndpoint(input); got != want {
 			t.Fatalf("aiModelsEndpoint(%q) = %q, want %q", input, got, want)

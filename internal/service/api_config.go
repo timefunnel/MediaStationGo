@@ -47,6 +47,7 @@ func (s *APIConfigService) SeedDefaults(ctx context.Context) error {
 		{Provider: "fanart", BaseURL: "https://webservice.fanart.tv/v3", Description: "Fanart.tv (artwork)", Enabled: true},
 		{Provider: "douban", Description: "Douban cookie (zh metadata)", Enabled: true},
 		{Provider: "adult", BaseURL: "https://javdb.com", Extra: "https://javbus.sbs,https://www.javbus.com,https://www.cdnbus.cyou,https://www.javsee.cyou,https://www.busjav.cyou", Description: "Adult / 番号元数据（JavDB/JavBus）", Enabled: true},
+		{Provider: "fd2ppv", BaseURL: "https://fd2ppv.cc", Description: "FD2PPV 会员账号（FC2 元数据与图片）", Enabled: true},
 		{Provider: "openai", BaseURL: "https://api.openai.com/v1", Description: "OpenAI-compatible (smart search)", Enabled: true},
 	}
 	for i := range defaults {
@@ -252,7 +253,11 @@ func (s *APIConfigService) toPublic(r *model.APIConfig) PublicView {
 		UpdatedAt:   r.UpdatedAt,
 	}
 	if pv.HasKey {
-		pv.MaskedKey = MaskAPIKey(plain)
+		if strings.EqualFold(r.Provider, "fd2ppv") {
+			pv.MaskedKey = "••••••••"
+		} else {
+			pv.MaskedKey = MaskAPIKey(plain)
+		}
 	}
 	return pv
 }

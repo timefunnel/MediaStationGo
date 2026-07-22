@@ -173,6 +173,9 @@ func (p *AdultProvider) fetchFD2PPVText(ctx context.Context, targetURL string) (
 		return "", ctx.Err()
 	default:
 	}
+	if p.apiConfig != nil {
+		return p.fetchAuthenticatedFD2PPVText(ctx, targetURL)
+	}
 	body, err := helper.FetchURLWithFlareSolverr(
 		p.flareSolverrURL,
 		targetURL,

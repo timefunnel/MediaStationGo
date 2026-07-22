@@ -28,7 +28,7 @@ export function APIConfigsPanel() {
         <div>
           <p className="font-display text-lg font-semibold text-ink-600">外部 API 配置</p>
           <p className="text-xs text-ink-50">
-            TMDb / Bangumi / TheTVDB / Fanart / OpenAI / Douban / Adult 密钥与源管理
+            TMDb / Bangumi / TheTVDB / Fanart / OpenAI / Douban / Adult / FD2PPV 密钥与源管理
             · AES-GCM 加密存储
           </p>
         </div>
@@ -161,6 +161,7 @@ function EditingRow({
   const [saving, setSaving] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const isAdult = item.provider === 'adult'
+  const isFD2PPV = item.provider === 'fd2ppv'
   const isOpenAI = item.provider === 'openai'
 
   const submit = async (e: FormEvent) => {
@@ -173,6 +174,7 @@ function EditingRow({
     try {
       const patch: Record<string, unknown> = { base_url: baseURL, enabled }
       if (isAdult) patch.extra = extra
+      if (isFD2PPV) patch.extra = extra.trim()
       if (isOpenAI) patch.model = model.trim()
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       await apiConfigsAPI.update(item.provider, patch)
@@ -215,31 +217,45 @@ function EditingRow({
           <span className="text-sm font-medium text-ink-600">{item.provider}</span>
           {!isAdult && (
             <label className="flex-1 text-xs text-ink-50">
-              API Key
+              {isFD2PPV ? '密码' : 'API Key'}
               <input
                 className="input-base mt-1"
                 type="password"
-                placeholder={item.has_key ? '•••••••••••• (留空保留原值)' : '输入密钥'}
+                placeholder={item.has_key ? '•••••••••••• (留空保留原值)' : isFD2PPV ? '输入 FD2PPV 密码' : '输入密钥'}
                 value={apiKey}
                 onChange={(e) => setAPIKey(e.target.value)}
               />
             </label>
           )}
-          <label className="flex-1 text-xs text-ink-50">
-            {isAdult ? '主源 URL' : 'Base URL'}
-            <input
-              className="input-base mt-1"
-              placeholder={isAdult ? 'https://javdb.com' : 'https://api.themoviedb.org/3'}
-              value={baseURL}
-              onChange={(e) => setBaseURL(e.target.value)}
-            />
-          </label>
+          {!isFD2PPV && (
+            <label className="flex-1 text-xs text-ink-50">
+              {isAdult ? '主源 URL' : 'Base URL'}
+              <input
+                className="input-base mt-1"
+                placeholder={isAdult ? 'https://javdb.com' : 'https://api.themoviedb.org/3'}
+                value={baseURL}
+                onChange={(e) => setBaseURL(e.target.value)}
+              />
+            </label>
+          )}
           {isAdult && (
             <label className="min-w-64 flex-1 text-xs text-ink-50">
               备用源 URL
               <textarea
                 className="input-base mt-1 min-h-20 resize-y"
                 placeholder={'https://javbus.sbs\nhttps://www.javbus.com'}
+                value={extra}
+                onChange={(e) => setExtra(e.target.value)}
+              />
+            </label>
+          )}
+          {isFD2PPV && (
+            <label className="flex-1 text-xs text-ink-50">
+              账号
+              <input
+                className="input-base mt-1"
+                autoComplete="username"
+                placeholder="输入 FD2PPV 账号"
                 value={extra}
                 onChange={(e) => setExtra(e.target.value)}
               />
@@ -318,6 +334,9 @@ function preferredDetectedModel(
 function apiConfigConfigured(item: APIConfig): boolean {
   if (item.provider === 'adult') {
     return Boolean(item.base_url?.trim() || item.extra?.trim())
+  }
+  if (item.provider === 'fd2ppv') {
+    return Boolean(item.has_key && item.extra?.trim())
   }
   return item.has_key
 }

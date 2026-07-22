@@ -2,14 +2,11 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/ShukeBta/MediaStationGo/internal/helper"
 )
 
 var fd2PPVBaseURL = "https://fd2ppv.cc"
@@ -36,19 +33,9 @@ func (p *AdultProvider) scrapeFD2PPV(ctx context.Context, code string) (*Match, 
 		return nil, nil
 	}
 	detailURL := strings.TrimRight(fd2PPVBaseURL, "/") + "/articles/" + url.PathEscape(number)
-	body, err := helper.FetchURLWithFlareSolverr(
-		p.flareSolverrURL,
-		detailURL,
-		"",
-		p.flareSolverrTimeout,
-		"",
-		p.log,
-	)
+	body, err := p.fetchFD2PPVText(ctx, detailURL)
 	if err != nil {
 		return nil, err
-	}
-	if helper.IsCloudflareChallenge(body) {
-		return nil, errors.New("fd2ppv Cloudflare challenge was not solved")
 	}
 	match := parseFD2PPVDetailHTML(body, code, detailURL)
 	if match == nil {

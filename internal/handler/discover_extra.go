@@ -125,6 +125,9 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			if !refresh && cacheHit {
 				metaEntry["cached"] = true
 			} else {
+				if refresh && k == "adult_fd2ppv" && svc != nil && svc.Adult != nil {
+					svc.Adult.ForgetFD2PPVCache()
+				}
 				sectionTimeout := discoverSectionTimeout(k)
 				sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
 				started := time.Now()

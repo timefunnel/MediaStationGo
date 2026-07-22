@@ -53,6 +53,7 @@ type AdultProvider struct {
 	flareSolverrURL        string
 	flareSolverrTimeout    int
 	javDBPerformerSections adultJavDBPerformerSectionCache
+	fd2ppv                 *fd2PPVClient
 }
 
 func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvider {
@@ -60,6 +61,7 @@ func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvid
 		log:       log,
 		apiConfig: apiConfig,
 		client:    NewExternalHTTPClient(12 * time.Second),
+		fd2ppv:    newFD2PPVClient(),
 	}
 }
 
