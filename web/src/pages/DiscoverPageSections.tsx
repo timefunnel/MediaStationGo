@@ -113,6 +113,7 @@ export function DiscoverResults({
   rowPages,
   rowCanNext,
   rowSorts,
+  rowSortSaving,
   loading,
   hasContent,
   sectionLabel,
@@ -129,6 +130,7 @@ export function DiscoverResults({
   rowPages: Record<string, number>
   rowCanNext: Record<string, boolean>
   rowSorts: Record<string, string>
+  rowSortSaving: Record<string, boolean>
   loading: boolean
   hasContent: boolean
   sectionLabel: SectionLabel
@@ -307,7 +309,7 @@ export function DiscoverResults({
                       <select
                         aria-label="FC2 作品排序"
                         value={rowSorts[key] || 'release'}
-                        disabled={Boolean(rowLoading[key])}
+                        disabled={Boolean(rowLoading[key] || rowSortSaving[key])}
                         onChange={(event) => onSortChange(key, event.target.value)}
                         className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-ink-600 outline-none transition focus:border-primary-300 disabled:cursor-not-allowed disabled:opacity-50"
                       >

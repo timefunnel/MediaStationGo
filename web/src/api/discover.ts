@@ -76,6 +76,7 @@ export interface DiscoverFeedResult {
 export interface DiscoverPreference {
   configured: boolean
   selected_sections: string[]
+  adult_fd2ppv_sort: string
 }
 
 export interface DiscoverSearchResult {
@@ -106,9 +107,12 @@ export const discoverAPI = {
     api.get<{ sections: DiscoverSection[] }>('/discover/sections').then((r) => r.data.sections),
   preference: () =>
     api.get<DiscoverPreference>('/discover/preferences').then((r) => r.data),
-  savePreference: (selectedSections: string[]) =>
+  savePreference: (selectedSections: string[], adultFD2PPVSort?: string) =>
     api
-      .put<DiscoverPreference>('/discover/preferences', { selected_sections: selectedSections })
+      .put<DiscoverPreference>('/discover/preferences', {
+        selected_sections: selectedSections,
+        adult_fd2ppv_sort: adultFD2PPVSort,
+      })
       .then((r) => r.data),
   feed: (
     sectionKeys: string[],

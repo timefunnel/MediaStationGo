@@ -26,6 +26,7 @@ export function DiscoverPage() {
   const [rowPages, setRowPages] = useState<Record<string, number>>({})
   const [rowCanNext, setRowCanNext] = useState<Record<string, boolean>>({})
   const [rowSorts, setRowSorts] = useState<Record<string, string>>({ adult_fd2ppv: 'release' })
+  const [rowSortSaving, setRowSortSaving] = useState<Record<string, boolean>>({})
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
   const [rowRefreshStatus, setRowRefreshStatus] = useState<Record<string, DiscoverRefreshStatus>>({})
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
@@ -114,12 +115,19 @@ export function DiscoverPage() {
         const fallback = defaultSections.filter((key) => available.has(key))
         const saved = preference.selected_sections.filter((key) => available.has(key))
         const nextSelected = orderSelectedSections(preference.configured ? saved : fallback, items)
+        let savedPreference = preference
         if (!preference.configured) {
-          await discoverAPI.savePreference(nextSelected)
+          savedPreference = await discoverAPI.savePreference(nextSelected, preference.adult_fd2ppv_sort)
         }
         if (cancelled) return
+        const savedFD2PPVSort = savedPreference.adult_fd2ppv_sort
+        const nextSorts = { adult_fd2ppv: savedFD2PPVSort }
+        rowSortsRef.current = nextSorts
+        setRowSorts(nextSorts)
         setSections(items)
-        const cached = readCachedDiscoverRows(nextSelected)
+        const cached = readCachedDiscoverRows(nextSelected.filter(
+          (key) => key !== 'adult_fd2ppv' || savedFD2PPVSort === 'release',
+        ))
         setSelected(nextSelected)
         const nextPages = Object.fromEntries(nextSelected.map((key) => [key, 1]))
         rowPagesRef.current = nextPages
@@ -224,7 +232,7 @@ export function DiscoverPage() {
     setSelectionSaving(true)
     setSelectionError('')
     try {
-      const saved = await discoverAPI.savePreference(next)
+      const saved = await discoverAPI.savePreference(next, rowSortsRef.current.adult_fd2ppv)
 		const savedSelection = orderSelectedSections(saved.selected_sections, sections)
       setSelected(savedSelection)
 		setSectionPickerDraft(savedSelection)
@@ -251,19 +259,28 @@ export function DiscoverPage() {
     void loadDiscoverSection(key, nextPage)
   }
 
-  const changeDiscoverSort = (key: string, sort: string) => {
+  const changeDiscoverSort = async (key: string, sort: string) => {
     if (key !== 'adult_fd2ppv' || !fd2PPVSortOptions.some((option) => option.value === sort)) return
     if ((rowSortsRef.current[key] || 'release') === sort) return
-    const nextSorts = { ...rowSortsRef.current, [key]: sort }
-    rowSortsRef.current = nextSorts
-    setRowSorts(nextSorts)
-    const nextPages = { ...rowPagesRef.current, [key]: 1 }
-    rowPagesRef.current = nextPages
-    setRowPages(nextPages)
-    setRows((current) => ({ ...current, [key]: [] }))
-    setRowCanNext((current) => ({ ...current, [key]: false }))
     setRowErrors((current) => updateDiscoverRowError(current, key))
-    void loadDiscoverSection(key, 1, false, sort)
+    setRowSortSaving((current) => ({ ...current, [key]: true }))
+    try {
+      const saved = await discoverAPI.savePreference(selected, sort)
+      const savedSort = saved.adult_fd2ppv_sort
+      const nextSorts = { ...rowSortsRef.current, [key]: savedSort }
+      rowSortsRef.current = nextSorts
+      setRowSorts(nextSorts)
+      const nextPages = { ...rowPagesRef.current, [key]: 1 }
+      rowPagesRef.current = nextPages
+      setRowPages(nextPages)
+      setRows((current) => ({ ...current, [key]: [] }))
+      setRowCanNext((current) => ({ ...current, [key]: false }))
+      await loadDiscoverSection(key, 1, false, savedSort)
+    } catch (error) {
+      setRowErrors((current) => ({ ...current, [key]: discoverSortPreferenceErrorMessage(error) }))
+    } finally {
+      setRowSortSaving((current) => ({ ...current, [key]: false }))
+    }
   }
 
   const refreshDiscoverSection = (key: string) => {
@@ -448,12 +465,13 @@ export function DiscoverPage() {
           rowPages={rowPages}
           rowCanNext={rowCanNext}
           rowSorts={rowSorts}
+          rowSortSaving={rowSortSaving}
           loading={loading}
           hasContent={hasContent}
           sectionLabel={sectionLabel}
           onPageChange={changeDiscoverPage}
           onRefresh={refreshDiscoverSection}
-          onSortChange={changeDiscoverSort}
+          onSortChange={(key, sort) => void changeDiscoverSort(key, sort)}
           onSelect={openRootModal}
         />
       )}
@@ -536,4 +554,9 @@ function groupDiscoverSearchItems(items: DiscoverItem[]): Array<{
 function discoverPreferenceErrorMessage(error: unknown): string {
   const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
   return message ? `发现模块设置保存失败：${message}` : '发现模块设置无法从数据库读取或保存，请稍后重试'
+}
+
+function discoverSortPreferenceErrorMessage(error: unknown): string {
+  const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+  return message ? `FC2 排序设置保存失败：${message}` : 'FC2 排序设置无法保存到数据库，请稍后重试'
 }

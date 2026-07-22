@@ -38,6 +38,6 @@ func (r *DiscoverPreferenceRepository) Upsert(ctx context.Context, preference *m
 		}
 		preference.ID = existing.ID
 		return r.db.WithContext(ctx).Model(&existing).
-			Select("SelectedSections").Updates(preference).Error
+			Select("SelectedSections", "AdultFD2PPVSort").Updates(preference).Error
 	})
 }
