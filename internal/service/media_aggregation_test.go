@@ -109,7 +109,7 @@ func TestUpdateMediaAggregationRejectsPartialExistingTree(t *testing.T) {
 	}
 }
 
-func TestUpdateMediaAggregationRejectsVersionedWorks(t *testing.T) {
+func TestUpdateMediaAggregationConvertsWholeVersionTreeToParts(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
 	repos := repository.New(db)
 	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
@@ -118,7 +118,42 @@ func TestUpdateMediaAggregationRejectsVersionedWorks(t *testing.T) {
 	}
 	rows := []model.Media{
 		{LibraryID: lib.ID, Title: "目标", Path: "/media/target.mp4"},
-		{LibraryID: lib.ID, Title: "多版本", Path: "/media/version.mp4", VersionGroupKey: "version"},
+		{LibraryID: lib.ID, Title: "多版本一", Path: "/media/version-1.mp4", VersionGroupKey: "version"},
+		{LibraryID: lib.ID, Title: "多版本二", Path: "/media/version-2.mp4", VersionGroupKey: "version"},
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+
+	result, err := svc.UpdateMediaAggregation(t.Context(), lib.ID, MediaAggregationRequest{
+		Action: MediaAggregationActionGroup, Title: "目标", MediaIDs: []string{rows[0].ID, rows[1].ID, rows[2].ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, row := range rows {
+		var stored model.Media
+		if err := repos.DB.First(&stored, "id = ?", row.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.PartGroupKey != result.GroupKey || stored.PartIndex != index+1 || stored.VersionGroupKey != "" {
+			t.Fatalf("stored[%d]=%#v", index, stored)
+		}
+	}
+}
+
+func TestUpdateMediaAggregationRejectsPartialVersionTree(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{LibraryID: lib.ID, Title: "目标", Path: "/media/target.mp4"},
+		{LibraryID: lib.ID, Title: "多版本一", Path: "/media/version-1.mp4", VersionGroupKey: "version"},
+		{LibraryID: lib.ID, Title: "多版本二", Path: "/media/version-2.mp4", VersionGroupKey: "version"},
 	}
 	if err := repos.DB.Create(&rows).Error; err != nil {
 		t.Fatal(err)
@@ -128,7 +163,7 @@ func TestUpdateMediaAggregationRejectsVersionedWorks(t *testing.T) {
 	_, err := svc.UpdateMediaAggregation(t.Context(), lib.ID, MediaAggregationRequest{
 		Action: MediaAggregationActionGroup, Title: "目标", MediaIDs: []string{rows[0].ID, rows[1].ID},
 	})
-	if err == nil || !strings.Contains(err.Error(), "多版本作品不能手动聚合") {
-		t.Fatalf("expected version error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "完整选择多版本作品") {
+		t.Fatalf("expected partial version-tree error, got %v", err)
 	}
 }

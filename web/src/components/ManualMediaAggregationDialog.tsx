@@ -25,6 +25,7 @@ type ManualMediaAggregationDialogProps = {
 
 type AggregationTree = {
   key: string
+  kind: 'single' | 'version' | 'part'
   title: string
   members: Media[]
   versionCount: number
@@ -115,7 +116,7 @@ export function ManualMediaAggregationDialog({
               <h2 className="font-display text-xl font-bold text-gray-900">手动聚合作品</h2>
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              {libraryName} · 选择一个顶层作品，再将它挂到另一个作品下；多版本关系保持原样
+              {libraryName} · 将顶层作品归为同一分段作品；多版本作品会完整转换为片段
             </p>
           </div>
           <button type="button" className="btn-ghost h-9 w-9 shrink-0 p-0" onClick={onClose} aria-label="关闭">
@@ -148,7 +149,6 @@ export function ManualMediaAggregationDialog({
           <div className="space-y-2" role="tree" aria-label="当前作品聚合关系">
             {visibleTrees.map((tree) => {
               const selected = sourceKey === tree.key
-              const locked = tree.versionCount > 1
               const treeBusy = busyKey.includes(tree.key) || tree.members.some((media) => busyKey.includes(media.id))
               return (
                 <div key={tree.key} className={`rounded-lg border ${selected ? 'border-brand-300 bg-brand-50/40' : 'border-gray-200 bg-white'}`}>
@@ -159,13 +159,17 @@ export function ManualMediaAggregationDialog({
                       <p className="truncate text-xs text-gray-500">{mediaFilename(tree.members[0])}</p>
                     </div>
                     {tree.members.length > 1 && <span className="shrink-0 text-xs text-gray-500">{tree.members.length} 项</span>}
-                    {locked && <span className="shrink-0 rounded bg-gray-100 px-2 py-1 text-xs text-gray-500">多版本</span>}
-                    {!locked && !source && (
+                    {tree.kind === 'version' && (
+                      <span className="shrink-0 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+                        {tree.versionCount} 版本 · 可转为片段
+                      </span>
+                    )}
+                    {!source && (
                       <button type="button" className="btn-outline h-8 shrink-0 px-2 text-xs" onClick={() => setSourceKey(tree.key)}>
                         选择作品
                       </button>
                     )}
-                    {!locked && source && source.key !== tree.key && (
+                    {source && source.key !== tree.key && (
                       <button
                         type="button"
                         className="btn-primary h-8 shrink-0 px-2 text-xs"
@@ -189,36 +193,40 @@ export function ManualMediaAggregationDialog({
                             <p className="truncate text-sm text-gray-700">{mediaTitle(media)}</p>
                             <p className="truncate text-xs text-gray-400">{mediaFilename(media)}</p>
                           </div>
-                          <button
-                            type="button"
-                            className="icon-button h-8 w-8"
-                            title="上移"
-                            aria-label={`上移 ${mediaTitle(media)}`}
-                            disabled={treeBusy || index === 0}
-                            onClick={() => void move(tree, index, -1)}
-                          >
-                            <ChevronUp size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button h-8 w-8"
-                            title="下移"
-                            aria-label={`下移 ${mediaTitle(media)}`}
-                            disabled={treeBusy || index === tree.members.length - 1}
-                            onClick={() => void move(tree, index, 1)}
-                          >
-                            <ChevronDown size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button h-8 w-8 text-red-500"
-                            title="从当前作品解除"
-                            aria-label={`解除 ${mediaTitle(media)}`}
-                            disabled={treeBusy}
-                            onClick={() => void detach(tree, media)}
-                          >
-                            {busyKey === `detach:${media.id}` ? <LoaderCircle size={14} className="animate-spin" /> : <Unlink size={14} />}
-                          </button>
+                          {tree.kind === 'part' && (
+                            <>
+                              <button
+                                type="button"
+                                className="icon-button h-8 w-8"
+                                title="上移"
+                                aria-label={`上移 ${mediaTitle(media)}`}
+                                disabled={treeBusy || index === 0}
+                                onClick={() => void move(tree, index, -1)}
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-button h-8 w-8"
+                                title="下移"
+                                aria-label={`下移 ${mediaTitle(media)}`}
+                                disabled={treeBusy || index === tree.members.length - 1}
+                                onClick={() => void move(tree, index, 1)}
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-button h-8 w-8 text-red-500"
+                                title="从当前作品解除"
+                                aria-label={`解除 ${mediaTitle(media)}`}
+                                disabled={treeBusy}
+                                onClick={() => void detach(tree, media)}
+                              >
+                                {busyKey === `detach:${media.id}` ? <LoaderCircle size={14} className="animate-spin" /> : <Unlink size={14} />}
+                              </button>
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -238,11 +246,15 @@ export function ManualMediaAggregationDialog({
 
 function buildAggregationTrees(items: Media[]): AggregationTree[] {
   return items.map((item) => {
-    const members = item.parts?.length
-      ? [...item.parts].sort((left, right) => (left.part_index ?? 0) - (right.part_index ?? 0) || left.path.localeCompare(right.path))
-      : [item]
+    const kind: AggregationTree['kind'] = item.parts?.length ? 'part' : item.versions?.length ? 'version' : 'single'
+    const members = kind === 'part'
+      ? [...(item.parts ?? [])].sort((left, right) => (left.part_index ?? 0) - (right.part_index ?? 0) || compareMediaFilename(left, right))
+      : kind === 'version'
+        ? [...(item.versions ?? [])].sort(compareMediaFilename)
+        : [item]
     return {
       key: item.part_group_key ? `part:${item.part_group_key}` : `media:${item.id}`,
+      kind,
       title: item.part_group_title || item.display_title || item.title,
       members,
       versionCount: item.versions?.length ?? 0,
@@ -263,6 +275,10 @@ function mediaTitle(media: Media): string {
 function mediaFilename(media: Media): string {
   const parts = media.path.split('\\').join('/').split('/').filter(Boolean)
   return parts[parts.length - 1] || media.path
+}
+
+function compareMediaFilename(left: Media, right: Media): number {
+  return mediaFilename(left).localeCompare(mediaFilename(right), 'zh-CN', { numeric: true, sensitivity: 'base' })
 }
 
 function aggregationError(error: unknown, fallback: string): string {

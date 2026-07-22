@@ -31,7 +31,8 @@ type MediaAggregationResult struct {
 }
 
 // UpdateMediaAggregation manages the explicit parent/child presentation used
-// by multipart works. Version relationships are intentionally left untouched.
+// by multipart works. A complete version tree may be explicitly reclassified
+// as parts; partial version trees are rejected.
 func (s *MediaService) UpdateMediaAggregation(ctx context.Context, libraryID string, req MediaAggregationRequest) (*MediaAggregationResult, error) {
 	if s == nil || s.repo == nil || s.repo.DB == nil || s.repo.Library == nil {
 		return nil, errors.New("media service unavailable")
@@ -110,9 +111,10 @@ func (s *MediaService) UpdateMediaAggregation(ctx context.Context, libraryID str
 		case MediaAggregationActionGroup:
 			for index, row := range ordered {
 				if err := tx.Model(&model.Media{}).Where("id = ?", row.ID).Updates(map[string]any{
-					"part_group_key":   groupKey,
-					"part_group_title": title,
-					"part_index":       index + 1,
+					"part_group_key":    groupKey,
+					"part_group_title":  title,
+					"part_index":        index + 1,
+					"version_group_key": "",
 				}).Error; err != nil {
 					return err
 				}
@@ -165,9 +167,6 @@ func (s *MediaService) validateManualAggregationRows(ctx context.Context, librar
 	selectedPartCounts := make(map[string]int)
 	for _, row := range selected {
 		selectedByID[row.ID] = struct{}{}
-		if strings.TrimSpace(row.VersionGroupKey) != "" {
-			return fmt.Errorf("多版本作品不能手动聚合: %s", row.Title)
-		}
 		if key := strings.TrimSpace(row.PartGroupKey); key != "" {
 			selectedPartCounts[key]++
 		}
@@ -193,32 +192,40 @@ func (s *MediaService) validateManualAggregationRows(ctx context.Context, librar
 	}
 	versionCounts := make(map[string]int)
 	versionKeyByID := make(map[string]string)
+	versionTitleByKey := make(map[string]string)
 	for _, row := range libraryRows {
-		if strings.TrimSpace(row.PartGroupKey) != "" {
-			continue
-		}
-		key := mediaVersionGroupKey(row)
+		key := manualAggregationVersionKey(row)
 		if key == "" {
 			continue
 		}
 		versionCounts[key]++
 		versionKeyByID[row.ID] = key
+		if versionTitleByKey[key] == "" {
+			versionTitleByKey[key] = firstNonEmpty(row.DisplayTitle, row.Title, row.OriginalName, row.ID)
+		}
 	}
+	selectedVersionCounts := make(map[string]int)
 	for id := range selectedByID {
-		if key := versionKeyByID[id]; key != "" && versionCounts[key] > 1 {
-			return fmt.Errorf("多版本作品不能手动聚合: %s", byMediaIDTitle(selected, id))
+		if key := versionKeyByID[id]; key != "" {
+			selectedVersionCounts[key]++
+		}
+	}
+	for key, selectedCount := range selectedVersionCounts {
+		if versionCounts[key] > 1 && selectedCount != versionCounts[key] {
+			return fmt.Errorf("请完整选择多版本作品后再聚合: %s", versionTitleByKey[key])
 		}
 	}
 	return nil
 }
 
-func byMediaIDTitle(rows []model.Media, id string) string {
-	for _, row := range rows {
-		if row.ID == id {
-			return row.Title
-		}
+func manualAggregationVersionKey(row model.Media) string {
+	if strings.TrimSpace(row.PartGroupKey) != "" {
+		return ""
 	}
-	return id
+	if key := strings.TrimSpace(row.VersionGroupKey); key != "" {
+		return "explicit:" + strings.ToLower(key)
+	}
+	return mediaVersionGroupKey(row)
 }
 
 func normalizeRemainingPartGroup(tx *gorm.DB, libraryID, groupKey string) error {
