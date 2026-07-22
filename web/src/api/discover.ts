@@ -110,10 +110,19 @@ export const discoverAPI = {
     api
       .put<DiscoverPreference>('/discover/preferences', { selected_sections: selectedSections })
       .then((r) => r.data),
-  feed: (sectionKeys: string[], page = 1, options?: { refresh?: boolean }): Promise<DiscoverFeedResult> =>
+  feed: (
+    sectionKeys: string[],
+    page = 1,
+    options?: { refresh?: boolean; adultFD2PPVSort?: string },
+  ): Promise<DiscoverFeedResult> =>
     api
       .get<Record<string, DiscoverItem[] | DiscoverFeedMeta | Record<string, DiscoverFeedMeta> | null>>('/discover/feed', {
-        params: { sections: sectionKeys.join(','), page, refresh: options?.refresh || undefined },
+        params: {
+          sections: sectionKeys.join(','),
+          page,
+          refresh: options?.refresh || undefined,
+          adult_fd2ppv_sort: options?.adultFD2PPVSort || undefined,
+        },
       })
       .then((r) => {
         const raw = r.data

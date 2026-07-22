@@ -101,3 +101,38 @@ func TestSearchDiscoverCatalogOnlySearchesAdultMoviesForAdultCode(t *testing.T) 
 		t.Fatalf("movie requests = %d, want 1", got)
 	}
 }
+
+func TestSearchDiscoverCatalogRoutesFC2CodeOnlyToFD2PPV(t *testing.T) {
+	var javDBRequests atomic.Int32
+	javDB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		javDBRequests.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer javDB.Close()
+	withAdultDefaultBases(t, []string{javDB.URL})
+
+	flareRequests := atomic.Int32{}
+	flare := newFD2PPVFlareServer(t, func(target string) string {
+		flareRequests.Add(1)
+		if target != "https://fd2ppv.cc/articles/3780016" {
+			t.Fatalf("target URL = %q", target)
+		}
+		return `<h1 class="work-title">3780016</h1>
+			<div class="work-brief">FD2 code result</div>
+			<div class="work-original-photos">https://xximgs.cc/uploads/fd2.webp</div>`
+	})
+	defer flare.Close()
+
+	adult := NewAdultProvider(zap.NewNop(), nil)
+	adult.SetFlareSolverr(flare.URL, 5)
+	result := SearchDiscoverCatalog(t.Context(), "FC2-PPV-3780016", nil, nil, nil, adult)
+	if len(result.Errors) != 0 || len(result.Items) != 1 || result.Items[0].Source != "fd2ppv" {
+		t.Fatalf("result = %#v", result)
+	}
+	if javDBRequests.Load() != 0 {
+		t.Fatalf("JavDB requests = %d, want 0", javDBRequests.Load())
+	}
+	if flareRequests.Load() != 1 {
+		t.Fatalf("FD2PPV requests = %d, want 1", flareRequests.Load())
+	}
+}

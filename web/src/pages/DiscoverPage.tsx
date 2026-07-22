@@ -8,6 +8,7 @@ import { DiscoverEmptySelection, DiscoverHeader, DiscoverResults } from './Disco
 import { DiscoverSectionPickerModal } from './DiscoverSectionPickerModal'
 import {
   defaultSections,
+  fd2PPVSortOptions,
   orderSelectedSections,
   readCachedDiscoverRows,
   writeCachedDiscoverRow,
@@ -24,6 +25,7 @@ export function DiscoverPage() {
   const [rows, setRows] = useState<Record<string, DiscoverItem[]>>({})
   const [rowPages, setRowPages] = useState<Record<string, number>>({})
   const [rowCanNext, setRowCanNext] = useState<Record<string, boolean>>({})
+  const [rowSorts, setRowSorts] = useState<Record<string, string>>({ adult_fd2ppv: 'release' })
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
   const [rowRefreshStatus, setRowRefreshStatus] = useState<Record<string, DiscoverRefreshStatus>>({})
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
@@ -40,17 +42,26 @@ export function DiscoverPage() {
 	const [searchDone, setSearchDone] = useState(false)
 	const searchSequence = useRef(0)
 	const modalSequence = useRef(0)
-	const rowPagesRef = useRef<Record<string, number>>({})
+  const rowPagesRef = useRef<Record<string, number>>({})
+  const rowSortsRef = useRef<Record<string, string>>({ adult_fd2ppv: 'release' })
 	const rowRequestSequences = useRef<Record<string, number>>({})
 	const rowRefreshClearTimers = useRef<Record<string, number>>({})
 
-	const loadDiscoverSection = useCallback(async (key: string, page: number, refresh = false): Promise<boolean | undefined> => {
+	const loadDiscoverSection = useCallback(async (
+		key: string,
+		page: number,
+		refresh = false,
+		sortOverride?: string,
+	): Promise<boolean | undefined> => {
 		const sequence = (rowRequestSequences.current[key] ?? 0) + 1
 		rowRequestSequences.current[key] = sequence
 		setRowLoading((current) => ({ ...current, [key]: true }))
 		setRowErrors((current) => updateDiscoverRowError(current, key))
 		try {
-			const feed = await discoverAPI.feed([key], page, { refresh })
+			const adultFD2PPVSort = key === 'adult_fd2ppv'
+				? sortOverride || rowSortsRef.current[key] || 'release'
+				: undefined
+			const feed = await discoverAPI.feed([key], page, { refresh, adultFD2PPVSort })
 			if (rowRequestSequences.current[key] !== sequence) return undefined
 			const meta = feed.meta[key]
 			const issue = meta?.error || meta?.warning
@@ -68,7 +79,7 @@ export function DiscoverPage() {
 				}
 				return { ...current, [key]: nextCanNext }
 			})
-			if (!issue) {
+			if (!issue && (key !== 'adult_fd2ppv' || adultFD2PPVSort === 'release')) {
 				writeCachedDiscoverRow(key, page, nextItems, nextCanNext)
 			}
 			setRowErrors((current) => updateDiscoverRowError(current, key, issue))
@@ -240,6 +251,21 @@ export function DiscoverPage() {
     void loadDiscoverSection(key, nextPage)
   }
 
+  const changeDiscoverSort = (key: string, sort: string) => {
+    if (key !== 'adult_fd2ppv' || !fd2PPVSortOptions.some((option) => option.value === sort)) return
+    if ((rowSortsRef.current[key] || 'release') === sort) return
+    const nextSorts = { ...rowSortsRef.current, [key]: sort }
+    rowSortsRef.current = nextSorts
+    setRowSorts(nextSorts)
+    const nextPages = { ...rowPagesRef.current, [key]: 1 }
+    rowPagesRef.current = nextPages
+    setRowPages(nextPages)
+    setRows((current) => ({ ...current, [key]: [] }))
+    setRowCanNext((current) => ({ ...current, [key]: false }))
+    setRowErrors((current) => updateDiscoverRowError(current, key))
+    void loadDiscoverSection(key, 1, false, sort)
+  }
+
   const refreshDiscoverSection = (key: string) => {
     const existingTimer = rowRefreshClearTimers.current[key]
     if (existingTimer) {
@@ -385,7 +411,7 @@ export function DiscoverPage() {
 
 			{sectionsReady && searchLoading && (
 				<div className="rounded-lg border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-brand-500">
-					正在聚合搜索 TMDb、豆瓣、Bangumi{adultSearchAvailable ? ' 与 JavDB' : ''}…
+					正在聚合搜索 TMDb、豆瓣、Bangumi{adultSearchAvailable ? '、JavDB 与 FC2' : ''}…
 				</div>
 			)}
 
@@ -421,11 +447,13 @@ export function DiscoverPage() {
           rowErrors={rowErrors}
           rowPages={rowPages}
           rowCanNext={rowCanNext}
+          rowSorts={rowSorts}
           loading={loading}
           hasContent={hasContent}
           sectionLabel={sectionLabel}
           onPageChange={changeDiscoverPage}
           onRefresh={refreshDiscoverSection}
+          onSortChange={changeDiscoverSort}
           onSelect={openRootModal}
         />
       )}

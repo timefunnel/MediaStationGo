@@ -41,6 +41,7 @@ var discoverSectionCatalog = []discoverSectionDef{
 	{Key: "douban_top_movie", Label: "豆瓣高分电影", Provider: "douban"},
 	{Key: "bangumi_calendar", Label: "Bangumi 每日放送", Provider: "bangumi"},
 	{Key: "adult_javdb_popular", Label: "JavDB 今日热门", Provider: "adult", Group: "adult"},
+	{Key: "adult_fd2ppv", Label: "FC2 作品", Provider: "adult", Group: "adult"},
 	{Key: "adult_followed_performers", Label: "关注女优", Provider: "adult", Group: "adult"},
 	{Key: "adult_followed", Label: "关注女优新作", Provider: "adult", Group: "adult"},
 	{Key: "adult_javdb_performers_new", Label: "JavDB 新人女优", Provider: "adult", Group: "adult"},
@@ -50,6 +51,7 @@ var discoverSectionCatalog = []discoverSectionDef{
 
 const discoverFeedSectionTimeout = 20 * time.Second
 const discoverFeedBangumiTimeout = 30 * time.Second
+const discoverFeedFD2PPVTimeout = 75 * time.Second
 const discoverFeedSlowSectionThreshold = 2 * time.Second
 const discoverWorkPageSize = 18
 
@@ -87,6 +89,11 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			page = 1
 		}
 		refresh := c.Query("refresh") == "true"
+		fd2Sort, fd2SortOK := service.NormalizeFD2PPVDiscoverSort(c.Query("adult_fd2ppv_sort"))
+		if !fd2SortOK {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "FC2 排序条件无效"})
+			return
+		}
 		keys := strings.Split(rawSections, ",")
 		out := gin.H{}
 		meta := gin.H{}
@@ -108,7 +115,11 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 				meta[k] = gin.H{"page": page, "has_next": false, "disabled": true}
 				continue
 			}
-			cacheKey := discoverSectionCacheKeyForUser(k, userID)
+			sectionCacheKey := k
+			if k == "adult_fd2ppv" {
+				sectionCacheKey += ":" + fd2Sort
+			}
+			cacheKey := discoverSectionCacheKeyForUser(sectionCacheKey, userID)
 			metaEntry := gin.H{"page": page, "has_next": false, "duration_ms": int64(0)}
 			items, cacheHit := cachedDiscoverSection(svc, cacheKey, page)
 			if !refresh && cacheHit {
@@ -117,7 +128,7 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 				sectionTimeout := discoverSectionTimeout(k)
 				sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
 				started := time.Now()
-				freshItems, err := discoverSectionItems(sectionCtx, svc, k, page, userID)
+				freshItems, err := discoverSectionItems(sectionCtx, svc, k, page, userID, fd2Sort)
 				elapsed := time.Since(started)
 				cancel()
 				metaEntry["duration_ms"] = elapsed.Milliseconds()
@@ -315,6 +326,9 @@ func discoverSectionTimeout(key string) time.Duration {
 	if key == "bangumi_calendar" {
 		return discoverFeedBangumiTimeout
 	}
+	if key == "adult_fd2ppv" {
+		return discoverFeedFD2PPVTimeout
+	}
 	return discoverFeedSectionTimeout
 }
 
@@ -322,6 +336,9 @@ func enabledDiscoverSections(ctx context.Context, svc *service.Container) []disc
 	sections := make([]discoverSectionDef, 0, len(discoverSectionCatalog))
 	for _, section := range discoverSectionCatalog {
 		if !discoverProviderEnabled(ctx, svc, section.Provider) {
+			continue
+		}
+		if section.Key == "adult_fd2ppv" && (svc == nil || svc.Adult == nil || !svc.Adult.FD2PPVEnabled()) {
 			continue
 		}
 		sections = append(sections, section)
@@ -361,7 +378,7 @@ func discoverSectionProvider(key string) string {
 	}
 	switch key {
 	case "adult_javdb_popular", "adult_javdb_performers", "adult_followed_performers", "adult_followed",
-		"adult_javdb_performers_new", "adult_javdb_performers_monthly", "adult_javdb_performers_fanza":
+		"adult_javdb_performers_new", "adult_javdb_performers_monthly", "adult_javdb_performers_fanza", "adult_fd2ppv":
 		return "adult"
 	case "trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
 		return "tmdb"
@@ -381,7 +398,7 @@ func discoverProviderEnabled(ctx context.Context, svc *service.Container, provid
 	return cfg.Enabled
 }
 
-func discoverSectionItems(ctx context.Context, svc *service.Container, k string, page int, userID string) ([]service.ExternalMediaResult, error) {
+func discoverSectionItems(ctx context.Context, svc *service.Container, k string, page int, userID string, fd2Sort ...string) ([]service.ExternalMediaResult, error) {
 	switch k {
 	case "tmdb_trending_day", "tmdb_trending_week", "tmdb_latest_movie", "tmdb_latest_tv", "tmdb_popular_movie", "tmdb_popular_tv", "tmdb_top_rated_movie", "tmdb_upcoming_movie",
 		"trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie":
@@ -409,6 +426,15 @@ func discoverSectionItems(ctx context.Context, svc *service.Container, k string,
 			rememberDiscoverStaticWindows(svc, k, items)
 		}
 		return discoverSectionWindow(items, page), err
+	case "adult_fd2ppv":
+		if svc.Adult == nil {
+			return []service.ExternalMediaResult{}, nil
+		}
+		sortKey := "release"
+		if len(fd2Sort) > 0 {
+			sortKey = fd2Sort[0]
+		}
+		return svc.Adult.DiscoverFD2PPVWindow(ctx, sortKey, page, discoverWorkPageSize)
 	case "adult_javdb_performers", "adult_javdb_performers_monthly":
 		if svc.Adult == nil || page > 1 {
 			return []service.ExternalMediaResult{}, nil
@@ -503,7 +529,7 @@ func discoverSectionUsesWorkPaging(key string) bool {
 	switch key {
 	case "tmdb_trending_day", "tmdb_trending_week", "tmdb_latest_movie", "tmdb_latest_tv", "tmdb_popular_movie", "tmdb_popular_tv", "tmdb_top_rated_movie", "tmdb_upcoming_movie",
 		"trending_day", "trending_week", "latest_movie", "latest_tv", "popular_movie", "popular_tv", "top_rated_movie", "upcoming_movie",
-		"douban_hot_movie", "douban_hot_tv", "douban_top_movie", "bangumi_calendar", "adult_javdb_popular", "adult_followed":
+		"douban_hot_movie", "douban_hot_tv", "douban_top_movie", "bangumi_calendar", "adult_javdb_popular", "adult_fd2ppv", "adult_followed":
 		return true
 	default:
 		return false

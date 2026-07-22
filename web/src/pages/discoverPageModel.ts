@@ -9,6 +9,14 @@ export const defaultSections = [
   'bangumi_calendar',
 ]
 
+export const fd2PPVSortOptions = [
+  { value: 'release', label: '发行日期' },
+  { value: 'views', label: '观看数' },
+  { value: 'likes', label: '喜欢数' },
+  { value: 'favorites', label: '收藏数' },
+  { value: 'comments', label: '留言数' },
+] as const
+
 export const discoverRowsStorageKey = 'mediastation.discover.rows'
 const discoverRowsStorageVersion = 3
 const discoverRowsCacheMaxAgeMs = 6 * 60 * 60 * 1000
@@ -33,6 +41,7 @@ export const defaultSectionDefs: DiscoverSection[] = [
   { key: 'douban_hot_movie', label: '豆瓣热门电影', provider: 'douban' },
   { key: 'douban_hot_tv', label: '豆瓣热门剧集', provider: 'douban' },
   { key: 'bangumi_calendar', label: 'Bangumi 每日放送', provider: 'bangumi' },
+	{ key: 'adult_fd2ppv', label: 'FC2 作品', provider: 'adult', group: 'adult' },
 	{ key: 'adult_javdb_popular', label: 'JavDB 今日热门', provider: 'adult', group: 'adult' },
 	{ key: 'adult_followed_performers', label: '关注女优', provider: 'adult', group: 'adult' },
 	{ key: 'adult_followed', label: '关注女优新作', provider: 'adult', group: 'adult' },
@@ -43,6 +52,11 @@ export const defaultSectionDefs: DiscoverSection[] = [
 
 export function discoverItemSource(item: DiscoverItem): string {
   return item.source || (item.bangumi_id ? 'bangumi' : item.douban_id ? 'douban' : 'tmdb')
+}
+
+export function discoverSourceLabel(source?: string): string {
+  if (source?.trim().toLowerCase() === 'fd2ppv') return 'FC2'
+  return source?.trim() || '推荐'
 }
 
 export function discoverMediaTypeLabel(mediaType?: string): string {

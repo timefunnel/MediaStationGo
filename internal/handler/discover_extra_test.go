@@ -196,6 +196,18 @@ func TestDiscoverSectionTimeoutRaisesBangumiBudget(t *testing.T) {
 	if got := discoverSectionTimeout("tmdb_latest_movie"); got != discoverFeedSectionTimeout {
 		t.Fatalf("tmdb timeout = %s, want %s", got, discoverFeedSectionTimeout)
 	}
+	if got := discoverSectionTimeout("adult_fd2ppv"); got != discoverFeedFD2PPVTimeout {
+		t.Fatalf("fd2ppv timeout = %s, want %s", got, discoverFeedFD2PPVTimeout)
+	}
+}
+
+func TestDiscoverFD2PPVSectionUsesWorkPaging(t *testing.T) {
+	if !discoverSectionHasNext("adult_fd2ppv", discoverWorkPageSize+1) {
+		t.Fatal("FC2 19th item should enable the next page")
+	}
+	if got := len(discoverSectionVisibleItems("adult_fd2ppv", make([]service.ExternalMediaResult, discoverWorkPageSize+1))); got != discoverWorkPageSize {
+		t.Fatalf("FC2 visible items = %d, want %d", got, discoverWorkPageSize)
+	}
 }
 
 func TestDiscoverSlowFetchLogIncludesSectionTiming(t *testing.T) {

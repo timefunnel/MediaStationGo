@@ -11,13 +11,20 @@ import {
   supportsCatalogItemDetail,
 } from './discoverDetailDataModel.ts'
 
-test('成人作品详情只对可信 JavDB 作品引用启用', () => {
+test('成人作品详情只对可信 JavDB 或 FD2PPV 作品引用启用', () => {
   assert.equal(supportsAdultMovieDetail({
     title: '测试',
     media_type: 'adult',
     source: 'javdb',
     provider_id: 'QNRVYG',
     original_name: 'MIZD-534',
+  }), true)
+  assert.equal(supportsAdultMovieDetail({
+    title: 'FC2 测试',
+    media_type: 'adult',
+    source: 'fd2ppv',
+    provider_id: '3780016',
+    original_name: 'FC2-PPV-3780016',
   }), true)
   assert.equal(supportsAdultMovieDetail({
     title: '测试',

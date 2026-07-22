@@ -9,6 +9,7 @@ import {
   discoverModulePageSize,
   type DiscoverRefreshStatus,
 } from './DiscoverContentRow'
+import { fd2PPVSortOptions } from './discoverPageModel'
 
 type SectionLabel = (key: string) => string
 
@@ -111,11 +112,13 @@ export function DiscoverResults({
   rowRefreshStatus,
   rowPages,
   rowCanNext,
+  rowSorts,
   loading,
   hasContent,
   sectionLabel,
   onPageChange,
   onRefresh,
+  onSortChange,
   onSelect,
 }: {
   selected: string[]
@@ -125,11 +128,13 @@ export function DiscoverResults({
   rowRefreshStatus: Record<string, DiscoverRefreshStatus>
   rowPages: Record<string, number>
   rowCanNext: Record<string, boolean>
+  rowSorts: Record<string, string>
   loading: boolean
   hasContent: boolean
   sectionLabel: SectionLabel
   onPageChange: (key: string, delta: number) => void
   onRefresh: (key: string) => void
+  onSortChange: (key: string, sort: string) => void
   onSelect: (item: DiscoverItem) => void
 }) {
   const sectionTopOffset = 32
@@ -296,6 +301,22 @@ export function DiscoverResults({
                   refreshStatus={rowRefreshStatus[key]}
                   fixedGrid={workRow}
                   priority={rowIndex === 0}
+                  headerControl={key === 'adult_fd2ppv' ? (
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-sand-500">
+                      <span className="hidden sm:inline">排序</span>
+                      <select
+                        aria-label="FC2 作品排序"
+                        value={rowSorts[key] || 'release'}
+                        disabled={Boolean(rowLoading[key])}
+                        onChange={(event) => onSortChange(key, event.target.value)}
+                        className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-ink-600 outline-none transition focus:border-primary-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {fd2PPVSortOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : undefined}
                   onPageChange={(delta) => onPageChange(key, delta)}
                   onRefresh={() => onRefresh(key)}
                   onSelect={onSelect}

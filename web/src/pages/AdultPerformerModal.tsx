@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { imageURL } from '../api/client'
 import { discoverAPI, type AdultPerformerFollow, type DiscoverItem } from '../api/discover'
 import { ContentRow } from './DiscoverContentRow'
+import { discoverSourceLabel } from './discoverPageModel'
 
 export function AdultPerformerModal({
 	item,
@@ -18,6 +19,7 @@ export function AdultPerformerModal({
 	onFollowChanged: (followed: boolean) => void
 }) {
 	const source = item.source || 'javdb'
+	const sourceLabel = discoverSourceLabel(source)
 	const sourceID = item.provider_id || ''
 	const [resolvedItem, setResolvedItem] = useState(item)
 	const [follows, setFollows] = useState<AdultPerformerFollow[]>([])
@@ -125,7 +127,7 @@ export function AdultPerformerModal({
 			<div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-white/60 bg-white shadow-2xl">
 				<header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 bg-white px-4 py-4 sm:px-5">
 					<div>
-						<p className="text-xs font-semibold uppercase text-rose-500">JavDB 女优</p>
+						<p className="text-xs font-semibold uppercase text-rose-500">{sourceLabel} 女优</p>
 						<h2 className="mt-1 text-2xl font-bold text-ink-600">{resolvedItem.title}</h2>
 					</div>
 					<button
@@ -146,7 +148,7 @@ export function AdultPerformerModal({
 							) : (
 								<div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-rose-50 to-rose-100 px-4 text-center text-rose-500">
 									<UserRound size={38} strokeWidth={1.5} />
-									<span className="text-xs font-semibold">JavDB 暂无头像</span>
+									<span className="text-xs font-semibold">{sourceLabel} 暂无头像</span>
 								</div>
 							)}
 						</div>

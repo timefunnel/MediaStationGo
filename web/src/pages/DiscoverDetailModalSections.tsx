@@ -20,6 +20,7 @@ import {
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
+import { discoverSourceLabel } from './discoverPageModel'
 import {
   discoverItemMetaText,
   discoverItemPeople,
@@ -257,6 +258,7 @@ export function DiscoverMetadataPanel({
         ? `Bangumi ${item.bangumi_id}`
         : ''
   const releaseLabel = adultItem ? '发行日期' : item.media_type === 'tv' || item.media_type === 'anime' ? '首播日期' : '上映日期'
+  const sourceLabel = discoverSourceLabel(item.source)
 
   return (
     <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4">
@@ -265,7 +267,7 @@ export function DiscoverMetadataPanel({
         {loading && (
           <span className="inline-flex items-center gap-1.5 text-xs text-sand-500">
             <LoaderCircle size={14} className="animate-spin" />
-            {adultItem ? '正在补充 JavDB 详情…' : '正在补充作品资料…'}
+            {adultItem ? `正在补充 ${sourceLabel} 详情…` : '正在补充作品资料…'}
           </span>
         )}
       </div>

@@ -1,8 +1,9 @@
 import type { DiscoverItem, DiscoverPerson } from '../api/discover'
 
 export function supportsAdultMovieDetail(item: DiscoverItem): boolean {
+  const source = item.source?.toLowerCase()
   return item.media_type === 'adult'
-    && item.source?.toLowerCase() === 'javdb'
+    && (source === 'javdb' || source === 'fd2ppv')
     && Boolean(item.provider_id?.trim())
     && Boolean(item.original_name?.trim())
 }

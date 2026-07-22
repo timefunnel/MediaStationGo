@@ -39,8 +39,10 @@ func SearchDiscoverCatalog(
 		return result
 	}
 
-	adultCodeQuery := normalizeAdultCode(query) != ""
-	tasks := make([]discoverCatalogSearchTask, 0, 6)
+	fd2NumberQuery := adultFD2SearchNumber(query) != ""
+	adultCodeQuery := normalizeAdultCode(query) != "" || fd2NumberQuery
+	fd2OnlyQuery := fd2NumberQuery
+	tasks := make([]discoverCatalogSearchTask, 0, 8)
 	if tmdb != nil && !adultCodeQuery {
 		tasks = append(tasks,
 			discoverCatalogSearchTask{key: "tmdb_movie", run: func() ([]ExternalMediaResult, error) {
@@ -78,9 +80,21 @@ func SearchDiscoverCatalog(
 				return adult.SearchPerformers(ctx, query)
 			}})
 		}
-		tasks = append(tasks, discoverCatalogSearchTask{key: "javdb_adult", run: func() ([]ExternalMediaResult, error) {
-			return adult.SearchMovies(ctx, query)
-		}})
+		if !fd2OnlyQuery {
+			tasks = append(tasks, discoverCatalogSearchTask{key: "javdb_adult", run: func() ([]ExternalMediaResult, error) {
+				return adult.SearchMovies(ctx, query)
+			}})
+		}
+		if adult.FD2PPVEnabled() && (!adultCodeQuery || fd2OnlyQuery) {
+			if !adultCodeQuery {
+				tasks = append(tasks, discoverCatalogSearchTask{key: "fd2ppv_performer", run: func() ([]ExternalMediaResult, error) {
+					return adult.SearchFD2PPVPerformers(ctx, query)
+				}})
+			}
+			tasks = append(tasks, discoverCatalogSearchTask{key: "fd2ppv_adult", run: func() ([]ExternalMediaResult, error) {
+				return adult.SearchFD2PPVMovies(ctx, query)
+			}})
+		}
 	}
 
 	results := make(chan discoverCatalogSearchTaskResult, len(tasks))

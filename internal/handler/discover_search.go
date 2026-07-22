@@ -14,14 +14,17 @@ import (
 )
 
 const discoverSearchTimeout = 20 * time.Second
+const discoverSearchFD2PPVTimeout = 75 * time.Second
 
 var discoverSearchSourceLabels = map[string]string{
-	"tmdb_movie":      "TMDb 电影",
-	"tmdb_tv":         "TMDb 剧集",
-	"douban":          "豆瓣",
-	"bangumi":         "Bangumi 动漫",
-	"javdb_performer": "JavDB 女优",
-	"javdb_adult":     "JavDB 作品",
+	"tmdb_movie":       "TMDb 电影",
+	"tmdb_tv":          "TMDb 剧集",
+	"douban":           "豆瓣",
+	"bangumi":          "Bangumi 动漫",
+	"javdb_performer":  "JavDB 女优",
+	"javdb_adult":      "JavDB 作品",
+	"fd2ppv_performer": "FC2 演员",
+	"fd2ppv_adult":     "FC2 作品",
 }
 
 func discoverSearchHandler(svc *service.Container) gin.HandlerFunc {
@@ -49,7 +52,11 @@ func discoverSearchHandler(svc *service.Container) gin.HandlerFunc {
 			adult = svc.Adult
 		}
 
-		searchCtx, cancel := context.WithTimeout(c.Request.Context(), discoverSearchTimeout)
+		searchTimeout := discoverSearchTimeout
+		if adult != nil && adult.FD2PPVEnabled() {
+			searchTimeout = discoverSearchFD2PPVTimeout
+		}
+		searchCtx, cancel := context.WithTimeout(c.Request.Context(), searchTimeout)
 		defer cancel()
 		result := service.SearchDiscoverCatalog(searchCtx, query, tmdb, douban, bangumi, adult)
 		if adult != nil {

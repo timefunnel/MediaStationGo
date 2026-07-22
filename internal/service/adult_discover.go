@@ -344,6 +344,7 @@ func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sour
 }
 
 func (p *AdultProvider) DiscoverPerformerWorksPage(ctx context.Context, source, sourceID string, page int) ([]ExternalMediaResult, bool, error) {
+	source = strings.ToLower(strings.TrimSpace(source))
 	base, profileURL, ok := p.AdultPerformerProfile(ctx, source, sourceID)
 	if !ok {
 		return nil, false, errors.New("unsupported adult performer source")
@@ -355,15 +356,28 @@ func (p *AdultProvider) DiscoverPerformerWorksPage(ctx context.Context, source, 
 	if page > 1 {
 		target += "?page=" + strconv.Itoa(page)
 	}
-	body, err := p.fetchText(ctx, target, base)
+	var (
+		body string
+		err  error
+	)
+	if source == "fd2ppv" {
+		body, err = p.fetchFD2PPVText(ctx, target)
+	} else {
+		body, err = p.fetchText(ctx, target, base)
+	}
 	if err != nil {
 		return nil, false, err
 	}
 	items := parseJavDBMovieList(body, base)
+	hasNext := adultPageHasNext(body)
+	if source == "fd2ppv" {
+		items = parseFD2PPVMovieList(body, base)
+		hasNext = adultFD2PageHasNext(body, page)
+	}
 	if len(items) == 0 {
 		return nil, false, errAdultPerformerPageEmpty
 	}
-	return limitAdultDiscoveryItems(items, 40), adultPageHasNext(body), nil
+	return limitAdultDiscoveryItems(items, 40), hasNext, nil
 }
 
 func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, providerID, code string) (ExternalMediaResult, error) {
@@ -373,6 +387,24 @@ func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, provide
 	source = strings.ToLower(strings.TrimSpace(source))
 	providerID = strings.TrimSpace(providerID)
 	code = normalizeAdultDiscoveryCode(code)
+	if source == "fd2ppv" {
+		if !adultFD2RawNumberPattern.MatchString(providerID) {
+			return ExternalMediaResult{}, errors.New("unsupported adult movie source")
+		}
+		if code == "" {
+			code = "FC2-PPV-" + providerID
+		}
+		detailURL := strings.TrimRight(fd2PPVBaseURL, "/") + "/articles/" + url.PathEscape(providerID)
+		body, err := p.fetchFD2PPVText(ctx, detailURL)
+		if err != nil {
+			return ExternalMediaResult{}, err
+		}
+		match := parseFD2PPVDetailHTML(body, code, detailURL)
+		if match == nil {
+			return ExternalMediaResult{}, errors.New("adult movie detail returned no usable metadata")
+		}
+		return externalAdultMovieResult(source, providerID, detailURL, match), nil
+	}
 	if source != "javdb" || !adultMovieIDPattern.MatchString(providerID) {
 		return ExternalMediaResult{}, errors.New("unsupported adult movie source")
 	}
@@ -399,29 +431,7 @@ func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, provide
 			lastErr = errors.New("adult movie detail returned no usable metadata")
 			continue
 		}
-		return ExternalMediaResult{
-			Source:           source,
-			MediaType:        "adult",
-			Title:            match.Title,
-			OriginalName:     code,
-			Overview:         match.Overview,
-			PosterURL:        match.PosterURL,
-			BackdropURL:      match.BackdropURL,
-			PreviewImages:    match.PreviewImages,
-			Year:             match.Year,
-			ReleaseDate:      match.ReleaseDate,
-			Rating:           match.Rating,
-			DurationMinutes:  match.DurationMinutes,
-			Maker:            match.Maker,
-			SubscribeKeyword: code,
-			SubscribeAliases: compactUniqueStrings(code, match.Title),
-			Genres:           match.Genres,
-			Actors:           match.Actors,
-			People:           match.People,
-			NSFW:             true,
-			ProviderURL:      detailURL,
-			ProviderID:       providerID,
-		}, nil
+		return externalAdultMovieResult(source, providerID, detailURL, match), nil
 	}
 	if !foundSource {
 		return ExternalMediaResult{}, errors.New("adult source javdb is not configured")
@@ -430,6 +440,36 @@ func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, provide
 		return ExternalMediaResult{}, lastErr
 	}
 	return ExternalMediaResult{}, errors.New("adult movie detail is unavailable")
+}
+
+func externalAdultMovieResult(source, providerID, detailURL string, match *Match) ExternalMediaResult {
+	if match == nil {
+		return ExternalMediaResult{}
+	}
+	code := normalizeAdultDiscoveryCode(match.OriginalName)
+	return ExternalMediaResult{
+		Source:           source,
+		MediaType:        "adult",
+		Title:            match.Title,
+		OriginalName:     code,
+		Overview:         match.Overview,
+		PosterURL:        match.PosterURL,
+		BackdropURL:      match.BackdropURL,
+		PreviewImages:    match.PreviewImages,
+		Year:             match.Year,
+		ReleaseDate:      match.ReleaseDate,
+		Rating:           match.Rating,
+		DurationMinutes:  match.DurationMinutes,
+		Maker:            match.Maker,
+		SubscribeKeyword: code,
+		SubscribeAliases: compactUniqueStrings(code, match.Title),
+		Genres:           match.Genres,
+		Actors:           match.Actors,
+		People:           match.People,
+		NSFW:             true,
+		ProviderURL:      detailURL,
+		ProviderID:       providerID,
+	}
 }
 
 func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, follows []model.AdultPerformerFollow, page int) ([]ExternalMediaResult, error) {
@@ -557,7 +597,17 @@ func limitAdultDiscoveryItems(items []ExternalMediaResult, limit int) []External
 func (p *AdultProvider) AdultPerformerProfile(ctx context.Context, source, sourceID string) (string, string, bool) {
 	source = strings.ToLower(strings.TrimSpace(source))
 	sourceID = strings.TrimSpace(sourceID)
-	if source != "javdb" || !adultPerformerIDPattern.MatchString(sourceID) {
+	if !adultPerformerIDPattern.MatchString(sourceID) {
+		return "", "", false
+	}
+	if source == "fd2ppv" {
+		if !p.FD2PPVEnabled() {
+			return "", "", false
+		}
+		base := strings.TrimRight(fd2PPVBaseURL, "/")
+		return base, base + "/actresses/" + url.PathEscape(sourceID), true
+	}
+	if source != "javdb" {
 		return "", "", false
 	}
 	for _, base := range p.resolveBases(ctx) {
@@ -580,10 +630,23 @@ func NormalizeAdultPerformerImageURL(raw string) (string, bool) {
 		return "", false
 	}
 	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
-	if host != "jdbstatic.com" && !strings.HasSuffix(host, ".jdbstatic.com") {
+	if !adultPerformerImageHostAllowed(host) {
 		return "", false
 	}
 	return u.String(), true
+}
+
+func adultPerformerImageHostAllowed(host string) bool {
+	if host == "jdbstatic.com" || strings.HasSuffix(host, ".jdbstatic.com") {
+		return true
+	}
+	if host == "fd2ppv.cc" || strings.HasSuffix(host, ".fd2ppv.cc") ||
+		host == "xximgs.cc" || strings.HasSuffix(host, ".xximgs.cc") ||
+		host == "ppvdatabank.com" || strings.HasSuffix(host, ".ppvdatabank.com") {
+		return true
+	}
+	return host == "contents.fc2.com" || strings.HasSuffix(host, ".contents.fc2.com") ||
+		(strings.HasPrefix(host, "contents-thumbnail") && strings.HasSuffix(host, ".fc2.com"))
 }
 
 func (p *AdultProvider) discoverAdultList(

@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { discoverAPI } from '../api/discover'
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
-import { discoverItemSource } from './discoverPageModel'
+import { discoverItemSource, discoverSourceLabel } from './discoverPageModel'
 import {
   DiscoverArtworkPanel,
   DiscoverBackdropPanel,
@@ -32,7 +32,7 @@ export function DiscoverDetailModal({
   const [resourceSidecarOpen, setResourceSidecarOpen] = useState(false)
   const [resourceSidecarRoot, setResourceSidecarRoot] = useState<HTMLDivElement | null>(null)
   const [titleActionRoot, setTitleActionRoot] = useState<HTMLDivElement | null>(null)
-  const source = discoverItemSource(resolvedItem)
+  const source = discoverSourceLabel(discoverItemSource(resolvedItem))
 
   useEffect(() => {
     setResolvedItem(item)

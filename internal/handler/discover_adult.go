@@ -149,7 +149,8 @@ func adultPerformerWorksHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		response := gin.H{"items": items, "page": page, "has_next": hasNext}
 		performerName := strings.TrimSpace(c.Query("name"))
-		if page == 1 && performerName != "" {
+		requestedSource := strings.ToLower(strings.TrimSpace(c.Param("source")))
+		if page == 1 && performerName != "" && requestedSource == "javdb" {
 			if len([]rune(performerName)) > 255 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "演员名称无效"})
 				return
@@ -158,7 +159,6 @@ func adultPerformerWorksHandler(svc *service.Container) gin.HandlerFunc {
 			if profileErr != nil {
 				response["performer_error"] = "女优头像暂时无法加载"
 			} else {
-				requestedSource := strings.ToLower(strings.TrimSpace(c.Param("source")))
 				requestedID := strings.TrimSpace(c.Param("source_id"))
 				for _, performer := range performers {
 					if strings.EqualFold(performer.Source, requestedSource) && performer.ProviderID == requestedID {

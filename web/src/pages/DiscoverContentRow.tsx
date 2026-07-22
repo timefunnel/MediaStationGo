@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, ChevronLeft, ChevronRight, Heart, ImageOff, Info, RefreshCw } from 'lucide-react'
 
 import type { DiscoverItem } from '../api/discover'
 import { imageURL } from '../api/client'
-import { discoverCardMetaText, discoverCardSecondaryText, discoverItemSource } from './discoverPageModel'
+import { discoverCardMetaText, discoverCardSecondaryText, discoverItemSource, discoverSourceLabel } from './discoverPageModel'
 
 const discoverRowPreloadMargin = '0px'
 const discoverCardPreloadMargin = '0px'
@@ -66,6 +66,7 @@ export function ContentRow({
   fixedGrid = false,
   priority = false,
   cardSize = 'default',
+  headerControl,
   onPageChange,
   onRefresh,
   onSelect,
@@ -81,6 +82,7 @@ export function ContentRow({
   fixedGrid?: boolean
   priority?: boolean
   cardSize?: 'default' | 'large'
+  headerControl?: ReactNode
   onPageChange?: (delta: number) => void
   onRefresh?: () => void
   onSelect: (item: DiscoverItem) => void
@@ -117,8 +119,9 @@ export function ContentRow({
     <section ref={rowRef} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="pl-1 font-display text-2xl font-semibold text-ink-600">{title}</h2>
-        {(onRefresh || onPageChange) && (
+        {(headerControl || onRefresh || onPageChange) && (
           <div className="flex items-center gap-2">
+            {headerControl}
             {onRefresh && (
               <DiscoverRefreshControl
                 title={title}
@@ -266,6 +269,7 @@ function DiscoverCard({
   const source = discoverItemSource(item)
 	const isPerson = item.media_type === 'person'
 	const isJavDBAdult = item.media_type === 'adult' && source.toLowerCase() === 'javdb'
+	const isFD2Adult = item.media_type === 'adult' && source.toLowerCase() === 'fd2ppv'
   const secondaryText = discoverCardSecondaryText(item)
   const imageCandidates = useMemo(
     () =>
@@ -288,10 +292,10 @@ function DiscoverCard({
     () =>
       imageURL(activeImage, posterVersion, {
         refreshCache: shouldRefreshCache,
-        maxWidth: isJavDBAdult ? 800 : isPerson ? 320 : 420,
-        quality: isJavDBAdult ? 88 : 84,
+        maxWidth: isJavDBAdult || isFD2Adult ? 800 : isPerson ? 320 : 420,
+        quality: isJavDBAdult || isFD2Adult ? 88 : 84,
       }),
-    [activeImage, isJavDBAdult, isPerson, posterVersion, shouldRefreshCache],
+    [activeImage, isFD2Adult, isJavDBAdult, isPerson, posterVersion, shouldRefreshCache],
   )
 
   useEffect(() => {
@@ -359,7 +363,7 @@ function DiscoverCard({
             }}
 			className={isPerson
 				? 'h-28 w-28 rounded-full object-cover shadow-lg ring-4 ring-white transition-transform duration-500 group-hover:scale-105'
-				: `h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${isJavDBAdult ? 'object-right' : ''}`}
+				: `h-full w-full transition-transform duration-500 group-hover:scale-105 ${isFD2Adult ? 'object-contain' : `object-cover ${isJavDBAdult ? 'object-right' : ''}`}`}
           />
         ) : isPerson ? (
 			<div className="flex h-28 w-28 items-center justify-center rounded-full bg-rose-100 text-sm font-semibold text-rose-500 ring-4 ring-white">
@@ -372,7 +376,7 @@ function DiscoverCard({
           </div>
         ) : null}
         <div className="absolute left-1.5 top-1.5 rounded-xl border border-white/20 bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white backdrop-blur-sm">
-          {source}
+          {discoverSourceLabel(source)}
         </div>
         {(item.rating ?? 0) > 0 && (
           <div className="absolute right-1.5 top-1.5 rounded-xl border border-yellow-400/30 bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-yellow-400 backdrop-blur-sm">
