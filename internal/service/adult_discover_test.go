@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -47,6 +48,44 @@ func TestParseJavDBMovieListKeepsOriginalCover(t *testing.T) {
 	}
 	if got := items[0].PosterURL; got != "https://c0.jdbstatic.com/covers/1a/1Axvvw.jpg" {
 		t.Fatalf("poster = %q, want original cover", got)
+	}
+}
+
+func TestParseJavDBMovieListKeepsExtendedDiscoveryCodes(t *testing.T) {
+	body := `<a href="/v/extended" class="box" title="Extended">
+<strong>EXVR-781jo01</strong></a>
+<a href="/v/edition" class="box" title="Edition">
+<strong>JKSR-631-01</strong></a>`
+	items := parseJavDBMovieList(body, "https://javdb.example")
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].OriginalName != "EXVR-781JO01" || items[1].OriginalName != "JKSR-631-01" {
+		t.Fatalf("extended codes = %q, %q", items[0].OriginalName, items[1].OriginalName)
+	}
+}
+
+func TestAdultProviderDiscoverPerformerWorksPageUsesSourcePagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actors/Actor1" || r.URL.Query().Get("page") != "2" {
+			http.NotFound(w, r)
+			return
+		}
+		for index := 0; index < 39; index++ {
+			_, _ = fmt.Fprintf(w, `<a href="/v/item%d" class="box"><strong>TEST-%03d</strong></a>`, index, index)
+		}
+		_, _ = w.Write([]byte(`<a rel="next" class="pagination-next" href="/actors/Actor1?page=3">下一页</a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, hasNext, err := provider.DiscoverPerformerWorksPage(t.Context(), "javdb", "Actor1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 39 || !hasNext {
+		t.Fatalf("items=%d hasNext=%v", len(items), hasNext)
 	}
 }
 

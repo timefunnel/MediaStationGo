@@ -23,6 +23,7 @@ var (
 	adultListScorePattern      = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
 	adultPerformerIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	adultMovieIDPattern        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	adultDiscoveryCodePattern  = regexp.MustCompile(`^[A-Z]{2,10}-[0-9]{2,8}(?:[A-Z]{1,4}[0-9]{1,4}|-[0-9]{1,4})?$`)
 	adultJavDBActorHeading     = regexp.MustCompile(`(?is)<h3\b[^>]*>(.*?)</h3>`)
 	errAdultPerformerPageEmpty = errors.New("adult performer page returned no usable works")
 )
@@ -338,9 +339,14 @@ func (p *AdultProvider) searchJavDBPerformerMovieDetails(
 }
 
 func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sourceID string, page int) ([]ExternalMediaResult, error) {
+	items, _, err := p.DiscoverPerformerWorksPage(ctx, source, sourceID, page)
+	return items, err
+}
+
+func (p *AdultProvider) DiscoverPerformerWorksPage(ctx context.Context, source, sourceID string, page int) ([]ExternalMediaResult, bool, error) {
 	base, profileURL, ok := p.AdultPerformerProfile(ctx, source, sourceID)
 	if !ok {
-		return nil, errors.New("unsupported adult performer source")
+		return nil, false, errors.New("unsupported adult performer source")
 	}
 	if page < 1 {
 		page = 1
@@ -351,13 +357,13 @@ func (p *AdultProvider) DiscoverPerformerWorks(ctx context.Context, source, sour
 	}
 	body, err := p.fetchText(ctx, target, base)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	items := parseJavDBMovieList(body, base)
 	if len(items) == 0 {
-		return nil, errAdultPerformerPageEmpty
+		return nil, false, errAdultPerformerPageEmpty
 	}
-	return limitAdultDiscoveryItems(items, 40), nil
+	return limitAdultDiscoveryItems(items, 40), adultPageHasNext(body), nil
 }
 
 func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, providerID, code string) (ExternalMediaResult, error) {
@@ -366,7 +372,7 @@ func (p *AdultProvider) DiscoverMovieDetail(ctx context.Context, source, provide
 	}
 	source = strings.ToLower(strings.TrimSpace(source))
 	providerID = strings.TrimSpace(providerID)
-	code = normalizeAdultCode(code)
+	code = normalizeAdultDiscoveryCode(code)
 	if source != "javdb" || !adultMovieIDPattern.MatchString(providerID) {
 		return ExternalMediaResult{}, errors.New("unsupported adult movie source")
 	}
@@ -729,9 +735,9 @@ func filterAdultPerformerItems(items []ExternalMediaResult, query string) []Exte
 
 func filterAdultMovieSearchItems(items []ExternalMediaResult, query string) []ExternalMediaResult {
 	out := make([]ExternalMediaResult, 0, len(items))
-	if code := normalizeAdultCode(query); code != "" {
+	if code := normalizeAdultDiscoveryCode(query); code != "" {
 		for _, item := range items {
-			if normalizeAdultCode(item.OriginalName) == code || normalizeAdultCode(item.SubscribeKeyword) == code {
+			if normalizeAdultDiscoveryCode(item.OriginalName) == code || normalizeAdultDiscoveryCode(item.SubscribeKeyword) == code {
 				out = append(out, item)
 			}
 		}
@@ -783,18 +789,41 @@ func adultPerformerItem(person PersonMetadata) ExternalMediaResult {
 
 func adultListCode(inner, href string) string {
 	if m := adultListStrongPattern.FindStringSubmatch(inner); len(m) > 1 {
-		if code := normalizeAdultCode(stripAdultHTML(m[1])); code != "" {
+		if code := normalizeAdultDiscoveryCode(stripAdultHTML(m[1])); code != "" {
 			return code
 		}
 	}
 	for _, raw := range regexp.MustCompile(`(?is)<date[^>]*>(.*?)</date>`).FindAllStringSubmatch(inner, -1) {
 		if len(raw) > 1 {
-			if code := normalizeAdultCode(stripAdultHTML(raw[1])); code != "" {
+			if code := normalizeAdultDiscoveryCode(stripAdultHTML(raw[1])); code != "" {
 				return code
 			}
 		}
 	}
-	return normalizeAdultCode(href)
+	return normalizeAdultDiscoveryCode(href)
+}
+
+func normalizeAdultDiscoveryCode(input string) string {
+	exact := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(input), "_", "-"))
+	if adultDiscoveryCodePattern.MatchString(exact) {
+		return exact
+	}
+	return normalizeAdultCode(input)
+}
+
+func adultPageHasNext(body string) bool {
+	for _, found := range adultAnchorPattern.FindAllStringSubmatch(body, -1) {
+		if len(found) < 2 {
+			continue
+		}
+		attrs := adultAttrs(found[1])
+		for _, rel := range strings.Fields(strings.ToLower(attrs["rel"])) {
+			if rel == "next" && strings.TrimSpace(attrs["href"]) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func adultListTitle(attrs map[string]string, inner, code string) string {

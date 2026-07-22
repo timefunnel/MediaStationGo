@@ -134,7 +134,7 @@ func adultPerformerWorksHandler(svc *service.Container) gin.HandlerFunc {
 		if page < 1 {
 			page = 1
 		}
-		items, err := svc.Adult.DiscoverPerformerWorks(
+		items, hasNext, err := svc.Adult.DiscoverPerformerWorksPage(
 			c.Request.Context(), c.Param("source"), c.Param("source_id"), page,
 		)
 		if err != nil {
@@ -147,7 +147,7 @@ func adultPerformerWorksHandler(svc *service.Container) gin.HandlerFunc {
 		if svc.Discover != nil {
 			svc.Discover.WarmExternalArtwork(items)
 		}
-		response := gin.H{"items": items, "page": page, "has_next": len(items) >= 40}
+		response := gin.H{"items": items, "page": page, "has_next": hasNext}
 		performerName := strings.TrimSpace(c.Query("name"))
 		if page == 1 && performerName != "" {
 			if len([]rune(performerName)) > 255 {
