@@ -45,6 +45,7 @@ type ResourceSearchDrawerProps = {
   open: boolean
   embedded?: boolean
   sidecar?: boolean
+  showCloseButton?: boolean
   autoSearch?: boolean
   initialQuery?: string
   releaseDate?: string
@@ -83,6 +84,7 @@ export function ResourceSearchDrawer({
   open,
   embedded = false,
   sidecar = false,
+  showCloseButton = true,
   autoSearch = false,
   initialQuery,
   releaseDate,
@@ -432,7 +434,7 @@ export function ResourceSearchDrawer({
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>
-          {(!embedded || sidecar) && (
+          {showCloseButton && (!embedded || sidecar) && (
             <button
               type="button"
               className="rounded-lg p-2 text-sand-500 hover:bg-gray-100 hover:text-ink-600"

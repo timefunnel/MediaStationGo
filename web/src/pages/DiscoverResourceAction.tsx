@@ -157,6 +157,7 @@ export function DiscoverResourceAction({
       key={selectedLibrary.id}
       embedded
       sidecar
+      showCloseButton={false}
       autoSearch
       open
       initialQuery={discoverResourceSearchKeyword(item)}
