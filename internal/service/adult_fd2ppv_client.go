@@ -22,6 +22,7 @@ import (
 const (
 	fd2PPVHTMLCacheTTL        = 6 * time.Hour
 	fd2PPVHTMLCacheMaxEntries = 256
+	fd2PPVChrome133UserAgent  = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 )
 
 var (
@@ -38,6 +39,7 @@ type fd2PPVClient struct {
 	cookies             []helper.FlareSolverrCookie
 	userAgent           string
 	credentialSignature [sha256.Size]byte
+	direct              fd2PPVDirectFetcher
 }
 
 type fd2PPVHTMLCacheEntry struct {
@@ -61,6 +63,7 @@ func newFD2PPVClient() *fd2PPVClient {
 	return &fd2PPVClient{
 		cache:    make(map[string]fd2PPVHTMLCacheEntry),
 		inflight: make(map[string]*fd2PPVFetchCall),
+		direct:   &fd2PPVTLSFetcher{},
 	}
 }
 
@@ -159,19 +162,28 @@ func (c *fd2PPVClient) fetchFresh(ctx context.Context, provider *AdultProvider, 
 
 	var lastErr error
 	for loginAttempt := 0; loginAttempt < 2; loginAttempt++ {
-		for requestAttempt := 0; requestAttempt < 2; requestAttempt++ {
-			solution, fetchErr := helper.FetchURLWithFlareSolverrResult(
-				provider.flareSolverrURL,
-				targetURL,
-				cloneFD2PPVCookies(c.cookies),
-				provider.flareSolverrTimeout,
-				"",
-				provider.log,
-			)
-			if fetchErr != nil {
-				lastErr = fetchErr
-				continue
-			}
+		direct, directErr := c.fetchDirect(ctx, targetURL)
+		if directErr != nil {
+			return "", fmt.Errorf("fd2ppv direct request: %w", directErr)
+		}
+		if fd2PPVAuthenticatedHTMLUsable(direct.body) {
+			return direct.body, nil
+		}
+		if direct.statusCode >= http.StatusBadRequest && direct.statusCode != http.StatusForbidden {
+			return "", fmt.Errorf("fd2ppv direct request returned HTTP %d", direct.statusCode)
+		}
+
+		solution, fetchErr := helper.FetchURLWithFlareSolverrResult(
+			provider.flareSolverrURL,
+			targetURL,
+			cloneFD2PPVCookies(c.cookies),
+			provider.flareSolverrTimeout,
+			"",
+			provider.log,
+		)
+		if fetchErr != nil {
+			lastErr = fetchErr
+		} else {
 			c.cookies = mergeFD2PPVCookies(c.cookies, solution.Cookies)
 			if strings.TrimSpace(solution.UserAgent) != "" {
 				c.userAgent = strings.TrimSpace(solution.UserAgent)
@@ -179,7 +191,18 @@ func (c *fd2PPVClient) fetchFresh(ctx context.Context, provider *AdultProvider, 
 			if fd2PPVAuthenticatedHTMLUsable(solution.Response) {
 				return solution.Response, nil
 			}
-			lastErr = errors.New("fd2ppv returned incomplete authenticated HTML")
+
+			direct, directErr = c.fetchDirect(ctx, targetURL)
+			if directErr != nil {
+				return "", fmt.Errorf("fd2ppv direct request after challenge: %w", directErr)
+			}
+			if fd2PPVAuthenticatedHTMLUsable(direct.body) {
+				return direct.body, nil
+			}
+			if direct.statusCode >= http.StatusBadRequest && direct.statusCode != http.StatusForbidden {
+				return "", fmt.Errorf("fd2ppv direct request after challenge returned HTTP %d", direct.statusCode)
+			}
+			lastErr = errors.New("fd2ppv returned incomplete authenticated HTML after challenge refresh")
 		}
 
 		c.cookies = nil
@@ -193,6 +216,23 @@ func (c *fd2PPVClient) fetchFresh(ctx context.Context, provider *AdultProvider, 
 		lastErr = errors.New("fd2ppv authenticated request failed")
 	}
 	return "", lastErr
+}
+
+func (c *fd2PPVClient) fetchDirect(ctx context.Context, targetURL string) (fd2PPVDirectFetchResult, error) {
+	if c.direct == nil {
+		return fd2PPVDirectFetchResult{}, errors.New("browser fingerprint client is unavailable")
+	}
+	result, err := c.direct.fetch(
+		ctx,
+		targetURL,
+		firstNonEmpty(strings.TrimSpace(c.userAgent), fd2PPVChrome133UserAgent),
+		cloneFD2PPVCookies(c.cookies),
+	)
+	if err != nil {
+		return fd2PPVDirectFetchResult{}, err
+	}
+	c.cookies = mergeFD2PPVCookies(c.cookies, result.cookies)
+	return result, nil
 }
 
 func (p *AdultProvider) resolveFD2PPVCredentials(ctx context.Context) (fd2PPVCredentials, error) {
@@ -318,7 +358,7 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	}
 
 	c.cookies = memberCookies
-	c.userAgent = strings.TrimSpace(solution.UserAgent)
+	c.userAgent = firstNonEmpty(strings.TrimSpace(solution.UserAgent), fd2PPVChrome133UserAgent)
 	c.credentialSignature = credentials.signature
 	return nil
 }
