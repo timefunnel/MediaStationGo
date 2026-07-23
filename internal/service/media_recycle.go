@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 )
 
 const maxRecycleBinRecords = 200
@@ -186,8 +187,23 @@ func (s *MediaService) PurgeDeleted(ctx context.Context, id string) error {
 		if s.cloudDeleter == nil {
 			return errors.New("cloud file deletion is unavailable")
 		}
+		rootRef := ""
+		if provider == cloud.TypeOpenList {
+			rootRef, err = s.cloudLibraryRootRef(ctx, row, provider)
+			if err != nil {
+				return err
+			}
+		}
 		if err := s.cloudDeleter.DeleteCloudFile(ctx, provider, ref); err != nil {
 			return fmt.Errorf("delete cloud file %s: %w", row.Path, err)
+		}
+		// OpenList paths have a stable directory namespace, so only this
+		// provider gets empty-parent cleanup. Other cloud providers retain the
+		// existing exact-file purge behavior.
+		if provider == cloud.TypeOpenList && rootRef != "" {
+			if err := s.cloudDeleter.PruneEmptyCloudParents(ctx, provider, ref, rootRef); err != nil {
+				return fmt.Errorf("prune empty cloud parents for %s: %w", row.Path, err)
+			}
 		}
 	}
 	result := s.repo.DB.WithContext(ctx).Unscoped().
@@ -200,6 +216,29 @@ func (s *MediaService) PurgeDeleted(ctx context.Context, id string) error {
 		s.invalidateMediaCache(ctx)
 	}
 	return err
+}
+
+func (s *MediaService) cloudLibraryRootRef(ctx context.Context, row model.Media, provider string) (string, error) {
+	if strings.TrimSpace(row.LibraryRootID) == "" {
+		return "", nil
+	}
+	var root model.LibraryRoot
+	if err := s.repo.DB.WithContext(ctx).
+		Where("id = ? AND library_id = ?", row.LibraryRootID, row.LibraryID).
+		First(&root).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", fmt.Errorf("cloud media library root not found: %s", row.LibraryRootID)
+		}
+		return "", err
+	}
+	rootProvider, rootRef, isCloud, err := cloudMediaDirectoryTarget(root.Path)
+	if err != nil {
+		return "", err
+	}
+	if !isCloud || rootProvider != provider {
+		return "", fmt.Errorf("cloud media library root provider mismatch: %s", row.LibraryRootID)
+	}
+	return rootRef, nil
 }
 
 func (s *MediaService) PurgeDeletedForUser(ctx context.Context, id, userID string, isAdmin bool) error {
@@ -226,6 +265,18 @@ func (s *MediaService) canManageDeletedMedia(ctx context.Context, id, userID str
 }
 
 func cloudMediaFileTarget(raw string) (provider, ref string, isCloud bool, err error) {
+	provider, ref, isCloud, err = cloudMediaDirectoryTarget(raw)
+	if err != nil || !isCloud {
+		return provider, ref, isCloud, err
+	}
+	ext := strings.ToLower(pathpkg.Ext(ref))
+	if _, ok := videoExtensions[ext]; !ok {
+		return "", "", true, fmt.Errorf("refusing to delete non-video cloud path %q", ref)
+	}
+	return provider, ref, true, nil
+}
+
+func cloudMediaDirectoryTarget(raw string) (provider, ref string, isCloud bool, err error) {
 	raw = strings.TrimSpace(raw)
 	if !strings.HasPrefix(strings.ToLower(raw), "cloud://") {
 		return "", "", false, nil
@@ -243,10 +294,6 @@ func cloudMediaFileTarget(raw string) (provider, ref string, isCloud bool, err e
 	}
 	if ref == "" || ref == "." || ref == ".." {
 		return "", "", true, errors.New("refusing to delete cloud provider root")
-	}
-	ext := strings.ToLower(pathpkg.Ext(ref))
-	if _, ok := videoExtensions[ext]; !ok {
-		return "", "", true, fmt.Errorf("refusing to delete non-video cloud path %q", ref)
 	}
 	return provider, ref, true, nil
 }

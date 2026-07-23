@@ -28,6 +28,7 @@ type MediaService struct {
 
 type CloudMediaDeleter interface {
 	DeleteCloudFile(ctx context.Context, provider, ref string) error
+	PruneEmptyCloudParents(ctx context.Context, provider, ref, rootRef string) error
 }
 
 type MediaVisibility struct {

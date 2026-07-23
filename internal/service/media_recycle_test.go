@@ -17,15 +17,26 @@ import (
 )
 
 type fakeCloudMediaDeleter struct {
-	provider string
-	ref      string
-	err      error
+	provider      string
+	ref           string
+	err           error
+	pruneProvider string
+	pruneRef      string
+	pruneRoot     string
+	pruneErr      error
 }
 
 func (f *fakeCloudMediaDeleter) DeleteCloudFile(_ context.Context, provider, ref string) error {
 	f.provider = provider
 	f.ref = ref
 	return f.err
+}
+
+func (f *fakeCloudMediaDeleter) PruneEmptyCloudParents(_ context.Context, provider, ref, rootRef string) error {
+	f.pruneProvider = provider
+	f.pruneRef = ref
+	f.pruneRoot = rootRef
+	return f.pruneErr
 }
 
 func TestListRecycleBinPrunesOldRowsOverLimit(t *testing.T) {
@@ -168,6 +179,33 @@ func TestPurgeDeletedCloudMediaDeletesProviderFileBeforeDatabaseRow(t *testing.T
 	}
 	if count != 0 {
 		t.Fatal("database row should be purged after cloud delete succeeds")
+	}
+}
+
+func TestPurgeDeletedCloudMediaPrunesEmptyParentsWithinLibraryRoot(t *testing.T) {
+	db := newServiceTestDB(t, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	root := model.LibraryRoot{Base: model.Base{ID: "root-1"}, LibraryID: "library-1", Path: "cloud://openlist/115/剧集"}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{
+		Base:          model.Base{ID: "cloud-media", DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}},
+		LibraryID:     root.LibraryID,
+		LibraryRootID: root.ID,
+		Title:         "My Series",
+		Path:          "cloud://openlist/115/剧集/My Series/Season 1/My Series.S01E01.mkv",
+	}
+	if err := db.Unscoped().Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleter := &fakeCloudMediaDeleter{}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos).SetCloudMediaDeleter(deleter)
+	if err := svc.PurgeDeleted(t.Context(), media.ID); err != nil {
+		t.Fatal(err)
+	}
+	if deleter.pruneProvider != "openlist" || deleter.pruneRef != "115/剧集/My Series/Season 1/My Series.S01E01.mkv" || deleter.pruneRoot != "115/剧集" {
+		t.Fatalf("prune request = provider %q ref %q root %q", deleter.pruneProvider, deleter.pruneRef, deleter.pruneRoot)
 	}
 }
 
