@@ -46,6 +46,7 @@ func (e *EmbyService) libraryHasMultipartContent(ctx context.Context, libraryID 
 func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
 	libIDs := e.mergedLibraryIDs(ctx, p.ParentID)
 	hasMultipart := e.libraryHasMultipartContent(ctx, p.ParentID)
+	queryOrder := embyMovieLibraryOrderSQL(p)
 	includeSeries := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Series") || hasMultipart
 	includeMovies := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Movie")
 	apply := func(q *gorm.DB) *gorm.DB {
@@ -70,7 +71,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 		}
 		epQ = epQ.Where("(season_num > 0 OR episode_num > 0) AND ("+clause+")", args...).
-			Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit)
+			Order(queryOrder).Limit(embySeriesGroupingLimit)
 		if err := epQ.Find(&episodicRows).Error; err != nil {
 			return nil, err
 		}
@@ -83,7 +84,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		}
 		var multipartRows []model.Media
 		if err := multipartQ.Where("COALESCE(part_group_key, '') <> ''").
-			Order("media.part_group_key ASC, media.part_index ASC, media.created_at ASC").
+			Order(queryOrder + ", media.part_group_key ASC, media.part_index ASC").
 			Limit(embySeriesGroupingLimit).Find(&multipartRows).Error; err != nil {
 			return nil, err
 		}
@@ -99,7 +100,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		}
 		movieQ = filterLikelyEpisodicPathsFromMovieQuery(movieQ).
 			Where("COALESCE(part_group_key, '') = ''").
-			Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit)
+			Order(queryOrder).Limit(embySeriesGroupingLimit)
 		if err := movieQ.Find(&movieRows).Error; err != nil {
 			return nil, err
 		}
@@ -109,7 +110,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		return nil, err
 	}
 
-	// 合并: Series 卡片 + Movie 项, 统一按首播/上映日期倒序。
+	// 合并 Series 卡片与 Movie 项，并遵守客户端请求的主排序字段。
 	type entry struct {
 		sortAt  time.Time
 		payload map[string]any
@@ -121,9 +122,37 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	for _, item := range movieItems {
 		entries = append(entries, entry{sortAt: embyPayloadReleaseSortTime(item), payload: item})
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].sortAt.After(entries[j].sortAt)
-	})
+	descending := !strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending")
+	switch primarySupportedEmbySort(p.SortBy, false) {
+	case "datecreated":
+		sort.SliceStable(entries, func(i, j int) bool {
+			left := embyPayloadCreatedAt(entries[i].payload)
+			right := embyPayloadCreatedAt(entries[j].payload)
+			if left.Equal(right) {
+				return embyPayloadName(entries[i].payload) < embyPayloadName(entries[j].payload)
+			}
+			if descending {
+				return left.After(right)
+			}
+			return left.Before(right)
+		})
+	case "sortname", "name":
+		sort.SliceStable(entries, func(i, j int) bool {
+			left := embyPayloadName(entries[i].payload)
+			right := embyPayloadName(entries[j].payload)
+			if descending {
+				return left > right
+			}
+			return left < right
+		})
+	default:
+		sort.SliceStable(entries, func(i, j int) bool {
+			if descending {
+				return entries[i].sortAt.After(entries[j].sortAt)
+			}
+			return entries[i].sortAt.Before(entries[j].sortAt)
+		})
+	}
 	total := len(entries)
 	paged := pageSlice(entries, p.StartIndex, p.Limit)
 	items := make([]map[string]any, 0, len(paged))
@@ -131,6 +160,24 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		items = append(items, en.payload)
 	}
 	return map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}, nil
+}
+
+func embyMovieLibraryOrderSQL(p ItemsParams) string {
+	descending := !strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending")
+	direction := " ASC"
+	if descending {
+		direction = " DESC"
+	}
+	switch primarySupportedEmbySort(p.SortBy, false) {
+	case "datecreated":
+		return "media.created_at" + direction
+	case "sortname", "name":
+		return "media.title" + direction
+	case "communityrating":
+		return "media.rating" + direction
+	default:
+		return mediaReleaseOrderSQL(descending)
+	}
 }
 
 // embyPayloadCreatedAt 从 item payload 里取 DateCreated(time.Time),用于合并排序。
@@ -142,6 +189,14 @@ func embyPayloadCreatedAt(item map[string]any) time.Time {
 		return v
 	}
 	return time.Time{}
+}
+
+func embyPayloadName(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	name, _ := item["Name"].(string)
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 func embyPayloadReleaseSortTime(item map[string]any) time.Time {

@@ -349,3 +349,60 @@ func TestEmbyMovieLibraryExposesMultipartVideoAsVirtualSeries(t *testing.T) {
 		t.Fatalf("playback info treated parts as versions: %#v", playSources)
 	}
 }
+
+func TestEmbyMovieLibraryMultipartBrowseHonorsDateCreatedSort(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(-24 * time.Hour)
+	rows := []model.Media{
+		{
+			Base:           model.Base{ID: "older-part-1", CreatedAt: base},
+			LibraryID:      lib.ID,
+			Title:          "较早添加的多片段作品",
+			Path:           "/media/other/较早添加的多片段作品/part-1.mp4",
+			PartGroupKey:   "older-work",
+			PartGroupTitle: "较早添加的多片段作品",
+			PartIndex:      1,
+			ReleaseDate:    "2026-07-20",
+		},
+		{
+			Base:           model.Base{ID: "older-part-2", CreatedAt: base.Add(time.Minute)},
+			LibraryID:      lib.ID,
+			Title:          "较早添加的多片段作品",
+			Path:           "/media/other/较早添加的多片段作品/part-2.mp4",
+			PartGroupKey:   "older-work",
+			PartGroupTitle: "较早添加的多片段作品",
+			PartIndex:      2,
+			ReleaseDate:    "2026-07-20",
+		},
+		{
+			Base:        model.Base{ID: "newer-movie", CreatedAt: base.Add(2 * time.Hour)},
+			LibraryID:   lib.ID,
+			Title:       "最近添加的电影",
+			Path:        "/media/other/最近添加的电影.mp4",
+			ReleaseDate: "2020-01-01",
+		},
+	}
+	if err := svc.repo.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := svc.Items(t.Context(), ItemsParams{
+		ParentID:         lib.ID,
+		Recursive:        true,
+		IncludeItemTypes: []string{"Movie"},
+		SortBy:           "DateCreated,SortName",
+		SortOrder:        "Descending",
+		Limit:            12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := out["Items"].([]map[string]any)
+	if len(items) != 2 || items[0]["Id"] != "newer-movie" || items[1]["Type"] != "Series" {
+		t.Fatalf("DateCreated descending sort was ignored: %#v", items)
+	}
+}
