@@ -72,6 +72,25 @@ export function ManualMediaAggregationDialog({
     }
   }
 
+  const convertToParts = async (tree: AggregationTree) => {
+    if (tree.kind !== 'version') return
+    setBusyKey(`convert:${tree.key}`)
+    try {
+      await libraryAPI.updateAggregation(libraryID, {
+        action: 'group',
+        media_ids: tree.members.map((media) => media.id),
+        title: tree.title,
+      })
+      toast.success(`已将「${tree.title}」的 ${tree.members.length} 个版本转为多片段`)
+      if (sourceKey === tree.key) setSourceKey('')
+      await onApplied()
+    } catch (error) {
+      toast.error(aggregationError(error, '转换为多片段失败'))
+    } finally {
+      setBusyKey('')
+    }
+  }
+
   const detach = async (tree: AggregationTree, media: Media) => {
     setBusyKey(`detach:${media.id}`)
     try {
@@ -164,8 +183,24 @@ export function ManualMediaAggregationDialog({
                         {tree.versionCount} 版本 · 可转为片段
                       </span>
                     )}
+                    {!source && tree.kind === 'version' && (
+                      <button
+                        type="button"
+                        className="btn-primary h-8 shrink-0 px-2 text-xs"
+                        disabled={Boolean(busyKey)}
+                        onClick={() => void convertToParts(tree)}
+                      >
+                        {busyKey === `convert:${tree.key}` && <LoaderCircle size={14} className="animate-spin" />}
+                        转为多片段
+                      </button>
+                    )}
                     {!source && (
-                      <button type="button" className="btn-outline h-8 shrink-0 px-2 text-xs" onClick={() => setSourceKey(tree.key)}>
+                      <button
+                        type="button"
+                        className="btn-outline h-8 shrink-0 px-2 text-xs"
+                        disabled={Boolean(busyKey)}
+                        onClick={() => setSourceKey(tree.key)}
+                      >
                         选择作品
                       </button>
                     )}

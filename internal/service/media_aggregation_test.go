@@ -143,6 +143,47 @@ func TestUpdateMediaAggregationConvertsWholeVersionTreeToParts(t *testing.T) {
 	}
 }
 
+func TestUpdateMediaAggregationConvertsVersionTreeInPlace(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "其他媒体", Path: "/media/other", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{LibraryID: lib.ID, Title: "作品", Path: "/media/movie-part-1.mp4", VersionGroupKey: "version"},
+		{LibraryID: lib.ID, Title: "作品", Path: "/media/movie-part-2.mp4", VersionGroupKey: "version"},
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+
+	result, err := svc.UpdateMediaAggregation(t.Context(), lib.ID, MediaAggregationRequest{
+		Action: MediaAggregationActionGroup,
+		Title:  "作品",
+		MediaIDs: []string{
+			rows[0].ID,
+			rows[1].ID,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != len(rows) || result.GroupKey == "" {
+		t.Fatalf("result=%#v", result)
+	}
+	for index, row := range rows {
+		var stored model.Media
+		if err := repos.DB.First(&stored, "id = ?", row.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.PartGroupKey != result.GroupKey || stored.PartGroupTitle != "作品" || stored.PartIndex != index+1 || stored.VersionGroupKey != "" {
+			t.Fatalf("stored[%d]=%#v", index, stored)
+		}
+	}
+}
+
 func TestUpdateMediaAggregationRejectsPartialVersionTree(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
 	repos := repository.New(db)
