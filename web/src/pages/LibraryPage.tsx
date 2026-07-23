@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import toast from 'react-hot-toast'
 
 import type { Media } from '../types'
 import { useAuthStore } from '../stores/auth'
-import type { SeriesCard } from '../utils/groupSeries'
+import { seriesTitle, type SeriesCard } from '../utils/groupSeries'
 import { LibraryPageDialogs } from './LibraryPageDialogs'
 import { LibraryPageHeader } from './LibraryPageHeader'
 import { LibraryMediaSections } from './LibraryMediaSections'
@@ -34,6 +35,9 @@ export function LibraryPage() {
   const [resourceDrawerOpen, setResourceDrawerOpen] = useState(false)
   const [resourceInitialQuery, setResourceInitialQuery] = useState('')
   const [resourceTaskID, setResourceTaskID] = useState('')
+  const [resourceUpgradeMediaID, setResourceUpgradeMediaID] = useState('')
+  const [resourceUpgradeScope, setResourceUpgradeScope] = useState<'media' | 'work' | undefined>()
+  const [resourceFixedRootID, setResourceFixedRootID] = useState('')
   const [titleCleanupOpen, setTitleCleanupOpen] = useState(false)
   const [aggregationOpen, setAggregationOpen] = useState(false)
 
@@ -133,6 +137,9 @@ export function LibraryPage() {
     if (loading || !library || !requestedResourceQuery) return
     setResourceInitialQuery(requestedResourceQuery)
     setResourceTaskID('')
+    setResourceUpgradeMediaID('')
+    setResourceUpgradeScope(undefined)
+    setResourceFixedRootID('')
     setResourceDrawerOpen(true)
     const next = new URLSearchParams(searchParams)
     next.delete('resource_query')
@@ -144,6 +151,25 @@ export function LibraryPage() {
     if (actor) next.set('actor', actor)
     else next.delete('actor')
     setSearchParams(next)
+  }
+
+  const openSeriesUpgrade = () => {
+    if (!library || !selectedSeries) return
+    const media = selectedSeries.rep
+    const enabledRoots = (library.roots ?? []).filter((root) => root.enabled)
+    const rootID = enabledRoots.some((root) => root.id === media.library_root_id)
+      ? media.library_root_id ?? ''
+      : enabledRoots.length === 1 ? enabledRoots[0].id : ''
+    if (!rootID) {
+      toast.error('当前剧集缺少明确的媒体库目录，无法升级片源')
+      return
+    }
+    setResourceInitialQuery(media.original_name?.trim() || seriesTitle(media))
+    setResourceUpgradeMediaID(media.id)
+    setResourceUpgradeScope('work')
+    setResourceFixedRootID(rootID)
+    setResourceTaskID('')
+    setResourceDrawerOpen(true)
   }
 
   if (loading) {
@@ -180,6 +206,9 @@ export function LibraryPage() {
         onResourceSearch={() => {
           setResourceInitialQuery('')
           setResourceTaskID('')
+          setResourceUpgradeMediaID('')
+          setResourceUpgradeScope(undefined)
+          setResourceFixedRootID('')
           setResourceDrawerOpen(true)
         }}
       />
@@ -191,6 +220,9 @@ export function LibraryPage() {
         error={resourceImports.error}
         onOpenTask={(task) => {
           setResourceTaskID(task.id)
+          setResourceUpgradeMediaID(task.upgrade_media_id ?? '')
+          setResourceUpgradeScope(task.upgrade_scope)
+          setResourceFixedRootID(task.root_id ?? '')
           setResourceDrawerOpen(true)
         }}
         onDismissCompleted={resourceImports.dismissCompletedTask}
@@ -230,6 +262,7 @@ export function LibraryPage() {
         onNFO={handleSeriesNFO}
         onOrganize={handleSeriesOrganize}
         onSoftDelete={handleSeriesSoftDelete}
+        onUpgrade={openSeriesUpgrade}
         onSeasonChange={setSelectedSeason}
       />
 
@@ -250,6 +283,10 @@ export function LibraryPage() {
       <ResourceSearchDrawer
         open={resourceDrawerOpen}
         initialQuery={resourceInitialQuery}
+        upgradeMediaID={resourceUpgradeMediaID || undefined}
+        upgradeScope={resourceUpgradeScope}
+        fixedRootID={resourceFixedRootID || undefined}
+        canRemoveOldVersion={role === 'admin'}
         libraryID={id}
         libraryName={library?.name ?? '媒体库'}
         libraryRoots={library?.roots ?? []}
@@ -260,6 +297,9 @@ export function LibraryPage() {
         onClose={() => {
           setResourceDrawerOpen(false)
           setResourceInitialQuery('')
+          setResourceUpgradeMediaID('')
+          setResourceUpgradeScope(undefined)
+          setResourceFixedRootID('')
         }}
       />
 

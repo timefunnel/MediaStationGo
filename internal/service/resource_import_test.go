@@ -436,6 +436,9 @@ func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
 	if task.UpgradeMediaID != target.ID {
 		t.Fatalf("task upgrade_media_id = %q, want %q", task.UpgradeMediaID, target.ID)
 	}
+	if task.UpgradeScope != "media" {
+		t.Fatalf("task upgrade_scope = %q, want media", task.UpgradeScope)
+	}
 	pipeline.mu.Lock()
 	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].UpgradeMediaID != target.ID {
 		pipeline.mu.Unlock()
@@ -445,6 +448,10 @@ func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
 		pipeline.mu.Unlock()
 		t.Fatal("default upgrade should keep the old version")
 	}
+	if pipeline.createRequests[0].UpgradeScope != "media" {
+		pipeline.mu.Unlock()
+		t.Fatalf("pipeline upgrade_scope = %q, want media", pipeline.createRequests[0].UpgradeScope)
+	}
 	pipeline.mu.Unlock()
 	var job model.ResourceImportJob
 	if err := repos.DB.First(&job, "id = ?", task.ID).Error; err != nil {
@@ -453,8 +460,55 @@ func TestResourceImportUpgradePersistsAndForwardsTargetMedia(t *testing.T) {
 	if job.UpgradeMediaID != target.ID {
 		t.Fatalf("persisted upgrade_media_id = %q, want %q", job.UpgradeMediaID, target.ID)
 	}
+	if job.UpgradeScope != "media" {
+		t.Fatalf("persisted upgrade_scope = %q, want media", job.UpgradeScope)
+	}
 	if !job.KeepOldVersion {
 		t.Fatal("persisted upgrade should keep the old version by default")
+	}
+}
+
+func TestResourceImportTVUpgradeAlwaysUsesWorkScopeAndRequiresAdminForReplacement(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	library.Type = "tv"
+	if err := repos.DB.Model(&model.Library{}).Where("id = ?", library.ID).Update("type", "tv").Error; err != nil {
+		t.Fatal(err)
+	}
+	target := model.Media{
+		LibraryID: library.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 303143,
+		SeasonNum: 1, EpisodeNum: 1, Path: "cloud://openlist/115/电影/Show-old/Show.S01E01.mkv",
+	}
+	if err := repos.DB.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "Show", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keepOld := false
+	_, err = svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID,
+		UpgradeMediaID: target.ID, KeepOldVersion: &keepOld,
+	})
+	if !errors.Is(err, ErrMediaVersionForbidden) {
+		t.Fatalf("non-admin work replacement err = %v", err)
+	}
+
+	task, err := svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID,
+		UpgradeMediaID: target.ID, KeepOldVersion: &keepOld, IsAdmin: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.UpgradeScope != "work" {
+		t.Fatalf("task upgrade_scope = %q, want work", task.UpgradeScope)
+	}
+	pipeline.mu.Lock()
+	defer pipeline.mu.Unlock()
+	if len(pipeline.createRequests) != 1 || pipeline.createRequests[0].UpgradeScope != "work" {
+		t.Fatalf("pipeline create requests = %#v", pipeline.createRequests)
 	}
 }
 

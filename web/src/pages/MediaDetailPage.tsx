@@ -178,6 +178,7 @@ export function MediaDetailPage() {
   if (detail.loading) return <MediaDetailLoading />
   if (!detail.media) return <MediaDetailMissing />
   const media = detail.media
+  const upgradeScope = upgradeLibrary?.type === 'tv' || upgradeLibrary?.type === 'anime' ? 'work' : 'media'
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-white border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.01),0_1px_2px_rgba(0,0,0,0.015)]">
@@ -235,10 +236,15 @@ export function MediaDetailPage() {
       {upgradeLibrary && (
         <ResourceSearchDrawer
           open={upgradeOpen}
-          initialQuery={versions.find((version) => version.id === upgradeTargetID)?.original_name?.trim() || media.original_name?.trim() || media.title}
+          initialQuery={upgradeScope === 'work'
+            ? media.original_name?.trim() || media.title
+            : versions.find((version) => version.id === upgradeTargetID)?.original_name?.trim() || media.original_name?.trim() || media.title}
           upgradeMediaID={upgradeTargetID || media.id}
+          upgradeScope={upgradeScope}
           fixedRootID={upgradeRootID}
-          canRemoveOldVersion={role === 'admin' || Boolean(versions.find((version) => version.id === upgradeTargetID)?.can_manage)}
+          canRemoveOldVersion={upgradeScope === 'work'
+            ? role === 'admin'
+            : role === 'admin' || Boolean(versions.find((version) => version.id === upgradeTargetID)?.can_manage)}
           libraryID={upgradeLibrary.id}
           libraryName={upgradeLibrary.name}
           libraryRoots={upgradeLibrary.roots ?? []}

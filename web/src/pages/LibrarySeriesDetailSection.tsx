@@ -28,6 +28,7 @@ type LibrarySeriesDetailSectionProps = {
   onNFO: () => void
   onOrganize: () => void
   onSoftDelete: () => void
+  onUpgrade: () => void
   onSeasonChange: (season: number) => void
 }
 
@@ -49,6 +50,7 @@ export function LibrarySeriesDetailSection({
   onNFO,
   onOrganize,
   onSoftDelete,
+  onUpgrade,
   onSeasonChange,
 }: LibrarySeriesDetailSectionProps) {
   return (
@@ -75,6 +77,7 @@ export function LibrarySeriesDetailSection({
             onNFO={onNFO}
             onOrganize={onOrganize}
             onSoftDelete={onSoftDelete}
+            onUpgrade={onUpgrade}
           />
 
           <LibrarySeriesEpisodesPanel

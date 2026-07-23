@@ -67,6 +67,7 @@ func createResourceImportHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
+		in.IsAdmin = middleware.IsAdmin(c)
 		root, err := selectResourceImportRoot(*library, in.RootID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

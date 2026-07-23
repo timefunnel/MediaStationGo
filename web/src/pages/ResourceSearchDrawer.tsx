@@ -50,6 +50,7 @@ type ResourceSearchDrawerProps = {
   initialQuery?: string
   releaseDate?: string
   upgradeMediaID?: string
+  upgradeScope?: 'media' | 'work'
   fixedRootID?: string
   canRemoveOldVersion?: boolean
   libraryID: string
@@ -89,6 +90,7 @@ export function ResourceSearchDrawer({
   initialQuery,
   releaseDate,
   upgradeMediaID,
+  upgradeScope,
   fixedRootID,
   canRemoveOldVersion = false,
   libraryID,
@@ -352,6 +354,7 @@ export function ResourceSearchDrawer({
         root_id: importRootID,
         force_duplicate: forceDuplicate || undefined,
         upgrade_media_id: upgradeMediaID?.trim() || undefined,
+        upgrade_scope: upgrading ? upgradeScope : undefined,
         keep_old_version: upgrading ? keepOldVersion : undefined,
       })
       setLocalTask(task)
@@ -430,7 +433,7 @@ export function ResourceSearchDrawer({
           <div className="min-w-0 flex-1">
             <h2 className="flex min-w-0 items-center gap-2 font-display text-lg font-bold text-ink-600">
               {!taskID && <Search size={19} className="shrink-0 text-brand-600" />}
-              <span className="truncate">{taskID ? '资源入库进度' : upgrading ? '升级片源' : '查找资源'}</span>
+              <span className="truncate">{taskID ? '资源入库进度' : upgrading ? upgradeScope === 'work' ? '整剧升级片源' : '升级片源' : '查找资源'}</span>
             </h2>
             <p className="truncate text-xs text-sand-500">{libraryName}</p>
           </div>

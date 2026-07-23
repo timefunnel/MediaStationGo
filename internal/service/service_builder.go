@@ -174,7 +174,7 @@ func (b *serviceContainerBuilder) initContentServices() {
 	b.c.Scan.SetNotifyChannels(b.c.NotifyChannels)
 	b.c.Scraper.SetNotifyChannels(b.c.NotifyChannels)
 	b.c.Media = NewMediaService(b.cfg, b.log, b.repos).SetRuntimeCache(b.c.Cache).SetAI(b.c.AI).SetTaskTracker(b.c.Tasks)
-	b.c.PipelineMaintenance = NewPipelineMaintenanceService(b.log, b.repos)
+	b.c.PipelineMaintenance = NewPipelineMaintenanceService(b.log, b.repos).SetRuntimeCache(b.c.Cache)
 	b.c.PipelineIngest = NewPipelineIngestService(b.log, b.repos, b.c.Scan, b.c.PipelineMaintenance, b.c.Tasks)
 	b.c.PipelineScrape = NewPipelineScrapeService(b.repos, b.c.Scraper)
 	b.c.Stream = NewStreamService(b.cfg, b.log, b.repos, b.c.Transcoder)

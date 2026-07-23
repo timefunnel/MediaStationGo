@@ -31,10 +31,16 @@ var pipelineIgnoredEpisodeNumbers = map[int]bool{720: true, 1080: true, 2160: tr
 type PipelineMaintenanceService struct {
 	log   *zap.Logger
 	repos *repository.Container
+	cache *RuntimeCacheService
 }
 
 func NewPipelineMaintenanceService(log *zap.Logger, repos *repository.Container) *PipelineMaintenanceService {
 	return &PipelineMaintenanceService{log: log, repos: repos}
+}
+
+func (s *PipelineMaintenanceService) SetRuntimeCache(cache *RuntimeCacheService) *PipelineMaintenanceService {
+	s.cache = cache
+	return s
 }
 
 type PipelineMaintenanceTarget struct {

@@ -85,6 +85,7 @@ type resourcePipelineCreateRequest struct {
 	MediaType        string `json:"media_type"`
 	ForceDuplicate   bool   `json:"force_duplicate,omitempty"`
 	UpgradeMediaID   string `json:"upgrade_media_id,omitempty"`
+	UpgradeScope     string `json:"upgrade_scope,omitempty"`
 	KeepOldVersion   bool   `json:"keep_old_version"`
 }
 

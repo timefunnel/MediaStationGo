@@ -15,16 +15,41 @@ type pipelineMaintenanceRequest struct {
 	RootID           string   `json:"root_id"`
 	RootOpenListPath string   `json:"root_openlist_path"`
 	OpenListPaths    []string `json:"openlist_paths"`
+	NewMediaID       string   `json:"new_media_id"`
+	NewOpenListPaths []string `json:"new_openlist_paths"`
 }
 
 func registerAuthedPipelineMaintenanceRoutes(authed *gin.RouterGroup, svc *service.Container) {
 	authed.POST("/pipeline/media/:id/repair-movie-extras", middleware.AdminRequired(), pipelineRepairMovieExtrasHandler(svc))
 	authed.POST("/pipeline/media/:id/repair-episode-visibility", middleware.AdminRequired(), pipelineRepairEpisodeVisibilityHandler(svc))
+	authed.POST("/pipeline/media/:id/replace-work-source", middleware.AdminRequired(), pipelineReplaceWorkSourceHandler(svc))
 	authed.POST("/pipeline/deleted-media/hide-candidates", middleware.AdminRequired(), pipelineDeletedMediaHideCandidatesHandler(svc))
 	authed.POST("/pipeline/deleted-media/prune", middleware.AdminRequired(), pipelinePruneDeletedMediaHandler(svc))
 	authed.POST("/pipeline/migrations/search", middleware.AdminRequired(), pipelineMigrationSearchHandler(svc))
 	authed.POST("/pipeline/migrations/validate", middleware.AdminRequired(), pipelineMigrationValidateHandler(svc))
 	authed.POST("/pipeline/migrations/apply", middleware.AdminRequired(), pipelineMigrationApplyHandler(svc))
+}
+
+func pipelineReplaceWorkSourceHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.PipelineMaintenance == nil {
+			Error(c, http.StatusInternalServerError, ErrInternal, "pipeline maintenance service unavailable")
+			return
+		}
+		var req pipelineMaintenanceRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			Error(c, http.StatusBadRequest, ErrInvalidParams, "invalid request body")
+			return
+		}
+		result, err := svc.PipelineMaintenance.ReplaceWorkSource(
+			c.Request.Context(), c.Param("id"), req.NewMediaID, pipelineMaintenanceTarget(req), req.NewOpenListPaths,
+		)
+		if err != nil {
+			Error(c, http.StatusConflict, ErrInvalidParams, err.Error())
+			return
+		}
+		Success(c, result)
+	}
 }
 
 func pipelineRepairMovieExtrasHandler(svc *service.Container) gin.HandlerFunc {

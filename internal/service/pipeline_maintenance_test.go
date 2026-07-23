@@ -2,6 +2,7 @@ package service
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,88 @@ func TestPipelineMaintenancePruneDeletedMedia(t *testing.T) {
 	}
 	if activeCount != 1 {
 		t.Fatal("active media should be kept")
+	}
+}
+
+func TestPipelineMaintenanceReplaceWorkSourceMovesOnlyOldSeriesSource(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	svc := NewPipelineMaintenanceService(zap.NewNop(), repos)
+
+	lib, root := createPipelineMaintenanceRoot(t, db, "tv", "/115/tv")
+	rows := []model.Media{
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 303143, SeasonNum: 1, EpisodeNum: 1, Path: "cloud://openlist/115/tv/Show-old/Season 01/Show.S01E01.mkv"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 303143, SeasonNum: 1, EpisodeNum: 2, Path: "cloud://openlist/115/tv/Show-old/Season 01/Show.S01E02.mkv"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 303143, SeasonNum: 1, EpisodeNum: 1, Path: "cloud://openlist/115/tv/Show-new/Season 01/Show.S01E01.mkv"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 303143, SeasonNum: 1, EpisodeNum: 2, Path: "cloud://openlist/115/tv/Show-new/Season 01/Show.S01E02.mkv"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", TMDbID: 999999, SeasonNum: 1, EpisodeNum: 1, Path: "cloud://openlist/115/tv/Other/Season 01/Other.S01E01.mkv"},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ReplaceWorkSource(t.Context(), rows[0].ID, rows[2].ID, PipelineMaintenanceTarget{
+		Category: "tv", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/tv",
+	}, []string{"/115/tv/Show-new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "success" || result.Removed != 2 || result.Preserved != 2 || result.WorkIdentity != "tmdb:303143" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if !slices.Equal(result.RemovedMediaIDs, []string{rows[0].ID, rows[1].ID}) {
+		t.Fatalf("removed ids = %#v", result.RemovedMediaIDs)
+	}
+
+	var active []model.Media
+	if err := db.Order("path").Find(&active).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 3 {
+		t.Fatalf("active rows = %d, want 3", len(active))
+	}
+	for _, row := range active {
+		if strings.Contains(row.Path, "/Show-old/") {
+			t.Fatalf("old source remains active: %s", row.Path)
+		}
+	}
+	var removed []model.Media
+	if err := db.Unscoped().Where("id IN ?", result.RemovedMediaIDs).Find(&removed).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range removed {
+		if !row.DeletedAt.Valid || row.DeletionKind != "version" {
+			t.Fatalf("old source row not moved to recycle bin: %#v", row)
+		}
+	}
+}
+
+func TestPipelineMaintenanceReplaceWorkSourceRejectsSameDirectory(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	svc := NewPipelineMaintenanceService(zap.NewNop(), repos)
+
+	lib, root := createPipelineMaintenanceRoot(t, db, "anime", "/115/anime")
+	rows := []model.Media{
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", BangumiID: 123, SeasonNum: 1, EpisodeNum: 1, Path: "cloud://openlist/115/anime/Show/Show.S01E01.mkv"},
+		{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Show", BangumiID: 123, SeasonNum: 1, EpisodeNum: 2, Path: "cloud://openlist/115/anime/Show/Show.S01E02.mkv"},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.ReplaceWorkSource(t.Context(), rows[0].ID, rows[1].ID, PipelineMaintenanceTarget{
+		Category: "anime", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/anime",
+	}, []string{"/115/anime/Show"})
+	if err == nil || !strings.Contains(err.Error(), "同一目录") {
+		t.Fatalf("same-source error = %v", err)
+	}
+	var active int64
+	if err := db.Model(&model.Media{}).Count(&active).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active != 2 {
+		t.Fatalf("active rows = %d, want 2", active)
 	}
 }
 

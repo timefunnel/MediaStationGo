@@ -134,7 +134,7 @@ export function MediaDetailPlaybackActions({
         className="btn-outline gap-2 border-brand-500/30 text-[#c9954a] hover:border-brand-500 hover:bg-brand-50"
       >
         {upgradeOpening ? <LoaderCircle size={15} className="animate-spin" /> : <CircleArrowUp size={15} />}
-        <span>升级片源</span>
+        <span>{media.series_id || media.season_num > 0 || media.episode_num > 0 ? '整剧升级片源' : '升级片源'}</span>
       </button>
 
       {canSubscribe && (

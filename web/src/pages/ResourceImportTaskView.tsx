@@ -111,7 +111,7 @@ export function ResourceImportTaskView({
               )}
               {task.source && <span>来源：{task.source}</span>}
               {task.upgrade_media_id && (
-                <span>类型：升级片源 · {task.keep_old_version === false ? '替换旧版本' : '保留旧版本'}</span>
+                <span>类型：{task.upgrade_scope === 'work' ? '整剧升级' : '升级片源'} · {task.keep_old_version === false ? '替换旧版本' : '保留旧版本'}</span>
               )}
               <span>更新：{formatTaskTime(task.updated_at || task.created_at)}</span>
             </div>

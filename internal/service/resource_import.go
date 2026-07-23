@@ -145,7 +145,9 @@ type ResourceImportCreateInput struct {
 	SubscriptionID  string `json:"subscription_id,omitempty"`
 	ForceDuplicate  bool   `json:"force_duplicate,omitempty"`
 	UpgradeMediaID  string `json:"upgrade_media_id,omitempty"`
+	UpgradeScope    string `json:"upgrade_scope,omitempty"`
 	KeepOldVersion  *bool  `json:"keep_old_version,omitempty"`
+	IsAdmin         bool   `json:"-"`
 }
 
 type ResourceImportDuplicate struct {
@@ -193,6 +195,7 @@ type ResourceImportTask struct {
 	MediaID         string     `json:"media_id,omitempty"`
 	MediaTitle      string     `json:"media_title,omitempty"`
 	UpgradeMediaID  string     `json:"upgrade_media_id,omitempty"`
+	UpgradeScope    string     `json:"upgrade_scope,omitempty"`
 	KeepOldVersion  bool       `json:"keep_old_version"`
 	CancelRequested bool       `json:"cancel_requested"`
 	Attempt         int        `json:"attempt"`
@@ -386,11 +389,18 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 	if err := s.validateUpgradeTarget(ctx, library, root, upgradeMediaID); err != nil {
 		return ResourceImportTask{}, err
 	}
+	upgradeScope, err := normalizeResourceImportUpgradeScope(category, upgradeMediaID, in.UpgradeScope)
+	if err != nil {
+		return ResourceImportTask{}, err
+	}
 	keepOldVersion := true
 	if upgradeMediaID != "" && in.KeepOldVersion != nil {
 		keepOldVersion = *in.KeepOldVersion
 	}
-	if upgradeMediaID != "" && !keepOldVersion {
+	if upgradeMediaID != "" && !keepOldVersion && upgradeScope == "work" && !in.IsAdmin {
+		return ResourceImportTask{}, fmt.Errorf("%w: 整剧替换旧片源仅管理员可操作", ErrMediaVersionForbidden)
+	}
+	if upgradeMediaID != "" && !keepOldVersion && upgradeScope == "media" {
 		allowed, err := userCanManageMediaVersion(ctx, s.repos, userID, false, upgradeMediaID)
 		if err != nil {
 			return ResourceImportTask{}, err
@@ -400,7 +410,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		}
 	}
 	idempotencyKey := resourceImportIdempotencyKey(
-		userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.SubscriptionID, in.ForceDuplicate, upgradeMediaID, keepOldVersion,
+		userID, library.ID, root.ID, session.ID, in.CandidateIndex, in.SubscriptionID, in.ForceDuplicate, upgradeMediaID, upgradeScope, keepOldVersion,
 	)
 	if existing, found, err := s.findJobByIdempotencyKey(ctx, idempotencyKey); err != nil {
 		return ResourceImportTask{}, err
@@ -419,6 +429,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		MediaType:        mediaType,
 		ForceDuplicate:   in.ForceDuplicate,
 		UpgradeMediaID:   upgradeMediaID,
+		UpgradeScope:     upgradeScope,
 		KeepOldVersion:   keepOldVersion,
 	})
 	if err != nil {
@@ -447,7 +458,7 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 		CandidateJSON: string(candidateJSON), CandidateTitle: candidate.Title,
 		CandidateSource: candidate.Source, CandidateSize: candidate.SizeBytes,
 		Attempt: 1, IdempotencyKey: idempotencyKey, ForceDuplicate: in.ForceDuplicate,
-		UpgradeMediaID: upgradeMediaID, KeepOldVersion: keepOldVersion,
+		UpgradeMediaID: upgradeMediaID, UpgradeScope: upgradeScope, KeepOldVersion: keepOldVersion,
 		Status: status, Stage: stage, Message: safePipelineMessage(pipelineTask.Message),
 		PipelineJobID: pipelineTask.ID, MediaID: pipelineTask.MsgMediaID,
 		MediaTitle: pipelineTask.MsgMediaTitle, CancelRequested: pipelineTask.CancelRequested,
@@ -862,7 +873,7 @@ func (s *ResourceImportService) taskDTO(ctx context.Context, job model.ResourceI
 		CandidateTitle: job.CandidateTitle, Source: job.CandidateSource,
 		Status: job.Status, Stage: job.Stage, Progress: resourceImportProgress(job.Status, job.Stage),
 		Message: job.Message, Error: job.PublicError,
-		MediaID: job.MediaID, MediaTitle: job.MediaTitle, UpgradeMediaID: job.UpgradeMediaID,
+		MediaID: job.MediaID, MediaTitle: job.MediaTitle, UpgradeMediaID: job.UpgradeMediaID, UpgradeScope: job.UpgradeScope,
 		KeepOldVersion:  job.KeepOldVersion,
 		CancelRequested: job.CancelRequested,
 		Attempt:         job.Attempt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
@@ -1185,13 +1196,33 @@ func resourceRootOpenListPath(value string) (string, error) {
 	return openListPath, nil
 }
 
-func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, subscriptionID string, force bool, upgradeMediaID string, keepOldVersion bool) string {
+func resourceImportIdempotencyKey(userID, libraryID, rootID, sessionID string, candidateIndex int, subscriptionID string, force bool, upgradeMediaID, upgradeScope string, keepOldVersion bool) string {
 	raw := strings.Join([]string{
 		userID, libraryID, rootID, sessionID, strconv.Itoa(candidateIndex), strings.TrimSpace(subscriptionID), strconv.FormatBool(force),
-		strings.TrimSpace(upgradeMediaID), strconv.FormatBool(keepOldVersion),
+		strings.TrimSpace(upgradeMediaID), strings.TrimSpace(upgradeScope), strconv.FormatBool(keepOldVersion),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return "msg-resource-import:" + hex.EncodeToString(sum[:])
+}
+
+func normalizeResourceImportUpgradeScope(category, upgradeMediaID, requested string) (string, error) {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if strings.TrimSpace(upgradeMediaID) == "" {
+		if requested != "" {
+			return "", errors.New("upgrade_scope 只能与 upgrade_media_id 一起使用")
+		}
+		return "", nil
+	}
+	if category == "tv" || category == "anime" {
+		if requested != "" && requested != "work" {
+			return "", errors.New("剧集只支持整剧升级")
+		}
+		return "work", nil
+	}
+	if requested != "" && requested != "media" {
+		return "", errors.New("当前媒体类型只支持单作品升级")
+	}
+	return "media", nil
 }
 
 func mapPipelineImportState(task resourcePipelineTask) (string, string) {

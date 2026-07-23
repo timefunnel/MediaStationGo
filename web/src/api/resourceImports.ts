@@ -82,6 +82,7 @@ export interface ResourceImportTask {
   error?: string
   media_id?: string
   upgrade_media_id?: string
+  upgrade_scope?: 'media' | 'work'
   keep_old_version?: boolean
   created_at?: string
   updated_at?: string
@@ -139,6 +140,7 @@ export const resourceImportsAPI = {
       root_id: string
       force_duplicate?: boolean
       upgrade_media_id?: string
+      upgrade_scope?: 'media' | 'work'
       keep_old_version?: boolean
     },
   ) =>

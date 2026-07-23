@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Database, FileText, Film, FolderInput, Pencil, Play, Search, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, CircleArrowUp, Database, FileText, Film, FolderInput, Pencil, Play, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { imageURL } from '../api/client'
 import { ExternalPlayerButton } from '../components/ExternalPlayerButton'
@@ -22,6 +22,7 @@ type LibrarySeriesDetailHeaderProps = {
   onNFO: () => void
   onOrganize: () => void
   onSoftDelete: () => void
+  onUpgrade: () => void
 }
 
 export function LibrarySeriesDetailHeader({
@@ -39,6 +40,7 @@ export function LibrarySeriesDetailHeader({
   onNFO,
   onOrganize,
   onSoftDelete,
+  onUpgrade,
 }: LibrarySeriesDetailHeaderProps) {
   const firstEpisode = firstPlayableEpisode(visibleEpisodes.length > 0 ? visibleEpisodes : allEpisodes)
   const poster = mediaPosterURL(series.rep)
@@ -114,6 +116,10 @@ export function LibrarySeriesDetailHeader({
                 <button onClick={onOrganize} disabled={!!seriesToolBusy} className="btn-outline px-3.5 py-2 text-xs gap-1.5">
                   <FolderInput size={13} />
                   <span>{seriesToolBusy === 'organize' ? '整理中…' : '整理当前合集'}</span>
+                </button>
+                <button onClick={onUpgrade} disabled={!!seriesToolBusy} className="btn-outline px-3.5 py-2 text-xs gap-1.5">
+                  <CircleArrowUp size={13} className="text-[#c9954a]" />
+                  <span>整剧升级片源</span>
                 </button>
                 <button onClick={onSoftDelete} disabled={!!seriesToolBusy} className="btn-outline px-3.5 py-2 text-xs gap-1.5 !border-red-100 !text-red-500 hover:!border-red-200 hover:!bg-red-50">
                   <Trash2 size={13} />
