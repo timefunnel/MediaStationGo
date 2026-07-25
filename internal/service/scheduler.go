@@ -39,6 +39,7 @@ type SchedulerService struct {
 	organizer        *OrganizerService
 	organizePipeline *OrganizePipelineService
 	storageCfg       *StorageConfigService
+	adult            *AdultProvider
 	hub              *Hub
 	tasks            *TaskTrackerService
 	cacheDir         string
@@ -60,6 +61,10 @@ func (s *SchedulerService) SetTaskTracker(tasks *TaskTrackerService) {
 
 func (s *SchedulerService) SetOrganizePipeline(pipeline *OrganizePipelineService) {
 	s.organizePipeline = pipeline
+}
+
+func (s *SchedulerService) SetAdultProvider(adult *AdultProvider) {
+	s.adult = adult
 }
 
 // scheduledJob is one recurring task.
@@ -137,6 +142,11 @@ func (s *SchedulerService) Start(ctx context.Context) {
 			name:     "recycle_purge",
 			interval: 24 * time.Hour,
 			run:      s.jobPurgeRecycleBin,
+		},
+		{
+			name:     "fd2ppv_session_check",
+			interval: fd2PPVSessionCheckInterval,
+			run:      s.jobCheckFD2PPVSession,
 		},
 	}
 	for _, j := range s.jobs {

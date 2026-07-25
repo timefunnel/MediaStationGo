@@ -173,7 +173,8 @@ func (c *fd2PPVClient) fetchFresh(ctx context.Context, provider *AdultProvider, 
 			return "", fmt.Errorf("fd2ppv direct request returned HTTP %d", direct.statusCode)
 		}
 
-		solution, fetchErr := helper.FetchURLWithFlareSolverrResult(
+		solution, fetchErr := helper.FetchURLWithFlareSolverrResultContext(
+			ctx,
 			provider.flareSolverrURL,
 			targetURL,
 			cloneFD2PPVCookies(c.cookies),
@@ -235,27 +236,96 @@ func (c *fd2PPVClient) fetchDirect(ctx context.Context, targetURL string) (fd2PP
 	return result, nil
 }
 
-func (p *AdultProvider) resolveFD2PPVCredentials(ctx context.Context) (fd2PPVCredentials, error) {
-	if p == nil || p.apiConfig == nil {
-		return fd2PPVCredentials{}, errors.New("fd2ppv credentials service is unavailable")
+// CheckFD2PPVSession verifies the single shared FD2PPV session without using
+// the six-hour HTML cache. Disabled or unconfigured credentials are a normal
+// no-op; enabled but incomplete credentials remain an explicit error.
+func (p *AdultProvider) CheckFD2PPVSession(ctx context.Context) error {
+	if p == nil || p.fd2ppv == nil || !p.FD2PPVEnabled() || p.apiConfig == nil {
+		return nil
 	}
+	credentials, configured, err := p.fd2PPVSessionCredentials(ctx)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return nil
+	}
+	return p.fd2ppv.checkSession(ctx, p, credentials)
+}
+
+func (c *fd2PPVClient) checkSession(
+	ctx context.Context,
+	provider *AdultProvider,
+	credentials fd2PPVCredentials,
+) error {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+
+	baseURL := strings.TrimRight(fd2PPVBaseURL, "/")
+	if credentials.signature == c.credentialSignature && fd2PPVHasCookie(c.cookies, "member") {
+		direct, err := c.fetchDirect(ctx, baseURL+"/")
+		if err != nil {
+			return fmt.Errorf("fd2ppv session health request: %w", err)
+		}
+		if fd2PPVAuthenticatedHTMLUsable(direct.body) {
+			return nil
+		}
+		if direct.statusCode >= http.StatusInternalServerError {
+			return fmt.Errorf("fd2ppv session health request returned HTTP %d", direct.statusCode)
+		}
+	}
+
+	c.cookies = nil
+	c.userAgent = ""
+	c.credentialSignature = [sha256.Size]byte{}
+	if err := c.login(ctx, provider, credentials); err != nil {
+		return fmt.Errorf("fd2ppv session refresh: %w", err)
+	}
+	direct, err := c.fetchDirect(ctx, baseURL+"/")
+	if err != nil {
+		return fmt.Errorf("fd2ppv session verification request: %w", err)
+	}
+	if direct.statusCode >= http.StatusBadRequest {
+		return fmt.Errorf("fd2ppv session verification returned HTTP %d", direct.statusCode)
+	}
+	if !fd2PPVAuthenticatedHTMLUsable(direct.body) {
+		return errors.New("fd2ppv session verification did not return authenticated HTML")
+	}
+	return nil
+}
+
+func (p *AdultProvider) fd2PPVSessionCredentials(ctx context.Context) (fd2PPVCredentials, bool, error) {
 	resolved, err := p.apiConfig.Resolve(ctx, "fd2ppv")
 	if err != nil {
-		return fd2PPVCredentials{}, fmt.Errorf("resolve fd2ppv credentials: %w", err)
+		return fd2PPVCredentials{}, false, fmt.Errorf("resolve fd2ppv credentials: %w", err)
 	}
 	if !resolved.Enabled {
-		return fd2PPVCredentials{}, errors.New("fd2ppv credentials are disabled")
+		return fd2PPVCredentials{}, false, nil
 	}
 	username := strings.TrimSpace(resolved.Extra)
 	password := strings.TrimSpace(resolved.APIKey)
 	if username == "" || password == "" {
-		return fd2PPVCredentials{}, errors.New("fd2ppv username or password is not configured")
+		return fd2PPVCredentials{}, true, errors.New("fd2ppv username or password is not configured")
 	}
 	return fd2PPVCredentials{
 		username:  username,
 		password:  password,
 		signature: sha256.Sum256([]byte(username + "\x00" + password)),
-	}, nil
+	}, true, nil
+}
+
+func (p *AdultProvider) resolveFD2PPVCredentials(ctx context.Context) (fd2PPVCredentials, error) {
+	if p == nil || p.apiConfig == nil {
+		return fd2PPVCredentials{}, errors.New("fd2ppv credentials service is unavailable")
+	}
+	credentials, configured, err := p.fd2PPVSessionCredentials(ctx)
+	if err != nil {
+		return fd2PPVCredentials{}, err
+	}
+	if !configured {
+		return fd2PPVCredentials{}, errors.New("fd2ppv credentials are disabled")
+	}
+	return credentials, nil
 }
 
 func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, credentials fd2PPVCredentials) error {
@@ -266,7 +336,8 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	}
 
 	baseURL := strings.TrimRight(fd2PPVBaseURL, "/")
-	solution, err := helper.FetchURLWithFlareSolverrResult(
+	solution, err := helper.FetchURLWithFlareSolverrResultContext(
+		ctx,
 		provider.flareSolverrURL,
 		baseURL+"/",
 		nil,

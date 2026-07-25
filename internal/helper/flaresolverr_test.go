@@ -1,10 +1,13 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNormalizeFlareSolverrEndpoint(t *testing.T) {
@@ -61,5 +64,36 @@ func TestFetchURLWithFlareSolverrResultReturnsBrowserIdentity(t *testing.T) {
 	}
 	if len(solution.Cookies) != 1 || solution.Cookies[0].Name != "cf_clearance" {
 		t.Fatalf("solution cookies = %#v", solution.Cookies)
+	}
+}
+
+func TestFetchURLWithFlareSolverrResultContextStopsAtCallerDeadline(t *testing.T) {
+	releaseServer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-releaseServer:
+		}
+	}))
+	defer server.Close()
+	defer close(releaseServer)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := FetchURLWithFlareSolverrResultContext(
+		ctx,
+		server.URL,
+		"https://example.test/page",
+		nil,
+		60,
+		"",
+		nil,
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("cancellable FlareSolverr request took %s", elapsed)
 	}
 }

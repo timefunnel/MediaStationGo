@@ -245,6 +245,119 @@ func TestFD2PPVFetchErrorsAreNotCached(t *testing.T) {
 	}
 }
 
+func TestFD2PPVSessionCheckUsesLiveSessionInsteadOfHTMLCache(t *testing.T) {
+	provider := newConfiguredFD2PPVTestProvider(t, "fd2-user", "fd2-password")
+	provider.SetFlareSolverr("http://flaresolverr.invalid", 5)
+	credentials, err := provider.resolveFD2PPVCredentials(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.fd2ppv.cookies = []helper.FlareSolverrCookie{{Name: "member", Value: "member-token"}}
+	provider.fd2ppv.credentialSignature = credentials.signature
+	rootURL := strings.TrimRight(fd2PPVBaseURL, "/") + "/"
+	provider.fd2ppv.cache[rootURL] = fd2PPVHTMLCacheEntry{
+		body:     fd2PPVAuthenticatedTestHTML("cached"),
+		storedAt: time.Now(),
+	}
+	var directCalls atomic.Int32
+	provider.fd2ppv.direct = fd2PPVDirectFetcherFunc(func(
+		_ context.Context,
+		targetURL string,
+		_ string,
+		_ []helper.FlareSolverrCookie,
+	) (fd2PPVDirectFetchResult, error) {
+		directCalls.Add(1)
+		if targetURL != rootURL {
+			t.Fatalf("health target = %q, want %q", targetURL, rootURL)
+		}
+		return fd2PPVDirectFetchResult{
+			body:       fd2PPVAuthenticatedTestHTML("live"),
+			statusCode: http.StatusOK,
+		}, nil
+	})
+
+	if err := provider.CheckFD2PPVSession(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if directCalls.Load() != 1 {
+		t.Fatalf("direct health calls = %d, want 1", directCalls.Load())
+	}
+}
+
+func TestFD2PPVSessionCheckRefreshesExpiredSharedSession(t *testing.T) {
+	const (
+		username = "fd2-user"
+		password = "fd2-password"
+	)
+	var loginCalls atomic.Int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fetch/login.php" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		loginCalls.Add(1)
+		http.SetCookie(w, &http.Cookie{Name: "member", Value: "fresh-member", Path: "/"})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"script":"bG9jYXRpb24ucmVsb2FkKCk7"}`))
+	}))
+	defer site.Close()
+	originalBaseURL := fd2PPVBaseURL
+	fd2PPVBaseURL = site.URL
+	t.Cleanup(func() { fd2PPVBaseURL = originalBaseURL })
+
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status":    200,
+				"response":  `<html><input type="hidden" name="_csrf" value="csrf-token"></html>`,
+				"userAgent": "test-browser",
+				"cookies":   []map[string]string{},
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := newConfiguredFD2PPVTestProvider(t, username, password)
+	provider.client = site.Client()
+	provider.SetFlareSolverr(flare.URL, 5)
+	credentials, err := provider.resolveFD2PPVCredentials(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.fd2ppv.cookies = []helper.FlareSolverrCookie{{Name: "member", Value: "expired-member"}}
+	provider.fd2ppv.credentialSignature = credentials.signature
+	var directCalls atomic.Int32
+	provider.fd2ppv.direct = fd2PPVDirectFetcherFunc(func(
+		_ context.Context,
+		_ string,
+		_ string,
+		cookies []helper.FlareSolverrCookie,
+	) (fd2PPVDirectFetchResult, error) {
+		directCalls.Add(1)
+		for _, cookie := range cookies {
+			if cookie.Name == "member" && cookie.Value == "fresh-member" {
+				return fd2PPVDirectFetchResult{
+					body:       fd2PPVAuthenticatedTestHTML("refreshed"),
+					statusCode: http.StatusOK,
+				}, nil
+			}
+		}
+		return fd2PPVDirectFetchResult{body: "<html>login</html>", statusCode: http.StatusOK}, nil
+	})
+
+	if err := provider.CheckFD2PPVSession(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if loginCalls.Load() != 1 || directCalls.Load() != 2 {
+		t.Fatalf("login calls = %d, direct calls = %d, want 1 and 2", loginCalls.Load(), directCalls.Load())
+	}
+	if !fd2PPVHasCookie(provider.fd2ppv.cookies, "member") {
+		t.Fatal("refreshed shared session did not retain the member cookie")
+	}
+}
+
 func newConfiguredFD2PPVTestProvider(t *testing.T, username, password string) *AdultProvider {
 	t.Helper()
 	db := newServiceTestDB(t, &model.APIConfig{})

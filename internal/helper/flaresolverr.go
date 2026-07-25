@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,6 +83,28 @@ func FetchURLWithFlareSolverrResult(
 	proxyURL string,
 	log *zap.Logger,
 ) (*FlareSolverrSolution, error) {
+	return FetchURLWithFlareSolverrResultContext(
+		context.Background(),
+		flareSolverrURL,
+		targetURL,
+		cookies,
+		timeout,
+		proxyURL,
+		log,
+	)
+}
+
+// FetchURLWithFlareSolverrResultContext is the cancellable variant used by
+// request-scoped callers that must stop waiting at their own deadline.
+func FetchURLWithFlareSolverrResultContext(
+	ctx context.Context,
+	flareSolverrURL string,
+	targetURL string,
+	cookies []FlareSolverrCookie,
+	timeout int,
+	proxyURL string,
+	log *zap.Logger,
+) (*FlareSolverrSolution, error) {
 	flareSolverrURL = normalizeFlareSolverrEndpoint(flareSolverrURL)
 	if flareSolverrURL == "" {
 		return nil, fmt.Errorf("FlareSolverr URL not configured")
@@ -105,8 +128,13 @@ func FetchURLWithFlareSolverrResult(
 		return nil, fmt.Errorf("failed to marshal FlareSolverr request: %w", err)
 	}
 
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, flareSolverrURL, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create FlareSolverr request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: time.Duration(timeout+10) * time.Second}
-	resp, err := client.Post(flareSolverrURL, "application/json", strings.NewReader(string(jsonBody)))
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("FlareSolverr request failed: %w", err)
 	}
