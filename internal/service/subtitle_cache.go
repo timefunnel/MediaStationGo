@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -52,37 +53,58 @@ func (s *SubtitleService) SetLocalCacheDir(dir string) {
 	}
 }
 
-func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string) []SubtitleTrack {
+func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string, strict bool) ([]SubtitleTrack, error) {
 	if s == nil {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, nil
 	}
 	mediaDir, ok := localSubtitleMediaDir(s.localCacheDir, mediaID)
 	if !ok {
-		return []SubtitleTrack{}
+		return []SubtitleTrack{}, nil
 	}
 	raw, err := os.ReadFile(filepath.Join(mediaDir, "tracks.json")) // #nosec G304 -- mediaDir is constrained by localSubtitleMediaDir.
 	if err != nil {
-		return []SubtitleTrack{}
+		if errors.Is(err, os.ErrNotExist) {
+			return []SubtitleTrack{}, nil
+		}
+		if strict {
+			return nil, fmt.Errorf("read cached subtitle index: %w", err)
+		}
+		return []SubtitleTrack{}, nil
 	}
 	var index localSubtitleIndex
 	if err := json.Unmarshal(raw, &index); err != nil {
-		return []SubtitleTrack{}
+		if strict {
+			return nil, fmt.Errorf("parse cached subtitle index: %w", err)
+		}
+		return []SubtitleTrack{}, nil
 	}
 	tracks := make([]SubtitleTrack, 0, len(index.Tracks))
 	for _, item := range index.Tracks {
 		if strings.TrimSpace(item.MediaID) != "" && strings.TrimSpace(item.MediaID) != strings.TrimSpace(mediaID) {
+			if strict {
+				return nil, errors.New("cached subtitle index contains a mismatched media id")
+			}
 			continue
 		}
 		filename := strings.TrimSpace(item.Filename)
 		if !safeLocalSubtitleFilename(filename) {
+			if strict {
+				return nil, errors.New("cached subtitle index contains an invalid filename")
+			}
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(mediaDir, filename)); err != nil {
+			if strict {
+				return nil, fmt.Errorf("stat cached subtitle %q: %w", filename, err)
+			}
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(filename))
 		codec, ok := extToCodec[ext]
 		if !ok {
+			if strict {
+				return nil, fmt.Errorf("cached subtitle %q has unsupported format", filename)
+			}
 			continue
 		}
 		lang := strings.TrimSpace(item.Lang)
@@ -102,7 +124,7 @@ func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string) []Subtitle
 			Source: firstNonEmpty(strings.TrimSpace(item.Source), "cache"),
 		})
 	}
-	return tracks
+	return tracks, nil
 }
 
 func localSubtitleURI(mediaID, filename string) string {

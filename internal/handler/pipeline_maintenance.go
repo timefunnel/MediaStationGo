@@ -20,6 +20,7 @@ type pipelineMaintenanceRequest struct {
 }
 
 func registerAuthedPipelineMaintenanceRoutes(authed *gin.RouterGroup, svc *service.Container) {
+	authed.GET("/pipeline/media/:id/subtitle-status", middleware.AdminRequired(), pipelineSubtitleStatusHandler(svc))
 	authed.POST("/pipeline/media/:id/repair-movie-extras", middleware.AdminRequired(), pipelineRepairMovieExtrasHandler(svc))
 	authed.POST("/pipeline/media/:id/repair-episode-visibility", middleware.AdminRequired(), pipelineRepairEpisodeVisibilityHandler(svc))
 	authed.POST("/pipeline/media/:id/replace-work-source", middleware.AdminRequired(), pipelineReplaceWorkSourceHandler(svc))
@@ -28,6 +29,21 @@ func registerAuthedPipelineMaintenanceRoutes(authed *gin.RouterGroup, svc *servi
 	authed.POST("/pipeline/migrations/search", middleware.AdminRequired(), pipelineMigrationSearchHandler(svc))
 	authed.POST("/pipeline/migrations/validate", middleware.AdminRequired(), pipelineMigrationValidateHandler(svc))
 	authed.POST("/pipeline/migrations/apply", middleware.AdminRequired(), pipelineMigrationApplyHandler(svc))
+}
+
+func pipelineSubtitleStatusHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.Subtitle == nil || svc.Stream == nil || svc.FFprobe == nil {
+			Error(c, http.StatusInternalServerError, ErrInternal, "subtitle detection service unavailable")
+			return
+		}
+		result, err := svc.Subtitle.Presence(c.Request.Context(), c.Param("id"), svc.Stream, svc.FFprobe)
+		if err != nil {
+			Error(c, http.StatusInternalServerError, ErrInternal, err.Error())
+			return
+		}
+		Success(c, result)
+	}
 }
 
 func pipelineReplaceWorkSourceHandler(svc *service.Container) gin.HandlerFunc {

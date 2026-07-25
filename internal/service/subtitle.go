@@ -120,6 +120,14 @@ func normalizeSubtitleExtension(format string) (string, bool) {
 // relative; the caller should prepend /api/subtitles/<media_id>?path=...
 // when serializing for the frontend.
 func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]SubtitleTrack, error) {
+	return s.discover(ctx, mediaID, false)
+}
+
+func (s *SubtitleService) DiscoverStrict(ctx context.Context, mediaID string) ([]SubtitleTrack, error) {
+	return s.discover(ctx, mediaID, true)
+}
+
+func (s *SubtitleService) discover(ctx context.Context, mediaID string, strict bool) ([]SubtitleTrack, error) {
 	m, err := s.repo.Media.FindByID(ctx, mediaID)
 	if err != nil {
 		return nil, err
@@ -127,10 +135,16 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	if m == nil {
 		return nil, errors.New("media not found")
 	}
-	localTracks := discoverLocalCachedSubtitles(s, mediaID)
+	localTracks, err := discoverLocalCachedSubtitles(s, mediaID, strict)
+	if err != nil {
+		return nil, err
+	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
 		cloudTracks, err := s.discoverCloudSubtitlesCached(ctx, *m)
 		if err != nil {
+			if strict {
+				return nil, err
+			}
 			if s.log != nil {
 				s.log.Warn("discover cloud subtitles failed",
 					zap.String("media_id", m.ID),
@@ -154,6 +168,9 @@ func (s *SubtitleService) Discover(ctx context.Context, mediaID string) ([]Subti
 	for _, c := range candidates {
 		entries, err := os.ReadDir(c)
 		if err != nil {
+			if strict && (c == dir || !errors.Is(err, os.ErrNotExist)) {
+				return nil, fmt.Errorf("read subtitle directory %q: %w", c, err)
+			}
 			continue
 		}
 		for _, e := range entries {

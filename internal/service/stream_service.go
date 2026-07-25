@@ -101,18 +101,28 @@ func (s *StreamService) directPlayOnly(ctx context.Context) bool {
 // Probe re-runs ffprobe against an existing media row and refreshes the
 // extracted metadata. Used by the admin UI's "rescan" button.
 func (s *StreamService) Probe(ctx context.Context, mediaID string, probe mediaTrackProber) error {
-	m, err := s.repo.Media.FindByID(ctx, mediaID)
-	if err != nil || m == nil {
-		return ErrMediaNotFound
-	}
-	if probe == nil {
-		return errors.New("ffprobe service unavailable")
-	}
-	res, err := s.probeMediaSource(ctx, m, probe)
+	res, media, err := s.Inspect(ctx, mediaID, probe)
 	if err != nil {
 		return err
 	}
-	return persistMediaProbeResult(ctx, s.repo, s.cache, s.generatedArtwork, s.log, m, res)
+	return persistMediaProbeResult(ctx, s.repo, s.cache, s.generatedArtwork, s.log, media, res)
+}
+
+// Inspect returns current stream metadata without persisting it. It reuses the
+// same local/cloud source resolution as the normal probe path.
+func (s *StreamService) Inspect(ctx context.Context, mediaID string, probe mediaTrackProber) (*ProbeResult, *model.Media, error) {
+	m, err := s.repo.Media.FindByID(ctx, mediaID)
+	if err != nil || m == nil {
+		return nil, nil, ErrMediaNotFound
+	}
+	if probe == nil {
+		return nil, nil, errors.New("ffprobe service unavailable")
+	}
+	res, err := s.probeMediaSource(ctx, m, probe)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res, m, nil
 }
 
 func (s *StreamService) probeMediaSource(ctx context.Context, media *model.Media, probe mediaTrackProber) (*ProbeResult, error) {

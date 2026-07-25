@@ -16,6 +16,7 @@ type rawProbe struct {
 		BitRate    string `json:"bit_rate"`
 	} `json:"format"`
 	Streams []struct {
+		Index            int    `json:"index"`
 		CodecType        string `json:"codec_type"`
 		CodecName        string `json:"codec_name"`
 		Profile          string `json:"profile"`
@@ -34,6 +35,14 @@ type rawProbe struct {
 		SideDataList     []struct {
 			SideDataType string `json:"side_data_type"`
 		} `json:"side_data_list"`
+		Tags struct {
+			Language string `json:"language"`
+			Title    string `json:"title"`
+		} `json:"tags"`
+		Disposition struct {
+			Default int `json:"default"`
+			Forced  int `json:"forced"`
+		} `json:"disposition"`
 	} `json:"streams"`
 }
 
@@ -68,6 +77,15 @@ func parseProbeJSON(data []byte) (*ProbeResult, error) {
 				res.AudioChannelLayout = strings.TrimSpace(s.ChannelLayout)
 				res.AudioSampleRate = int(parseProbeInt64(s.SampleRate))
 			}
+		case "subtitle":
+			res.SubtitleStreams = append(res.SubtitleStreams, ProbeSubtitleStream{
+				Index:    s.Index,
+				Codec:    strings.TrimSpace(s.CodecName),
+				Language: strings.TrimSpace(s.Tags.Language),
+				Title:    strings.TrimSpace(s.Tags.Title),
+				Default:  s.Disposition.Default != 0,
+				Forced:   s.Disposition.Forced != 0,
+			})
 		}
 	}
 	return res, nil
@@ -140,6 +158,7 @@ var (
 	ffmpegInputRE    = regexp.MustCompile(`Input #\d+,\s*(.+?),\s*from`)
 	ffmpegVideoRE    = regexp.MustCompile(`Video:\s*([^,\s]+).*?(\d{2,5})x(\d{2,5})`)
 	ffmpegAudioRE    = regexp.MustCompile(`Audio:\s*([^,\s]+)`)
+	ffmpegSubtitleRE = regexp.MustCompile(`Stream #\d+:(\d+)(?:\(([^)]+)\))?.*Subtitle:\s*([^,\s]+)`)
 	probeBitDepthRE  = regexp.MustCompile(`p0?(10|12|14|16)(?:le|be)?$`)
 )
 
@@ -166,6 +185,17 @@ func parseFFmpegProbeText(text string) *ProbeResult {
 			if match := ffmpegAudioRE.FindStringSubmatch(line); len(match) == 2 {
 				res.AudioCodec = strings.TrimSpace(match[1])
 			}
+		}
+		if match := ffmpegSubtitleRE.FindStringSubmatch(line); len(match) == 4 {
+			index, _ := strconv.Atoi(match[1])
+			lowered := strings.ToLower(line)
+			res.SubtitleStreams = append(res.SubtitleStreams, ProbeSubtitleStream{
+				Index:    index,
+				Language: strings.TrimSpace(match[2]),
+				Codec:    strings.TrimSpace(match[3]),
+				Default:  strings.Contains(lowered, "(default)"),
+				Forced:   strings.Contains(lowered, "(forced)"),
+			})
 		}
 	}
 	return res

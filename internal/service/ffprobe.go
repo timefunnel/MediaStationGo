@@ -86,6 +86,16 @@ type ProbeResult struct {
 	AudioChannels      int
 	AudioChannelLayout string
 	AudioSampleRate    int
+	SubtitleStreams    []ProbeSubtitleStream
+}
+
+type ProbeSubtitleStream struct {
+	Index    int    `json:"index"`
+	Codec    string `json:"codec,omitempty"`
+	Language string `json:"language,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Default  bool   `json:"default,omitempty"`
+	Forced   bool   `json:"forced,omitempty"`
 }
 
 // Probe runs ffprobe against path and returns a typed result. A 30s timeout

@@ -93,6 +93,7 @@ func TestParseProbeJSONExtractsPrimaryStreams(t *testing.T) {
 		"streams": [
 			{"codec_type": "video", "codec_name": "hevc", "profile": "Main 10", "width": 3840, "height": 2160, "bit_rate": "22000000", "avg_frame_rate": "24000/1001", "pix_fmt": "yuv420p10le", "color_transfer": "smpte2084"},
 			{"codec_type": "audio", "codec_name": "eac3", "bit_rate": "768000", "channels": 6, "channel_layout": "5.1(side)", "sample_rate": "48000"},
+			{"index": 2, "codec_type": "subtitle", "codec_name": "ass", "tags": {"language": "zh-Hans", "title": "简体中文"}, "disposition": {"default": 1, "forced": 0}},
 			{"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080}
 		]
 	}`))
@@ -108,14 +109,21 @@ func TestParseProbeJSONExtractsPrimaryStreams(t *testing.T) {
 	if got.AudioBitRate != 768000 || got.AudioChannels != 6 || got.AudioChannelLayout != "5.1(side)" || got.AudioSampleRate != 48000 {
 		t.Fatalf("parsed audio details = %+v", got)
 	}
+	if len(got.SubtitleStreams) != 1 || got.SubtitleStreams[0].Index != 2 || got.SubtitleStreams[0].Language != "zh-Hans" || got.SubtitleStreams[0].Title != "简体中文" || !got.SubtitleStreams[0].Default {
+		t.Fatalf("parsed subtitle streams = %+v", got.SubtitleStreams)
+	}
 }
 
 func TestParseFFmpegProbeTextExtractsFallbackMetadata(t *testing.T) {
 	got := parseFFmpegProbeText(`Input #0, matroska,webm, from 'movie.mkv':
   Duration: 01:02:03.45, start: 0.000000, bitrate: N/A
   Stream #0:0: Video: h264 (High), yuv420p(progressive), 1920x804
-  Stream #0:1: Audio: aac, 48000 Hz, stereo`)
+	  Stream #0:1: Audio: aac, 48000 Hz, stereo
+	  Stream #0:2(chi): Subtitle: subrip (srt) (default)`)
 	if got.DurationSec != 3723 || got.Container != "matroska,webm" || got.VideoCodec != "h264" || got.AudioCodec != "aac" || got.Width != 1920 || got.Height != 804 {
 		t.Fatalf("parsed ffmpeg text = %+v", got)
+	}
+	if len(got.SubtitleStreams) != 1 || got.SubtitleStreams[0].Index != 2 || got.SubtitleStreams[0].Language != "chi" || got.SubtitleStreams[0].Codec != "subrip" || !got.SubtitleStreams[0].Default {
+		t.Fatalf("parsed ffmpeg subtitle streams = %+v", got.SubtitleStreams)
 	}
 }
