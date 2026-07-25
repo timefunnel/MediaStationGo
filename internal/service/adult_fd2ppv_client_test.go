@@ -305,13 +305,19 @@ func TestFD2PPVSessionCheckRefreshesExpiredSharedSession(t *testing.T) {
 	fd2PPVBaseURL = site.URL
 	t.Cleanup(func() { fd2PPVBaseURL = originalBaseURL })
 
+	var flareCalls atomic.Int32
 	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := flareCalls.Add(1)
+		response := `<html><input type="hidden" name="_csrf" value="csrf-token"></html>`
+		if call == 1 {
+			response = `<html><body>temporary incomplete login page</body></html>`
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "ok",
 			"solution": map[string]any{
 				"status":    200,
-				"response":  `<html><input type="hidden" name="_csrf" value="csrf-token"></html>`,
+				"response":  response,
 				"userAgent": "test-browser",
 				"cookies":   []map[string]string{},
 			},
@@ -350,11 +356,39 @@ func TestFD2PPVSessionCheckRefreshesExpiredSharedSession(t *testing.T) {
 	if err := provider.CheckFD2PPVSession(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if loginCalls.Load() != 1 || directCalls.Load() != 2 {
-		t.Fatalf("login calls = %d, direct calls = %d, want 1 and 2", loginCalls.Load(), directCalls.Load())
+	if flareCalls.Load() != 2 || loginCalls.Load() != 1 || directCalls.Load() != 2 {
+		t.Fatalf("flare calls = %d, login calls = %d, direct calls = %d, want 2, 1 and 2", flareCalls.Load(), loginCalls.Load(), directCalls.Load())
 	}
 	if !fd2PPVHasCookie(provider.fd2ppv.cookies, "member") {
 		t.Fatal("refreshed shared session did not retain the member cookie")
+	}
+}
+
+func TestFD2PPVSessionCheckStopsAfterBoundedMissingCSRFRetries(t *testing.T) {
+	var flareCalls atomic.Int32
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flareCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status":    200,
+				"response":  `<html><body>incomplete login page</body></html>`,
+				"userAgent": "test-browser",
+				"cookies":   []map[string]string{},
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := newConfiguredFD2PPVTestProvider(t, "fd2-user", "fd2-password")
+	provider.SetFlareSolverr(flare.URL, 5)
+	err := provider.CheckFD2PPVSession(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "after 2 attempts") {
+		t.Fatalf("error = %v", err)
+	}
+	if flareCalls.Load() != fd2PPVLoginPageAttempts {
+		t.Fatalf("flare calls = %d, want %d", flareCalls.Load(), fd2PPVLoginPageAttempts)
 	}
 }
 

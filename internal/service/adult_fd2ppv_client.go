@@ -23,6 +23,7 @@ const (
 	fd2PPVHTMLCacheTTL        = 6 * time.Hour
 	fd2PPVHTMLCacheMaxEntries = 256
 	fd2PPVChrome133UserAgent  = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+	fd2PPVLoginPageAttempts   = 2
 )
 
 var (
@@ -336,21 +337,29 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	}
 
 	baseURL := strings.TrimRight(fd2PPVBaseURL, "/")
-	solution, err := helper.FetchURLWithFlareSolverrResultContext(
-		ctx,
-		provider.flareSolverrURL,
-		baseURL+"/",
-		nil,
-		provider.flareSolverrTimeout,
-		"",
-		provider.log,
-	)
-	if err != nil {
-		return fmt.Errorf("fd2ppv login page: %w", err)
+	var solution *helper.FlareSolverrSolution
+	csrf := ""
+	for attempt := 0; attempt < fd2PPVLoginPageAttempts; attempt++ {
+		var err error
+		solution, err = helper.FetchURLWithFlareSolverrResultContext(
+			ctx,
+			provider.flareSolverrURL,
+			baseURL+"/",
+			nil,
+			provider.flareSolverrTimeout,
+			"",
+			provider.log,
+		)
+		if err != nil {
+			return fmt.Errorf("fd2ppv login page: %w", err)
+		}
+		csrf = fd2PPVCSRFToken(solution.Response)
+		if csrf != "" {
+			break
+		}
 	}
-	csrf := fd2PPVCSRFToken(solution.Response)
 	if csrf == "" {
-		return errors.New("fd2ppv login page did not contain a CSRF token")
+		return fmt.Errorf("fd2ppv login page did not contain a CSRF token after %d attempts", fd2PPVLoginPageAttempts)
 	}
 
 	jar, err := cookiejar.New(nil)
