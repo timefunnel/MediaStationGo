@@ -17,6 +17,7 @@ import { useLibraryAdminActions } from './useLibraryAdminActions'
 import { useLibraryResourceImports } from './useLibraryResourceImports'
 import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
+import { resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './resourceImportModel'
 import { LibraryActorFilter } from './LibraryActorFilter'
 import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
 import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
@@ -164,7 +165,7 @@ export function LibraryPage() {
       toast.error('当前剧集缺少明确的媒体库目录，无法升级片源')
       return
     }
-    setResourceInitialQuery(media.original_name?.trim() || seriesTitle(media))
+    setResourceInitialQuery(resourceSearchPrimaryQuery({ ...media, title: seriesTitle(media) }))
     setResourceUpgradeMediaID(media.id)
     setResourceUpgradeScope('work')
     setResourceFixedRootID(rootID)
@@ -283,6 +284,9 @@ export function LibraryPage() {
       <ResourceSearchDrawer
         open={resourceDrawerOpen}
         initialQuery={resourceInitialQuery}
+        alternateQuery={resourceUpgradeScope === 'work' && selectedSeries
+          ? resourceSearchAlternateQuery({ ...selectedSeries.rep, title: seriesTitle(selectedSeries.rep) })
+          : undefined}
         upgradeMediaID={resourceUpgradeMediaID || undefined}
         upgradeScope={resourceUpgradeScope}
         fixedRootID={resourceFixedRootID || undefined}

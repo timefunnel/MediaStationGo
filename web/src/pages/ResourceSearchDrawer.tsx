@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Download,
   Globe,
+  Languages,
   LoaderCircle,
   RotateCcw,
   Search,
@@ -37,6 +38,7 @@ import {
   resolveResourceRootID,
   resourceImportError,
   resourceImportDuplicateConflict,
+  resourceSearchAlternateLabel,
   resourceSearchFailure,
   supportsResourceSource,
 } from './resourceImportModel'
@@ -48,6 +50,7 @@ type ResourceSearchDrawerProps = {
   showCloseButton?: boolean
   autoSearch?: boolean
   initialQuery?: string
+  alternateQuery?: string
   releaseDate?: string
   upgradeMediaID?: string
   upgradeScope?: 'media' | 'work'
@@ -88,6 +91,7 @@ export function ResourceSearchDrawer({
   showCloseButton = true,
   autoSearch = false,
   initialQuery,
+  alternateQuery,
   releaseDate,
   upgradeMediaID,
   upgradeScope,
@@ -144,6 +148,7 @@ export function ResourceSearchDrawer({
   const upgrading = Boolean(upgradeMediaID?.trim())
   const hasAppliedFilters = resourceFiltersActive(appliedFilters)
   const embeddedExpanded = Boolean(taskID || response || searching || searchFailure || duplicateConflict)
+  const normalizedAlternateQuery = alternateQuery?.trim() ?? ''
 
   useEffect(() => {
     const nextQuery = initialQuery?.trim()
@@ -300,6 +305,15 @@ export function ResourceSearchDrawer({
     const cleared = emptyResourceFilters()
     setFilters(cleared)
     void runSearch(1, source, cleared)
+  }
+
+  const searchAlternateQuery = () => {
+    if (!normalizedAlternateQuery || searching) return
+    const cleared = emptyResourceFilters()
+    setQuery(normalizedAlternateQuery)
+    setFilters(cleared)
+    setAppliedFilters(cleared)
+    void runSearch(1, source, cleared, false, normalizedAlternateQuery)
   }
 
   const submitFilters = (event: FormEvent) => {
@@ -517,6 +531,20 @@ export function ResourceSearchDrawer({
                   {searching ? <LoaderCircle size={18} className="animate-spin" /> : <Search size={18} />}
                 </button>
               </div>
+
+              {normalizedAlternateQuery && (
+                <button
+                  type="button"
+                  className="mt-2 inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-medium text-ink-100 transition hover:border-primary-300 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={`${resourceSearchAlternateLabel(normalizedAlternateQuery)}：${normalizedAlternateQuery}`}
+                  disabled={searching}
+                  onClick={searchAlternateQuery}
+                >
+                  <Languages size={14} className="shrink-0" />
+                  <span className="shrink-0">{resourceSearchAlternateLabel(normalizedAlternateQuery)}</span>
+                  <span className="truncate text-sand-500">{normalizedAlternateQuery}</span>
+                </button>
+              )}
 
               {roots.length > 0 && (
                 <div className="mt-3">

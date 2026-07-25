@@ -18,7 +18,7 @@ import {
   MediaDetailMissing,
 } from './MediaDetailPageSections'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
-import { mergeResourceImportTasks } from './resourceImportModel'
+import { mergeResourceImportTasks, resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './resourceImportModel'
 import { useMediaDetailPageState } from './useMediaDetailPageState'
 
 export function MediaDetailPage() {
@@ -179,6 +179,9 @@ export function MediaDetailPage() {
   if (!detail.media) return <MediaDetailMissing />
   const media = detail.media
   const upgradeScope = upgradeLibrary?.type === 'tv' || upgradeLibrary?.type === 'anime' ? 'work' : 'media'
+  const upgradeSearchMedia = upgradeScope === 'work'
+    ? media
+    : versions.find((version) => version.id === upgradeTargetID) ?? media
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-white border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.01),0_1px_2px_rgba(0,0,0,0.015)]">
@@ -236,9 +239,8 @@ export function MediaDetailPage() {
       {upgradeLibrary && (
         <ResourceSearchDrawer
           open={upgradeOpen}
-          initialQuery={upgradeScope === 'work'
-            ? media.original_name?.trim() || media.title
-            : versions.find((version) => version.id === upgradeTargetID)?.original_name?.trim() || media.original_name?.trim() || media.title}
+          initialQuery={resourceSearchPrimaryQuery(upgradeSearchMedia)}
+          alternateQuery={resourceSearchAlternateQuery(upgradeSearchMedia)}
           upgradeMediaID={upgradeTargetID || media.id}
           upgradeScope={upgradeScope}
           fixedRootID={upgradeRootID}

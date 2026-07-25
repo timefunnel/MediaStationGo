@@ -10,7 +10,7 @@ import type { ResourceImportTask } from '../api/resourceImports'
 import { buildResourceImportFeedURL, buildSubscriptionAliases, subscriptionsAPI } from '../api/subscriptions'
 import { useAuthStore } from '../stores/auth'
 import type { Library } from '../types'
-import { discoverResourceSearchKeyword } from './discoverDetailModalModel'
+import { discoverResourceSearchAlternateKeyword, discoverResourceSearchKeyword } from './discoverDetailModalModel'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { mergeResourceImportTasks } from './resourceImportModel'
 
@@ -161,6 +161,7 @@ export function DiscoverResourceAction({
       autoSearch
       open
       initialQuery={discoverResourceSearchKeyword(item)}
+      alternateQuery={discoverResourceSearchAlternateKeyword(item)}
       releaseDate={item.release_date}
       libraryID={selectedLibrary.id}
       libraryName={selectedLibrary.name}
@@ -251,6 +252,7 @@ export function DiscoverResourceAction({
                   embedded
                   open
                   initialQuery={discoverResourceSearchKeyword(item)}
+                  alternateQuery={discoverResourceSearchAlternateKeyword(item)}
                   releaseDate={item.release_date}
                   libraryID={selectedLibrary.id}
                   libraryName={selectedLibrary.name}

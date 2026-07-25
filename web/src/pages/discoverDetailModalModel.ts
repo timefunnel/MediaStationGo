@@ -1,5 +1,6 @@
 import type { DiscoverItem } from '../api/discover'
 import { buildSubscribeKeyword, discoverMediaTypeLabel } from './discoverPageModel'
+import { resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './resourceImportModel'
 
 export {
   discoverItemPeople,
@@ -16,7 +17,11 @@ export function discoverSubscriptionKeyword(item: DiscoverItem): string {
 }
 
 export function discoverResourceSearchKeyword(item: DiscoverItem): string {
-  return item.original_name?.trim() || item.title.trim()
+  return resourceSearchPrimaryQuery(item)
+}
+
+export function discoverResourceSearchAlternateKeyword(item: DiscoverItem): string {
+  return resourceSearchAlternateQuery(item)
 }
 
 export function discoverItemMetaText(item: DiscoverItem): string {

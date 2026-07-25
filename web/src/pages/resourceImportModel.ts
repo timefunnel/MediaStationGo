@@ -9,6 +9,42 @@ import type {
 export const RESOURCE_SEARCH_LIMIT = 100
 export const RESOURCE_SEARCH_PAGE_SIZE = 20
 
+type ResourceSearchTitleInput = {
+  title?: string
+  original_name?: string
+  nsfw?: boolean
+  media_type?: string
+  source?: string
+}
+
+const adultResourceSources = new Set(['adult', 'javdb', 'javbus', 'fd2ppv'])
+
+function numberedResourceSearch(input: ResourceSearchTitleInput): boolean {
+  const mediaType = input.media_type?.trim().toLowerCase() ?? ''
+  const source = input.source?.trim().toLowerCase() ?? ''
+  return input.nsfw === true || mediaType === 'adult' || adultResourceSources.has(source)
+}
+
+export function resourceSearchPrimaryQuery(input: ResourceSearchTitleInput): string {
+  const title = input.title?.trim() ?? ''
+  const originalName = input.original_name?.trim() ?? ''
+  return numberedResourceSearch(input) ? originalName || title : title || originalName
+}
+
+export function resourceSearchAlternateQuery(input: ResourceSearchTitleInput): string {
+  if (numberedResourceSearch(input)) return ''
+  const primary = resourceSearchPrimaryQuery(input)
+  const originalName = input.original_name?.trim() ?? ''
+  if (!originalName || originalName.localeCompare(primary, undefined, { sensitivity: 'accent' }) === 0) return ''
+  return originalName
+}
+
+export function resourceSearchAlternateLabel(query: string): string {
+  const hasLatin = /[A-Za-z]/.test(query)
+  const hasCJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(query)
+  return hasLatin && !hasCJK ? '英文原名补查' : '原名补查'
+}
+
 const activeStatuses = new Set(['pending', 'queued', 'running', 'retrying', 'canceling'])
 const completedStatuses = new Set(['completed', 'completed_with_warning', 'succeeded', 'success'])
 const failedStatuses = new Set(['failed', 'error'])

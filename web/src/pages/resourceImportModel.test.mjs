@@ -10,10 +10,29 @@ import {
   resourceImportDuplicateConflict,
   resourceImportError,
   resourceImportProgress,
+  resourceSearchAlternateLabel,
+  resourceSearchAlternateQuery,
   resourceSearchFailure,
+  resourceSearchPrimaryQuery,
   resolveResourceRootID,
   supportsResourceSource,
 } from './resourceImportModel.ts'
+
+test('普通影视默认中文名并提供原名补查，番号作品保持番号优先', () => {
+  const movie = { title: '恶魔阴谋', original_name: 'The Devil Conspiracy', media_type: 'movie' }
+  assert.equal(resourceSearchPrimaryQuery(movie), '恶魔阴谋')
+  assert.equal(resourceSearchAlternateQuery(movie), 'The Devil Conspiracy')
+  assert.equal(resourceSearchAlternateLabel(movie.original_name), '英文原名补查')
+
+  const anime = { title: '葬送的芙莉莲', original_name: '葬送のフリーレン', media_type: 'anime' }
+  assert.equal(resourceSearchPrimaryQuery(anime), '葬送的芙莉莲')
+  assert.equal(resourceSearchAlternateQuery(anime), '葬送のフリーレン')
+  assert.equal(resourceSearchAlternateLabel(anime.original_name), '原名补查')
+
+  const adult = { title: '作品标题', original_name: 'MIZD-534', media_type: 'adult' }
+  assert.equal(resourceSearchPrimaryQuery(adult), 'MIZD-534')
+  assert.equal(resourceSearchAlternateQuery(adult), '')
+})
 
 test('资源搜索最多展示 100 条并限制分页', () => {
   assert.equal(cappedResourceTotal(238), 100)
