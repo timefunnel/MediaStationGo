@@ -13,8 +13,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
-const discoverSearchTimeout = 20 * time.Second
-const discoverSearchFD2PPVTimeout = 75 * time.Second
+const discoverSearchTimeout = 5 * time.Second
 
 var discoverSearchSourceLabels = map[string]string{
 	"tmdb_movie":       "TMDb 电影",
@@ -52,11 +51,7 @@ func discoverSearchHandler(svc *service.Container) gin.HandlerFunc {
 			adult = svc.Adult
 		}
 
-		searchTimeout := discoverSearchTimeout
-		if adult != nil && adult.FD2PPVEnabled() {
-			searchTimeout = discoverSearchFD2PPVTimeout
-		}
-		searchCtx, cancel := context.WithTimeout(c.Request.Context(), searchTimeout)
+		searchCtx, cancel := context.WithTimeout(c.Request.Context(), discoverSearchTimeout)
 		defer cancel()
 		result := service.SearchDiscoverCatalog(searchCtx, query, tmdb, douban, bangumi, adult)
 		if adult != nil {

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"strings"
-	"sync"
 )
 
 type DiscoverCatalogSearchResult struct {
@@ -33,6 +32,9 @@ func SearchDiscoverCatalog(
 	bangumi *BangumiProvider,
 	adult *AdultProvider,
 ) DiscoverCatalogSearchResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query = strings.TrimSpace(query)
 	result := DiscoverCatalogSearchResult{Items: []ExternalMediaResult{}, Errors: map[string]error{}}
 	if query == "" {
@@ -97,24 +99,67 @@ func SearchDiscoverCatalog(
 		}
 	}
 
+	return runDiscoverCatalogSearchTasks(ctx, tasks)
+}
+
+func runDiscoverCatalogSearchTasks(
+	ctx context.Context,
+	tasks []discoverCatalogSearchTask,
+) DiscoverCatalogSearchResult {
+	result := DiscoverCatalogSearchResult{Items: []ExternalMediaResult{}, Errors: map[string]error{}}
+	if len(tasks) == 0 {
+		return result
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		for _, task := range tasks {
+			result.Errors[task.key] = err
+		}
+		return result
+	}
+
 	results := make(chan discoverCatalogSearchTaskResult, len(tasks))
-	var wait sync.WaitGroup
 	for _, task := range tasks {
 		task := task
-		wait.Add(1)
 		go func() {
-			defer wait.Done()
 			items, err := task.run()
 			results <- discoverCatalogSearchTaskResult{key: task.key, items: items, err: err}
 		}()
 	}
-	wait.Wait()
-	close(results)
 
 	byKey := make(map[string]discoverCatalogSearchTaskResult, len(tasks))
-	for taskResult := range results {
-		byKey[taskResult.key] = taskResult
+	for len(byKey) < len(tasks) {
+		select {
+		case taskResult := <-results:
+			byKey[taskResult.key] = taskResult
+		case <-ctx.Done():
+			// Preserve every result that reached the buffered channel before the
+			// deadline, then mark only the still-pending sources as timed out.
+			for {
+				select {
+				case taskResult := <-results:
+					byKey[taskResult.key] = taskResult
+				default:
+					for _, task := range tasks {
+						if _, ok := byKey[task.key]; !ok {
+							byKey[task.key] = discoverCatalogSearchTaskResult{key: task.key, err: ctx.Err()}
+						}
+					}
+					return buildDiscoverCatalogSearchResult(tasks, byKey)
+				}
+			}
+		}
 	}
+	return buildDiscoverCatalogSearchResult(tasks, byKey)
+}
+
+func buildDiscoverCatalogSearchResult(
+	tasks []discoverCatalogSearchTask,
+	byKey map[string]discoverCatalogSearchTaskResult,
+) DiscoverCatalogSearchResult {
+	result := DiscoverCatalogSearchResult{Items: []ExternalMediaResult{}, Errors: map[string]error{}}
 	for _, task := range tasks {
 		taskResult := byKey[task.key]
 		if taskResult.err != nil {

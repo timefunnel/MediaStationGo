@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -41,6 +44,42 @@ func TestSearchDiscoverCatalogWithNoProvidersIsExplicitlyEmpty(t *testing.T) {
 	result := SearchDiscoverCatalog(t.Context(), "测试", nil, nil, nil, nil)
 	if len(result.Items) != 0 || len(result.Errors) != 0 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunDiscoverCatalogSearchTasksReturnsCompletedSourcesAtDeadline(t *testing.T) {
+	releaseSlow := make(chan struct{})
+	defer close(releaseSlow)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	result := runDiscoverCatalogSearchTasks(ctx, []discoverCatalogSearchTask{
+		{
+			key: "fast",
+			run: func() ([]ExternalMediaResult, error) {
+				return []ExternalMediaResult{{Source: "fast", MediaType: "movie", Title: "Fast result"}}, nil
+			},
+		},
+		{
+			key: "slow",
+			run: func() ([]ExternalMediaResult, error) {
+				<-releaseSlow
+				return []ExternalMediaResult{{Source: "slow", MediaType: "movie", Title: "Late result"}}, nil
+			},
+		},
+	})
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("search waited %s for a source beyond the caller deadline", elapsed)
+	}
+	if len(result.Items) != 1 || result.Items[0].Title != "Fast result" {
+		t.Fatalf("items = %#v, want only the completed source", result.Items)
+	}
+	if !errors.Is(result.Errors["slow"], context.DeadlineExceeded) {
+		t.Fatalf("slow source error = %v, want deadline exceeded", result.Errors["slow"])
+	}
+	if _, exists := result.Errors["fast"]; exists {
+		t.Fatalf("fast source unexpectedly failed: %v", result.Errors["fast"])
 	}
 }
 
