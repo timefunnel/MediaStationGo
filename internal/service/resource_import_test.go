@@ -609,6 +609,40 @@ func TestResourceImportUpgradeRejectsMediaOutsideTargetLibraryOrRoot(t *testing.
 	}
 }
 
+func TestResourceImportUpgradeRejectsNonPrimaryMediaVersion(t *testing.T) {
+	pipeline := &fakeResourcePipeline{}
+	svc, repos, library, root, _, user := newResourceImportTestService(t, pipeline)
+	primary := model.Media{
+		LibraryID: library.ID, LibraryRootID: root.ID, Title: "MIMK-267", TMDbID: 267,
+		Path: "cloud://openlist/115/成人/MIMK-267/MIMK-267.mp4", SizeBytes: 4 << 30,
+	}
+	auxiliary := model.Media{
+		LibraryID: library.ID, LibraryRootID: root.ID, Title: "MIMK-267", TMDbID: 267,
+		Path: "cloud://openlist/115/成人/MIMK-267/ad.mp4", SizeBytes: 2 << 20,
+	}
+	if err := repos.DB.Create(&primary).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.DB.Create(&auxiliary).Error; err != nil {
+		t.Fatal(err)
+	}
+	search, err := svc.Search(t.Context(), user.ID, library, root, ResourceSearchInput{Query: "MIMK-267", RootID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Create(t.Context(), user.ID, library, root, ResourceImportCreateInput{
+		SearchSessionID: search.SessionID, CandidateIndex: 0, RootID: root.ID, UpgradeMediaID: auxiliary.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "目标不是作品主片源") {
+		t.Fatalf("upgrade error = %v", err)
+	}
+	pipeline.mu.Lock()
+	defer pipeline.mu.Unlock()
+	if pipeline.createCalls != 0 {
+		t.Fatalf("pipeline create calls = %d", pipeline.createCalls)
+	}
+}
+
 func TestMapPipelineImportStateKeepsUnknownActiveStageRunning(t *testing.T) {
 	status, stage := mapPipelineImportState(resourcePipelineTask{Status: "running", Stage: "future_stage"})
 	if status != ResourceImportStatusRunning || stage != "running" {

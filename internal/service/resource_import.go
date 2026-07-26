@@ -503,6 +503,25 @@ func (s *ResourceImportService) validateUpgradeTarget(ctx context.Context, libra
 	if media.LibraryRootID != "" && media.LibraryRootID != root.ID {
 		return errors.New("upgrade_media_id 无效：目标作品不属于当前入库目录")
 	}
+	groupKey := mediaVersionGroupKey(*media)
+	if groupKey == "" {
+		return nil
+	}
+	var candidates []model.Media
+	if err := s.repos.DB.WithContext(ctx).
+		Where("library_id = ?", media.LibraryID).
+		Find(&candidates).Error; err != nil {
+		return err
+	}
+	primary := *media
+	for _, candidate := range candidates {
+		if mediaVersionGroupKey(candidate) == groupKey && betterMediaVersion(candidate, primary) {
+			primary = candidate
+		}
+	}
+	if primary.ID != media.ID {
+		return errors.New("upgrade_media_id 无效：目标不是作品主片源，请刷新详情后重新发起升级")
+	}
 	return nil
 }
 

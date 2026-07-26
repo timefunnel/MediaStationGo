@@ -73,11 +73,12 @@ export function MediaDetailPage() {
   const openUpgrade = useCallback(async () => {
     if (!detail.media || upgradeOpening) return
     const currentMedia = detail.media
-    const currentVersion = versions.find((version) => version.id === currentMedia.id)
-    const manageableVersion = versions.find((version) => version.can_manage)
-    const upgradeTarget = role === 'admin' ? (currentVersion ?? currentMedia) : (manageableVersion ?? currentVersion ?? currentMedia)
     setUpgradeOpening(true)
     try {
+      const loadedVersions = (await mediaAPI.listVersions(currentMedia.id)).items ?? []
+      setVersions(loadedVersions)
+      const primaryVersion = loadedVersions[0]
+      const upgradeTarget = primaryVersion ?? currentMedia
       const library = await libraryAPI.get(upgradeTarget.library_id)
       const enabledRoots = (library.roots ?? []).filter((root) => root.enabled)
       const rootID = enabledRoots.some((root) => root.id === upgradeTarget.library_root_id)
@@ -94,7 +95,7 @@ export function MediaDetailPage() {
     } finally {
       setUpgradeOpening(false)
     }
-  }, [detail.media, role, upgradeOpening, versions])
+  }, [detail.media, upgradeOpening])
 
   const acceptUpgradeTask = useCallback((task: ResourceImportTask) => {
     setUpgradeTasks((current) => mergeResourceImportTasks(current, [task]))
