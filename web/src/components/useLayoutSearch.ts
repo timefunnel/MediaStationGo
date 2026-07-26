@@ -20,6 +20,7 @@ export function useLayoutSearch({ pathname, locationSearch, navigate }: UseLayou
   const searchSeq = useRef(0)
 
   useEffect(() => {
+    setFocused(false)
     if (pathname === '/search') {
       setQuery(new URLSearchParams(locationSearch).get('q') ?? '')
     }
@@ -68,8 +69,8 @@ export function useLayoutSearch({ pathname, locationSearch, navigate }: UseLayou
     event.preventDefault()
     const trimmedQuery = query.trim()
     if (trimmedQuery) {
-      navigate(`/search?q=${encodeURIComponent(trimmedQuery)}`)
       setFocused(false)
+      navigate(`/search?q=${encodeURIComponent(trimmedQuery)}`)
     }
   }
 
