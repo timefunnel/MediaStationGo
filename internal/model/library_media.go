@@ -94,6 +94,7 @@ type Media struct {
 	DisplayLibraryName string `gorm:"-" json:"display_library_name,omitempty"`
 	DisplayLibraryPath string `gorm:"-" json:"display_library_path,omitempty"`
 	DisplayTitle       string `gorm:"-" json:"display_title,omitempty"`
+	AutoCategory       string `gorm:"-" json:"auto_category,omitempty"`
 	PartCount          int    `gorm:"-" json:"part_count,omitempty"`
 
 	// FileHash is a sparse-sample MD5 used for duplicate detection.

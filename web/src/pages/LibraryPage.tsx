@@ -18,8 +18,9 @@ import { useLibraryResourceImports } from './useLibraryResourceImports'
 import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './resourceImportModel'
-import { LibraryActorFilter } from './LibraryActorFilter'
+import { LibraryFilterBar } from './LibraryActorFilter'
 import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
+import { buildCategoryFacets, mediaHasCategory } from './libraryCategoryFilterModel'
 import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
 import { ManualMediaAggregationDialog } from '../components/ManualMediaAggregationDialog'
 
@@ -121,18 +122,34 @@ export function LibraryPage() {
   const resourceImports = useLibraryResourceImports(id, userID, reloadCurrentLibrary)
   const actorFacets = useMemo(() => buildActorFacets(items), [items])
   const selectedActor = searchParams.get('actor')?.trim() ?? ''
+  const selectedCategory = searchParams.get('category')?.trim() ?? ''
+  const categoryFacets = useMemo(
+    () => buildCategoryFacets(isSeries ? seriesCards.map((series) => series.rep) : items),
+    [isSeries, items, seriesCards],
+  )
   const requestedResourceQuery = searchParams.get('resource_query')?.trim() ?? ''
   const filteredItems = useMemo(
-    () => selectedActor ? items.filter((media) => mediaHasActor(media, selectedActor)) : items,
-    [items, selectedActor],
+    () => items.filter((media) => mediaHasActor(media, selectedActor) && mediaHasCategory(media, selectedCategory)),
+    [items, selectedActor, selectedCategory],
+  )
+  const filteredSeriesCards = useMemo(
+    () => seriesCards.filter((series) => mediaHasCategory(series.rep, selectedCategory)),
+    [selectedCategory, seriesCards],
   )
 
   useEffect(() => {
-    if (loading || !selectedActor || actorFacets.some((actor) => actor.name === selectedActor)) return
+    if (loading || loadingAllText || !selectedActor || actorFacets.some((actor) => actor.name === selectedActor)) return
     const next = new URLSearchParams(searchParams)
     next.delete('actor')
     setSearchParams(next, { replace: true })
-  }, [actorFacets, loading, searchParams, selectedActor, setSearchParams])
+  }, [actorFacets, loading, loadingAllText, searchParams, selectedActor, setSearchParams])
+
+  useEffect(() => {
+    if (loading || loadingAllText || !selectedCategory || categoryFacets.some((category) => category.name === selectedCategory)) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('category')
+    setSearchParams(next, { replace: true })
+  }, [categoryFacets, loading, loadingAllText, searchParams, selectedCategory, setSearchParams])
 
   useEffect(() => {
     if (loading || !library || !requestedResourceQuery) return
@@ -151,6 +168,13 @@ export function LibraryPage() {
     const next = new URLSearchParams(searchParams)
     if (actor) next.set('actor', actor)
     else next.delete('actor')
+    setSearchParams(next)
+  }
+
+  const selectCategory = (category: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (category) next.set('category', category)
+    else next.delete('category')
     setSearchParams(next)
   }
 
@@ -188,7 +212,9 @@ export function LibraryPage() {
     <div className="space-y-6">
       <LibraryPageHeader
         library={library}
-        itemCount={isSeries ? seriesCards.length : selectedActor ? filteredItems.length : total}
+        itemCount={isSeries
+          ? selectedCategory ? filteredSeriesCards.length : seriesCards.length
+          : selectedActor || selectedCategory ? filteredItems.length : total}
         loadingAllText={loadingAllText}
         scanProgress={scanProgress}
         isAdmin={role === 'admin'}
@@ -230,14 +256,19 @@ export function LibraryPage() {
         onRetryLoad={() => void resourceImports.refresh()}
       />
 
-      {!isSeries && (
-        <LibraryActorFilter actors={actorFacets} selected={selectedActor} onChange={selectActor} />
-      )}
+      <LibraryFilterBar
+        categories={categoryFacets}
+        selectedCategory={selectedCategory}
+        onCategoryChange={selectCategory}
+        actors={isSeries ? [] : actorFacets}
+        selectedActor={selectedActor}
+        onActorChange={selectActor}
+      />
 
       <LibraryMediaSections
         isSeries={isSeries}
         items={filteredItems}
-        seriesCards={seriesCards}
+        seriesCards={filteredSeriesCards}
         selectedSeries={selectedSeries}
         loading={loading}
         movieActions={movieActions}

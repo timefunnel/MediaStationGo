@@ -48,6 +48,7 @@ func (e *EmbyService) multipartSeriesGroupsFromMedia(rows []model.Media) []embyS
 			ReleaseDate: anchor.ReleaseDate,
 			TMDbID:      anchor.TMDbID,
 			BangumiID:   anchor.BangumiID,
+			Genres:      e.embyGenresForMedia(&anchor, ""),
 			CreatedAt:   anchor.CreatedAt,
 			Episodes:    make([]model.Media, 0, len(parts)),
 		}
@@ -66,6 +67,7 @@ func (e *EmbyService) multipartSeriesGroupsFromMedia(rows []model.Media) []embyS
 			if group.Overview == "" && part.Overview != "" {
 				group.Overview = part.Overview
 			}
+			group.Genres = uniqueFoldedStrings(append(group.Genres, e.embyGenresForMedia(&part, "")...))
 			group.Episodes = append(group.Episodes, part)
 		}
 		groups = append(groups, group)

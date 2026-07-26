@@ -33,6 +33,8 @@ func parseEmbyItemsParams(c *gin.Context) service.ItemsParams {
 		ParentID:         firstQueryValue(c, "ParentId", "parentId", "parentid"),
 		IDs:              splitOpt(firstQueryValue(c, "Ids", "ids")),
 		PersonIDs:        splitOpt(firstQueryValue(c, "PersonIds", "personIds", "personids")),
+		GenreIDs:         splitOpt(firstQueryValue(c, "GenreIds", "genreIds", "genreids")),
+		Genres:           splitOpt(firstQueryValue(c, "Genres", "genres", "Genre", "genre")),
 		SearchTerm:       firstQueryValue(c, "SearchTerm", "searchTerm", "searchterm"),
 		NameStartsWith:   firstQueryValue(c, "NameStartsWith", "nameStartsWith", "namestartswith"),
 		IncludeItemTypes: splitOpt(firstQueryValue(c, "IncludeItemTypes", "includeItemTypes", "includeitemtypes")),
@@ -69,6 +71,17 @@ func embyItemsHandler(svc *service.Container) gin.HandlerFunc {
 func embyPersonsHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		out, err := svc.Emby.Persons(c.Request.Context(), parseEmbyItemsParams(c))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+func embyGenresHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		out, err := svc.Emby.Genres(c.Request.Context(), parseEmbyItemsParams(c))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

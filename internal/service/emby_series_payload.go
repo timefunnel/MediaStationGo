@@ -26,6 +26,8 @@ func (e *EmbyService) seriesPayload(group embySeriesGroup) map[string]any {
 		"DateCreated":        group.CreatedAt,
 		"ImageTags":          imageTags,
 		"BackdropImageTags":  backdropTags,
+		"Genres":             group.Genres,
+		"GenreItems":         embyGenreItems(group.Genres),
 		"ProviderIds": map[string]string{
 			"Tmdb":    intToStr(group.TMDbID),
 			"Bangumi": intToStr(group.BangumiID),
@@ -63,6 +65,8 @@ func (e *EmbyService) seasonPayload(season embySeasonGroup) map[string]any {
 		"ChildCount":        len(season.Episodes),
 		"ImageTags":         imageTags,
 		"BackdropImageTags": backdropTags,
+		"Genres":            season.Series.Genres,
+		"GenreItems":        embyGenreItems(season.Series.Genres),
 		"UserData":          emptyUserData(),
 	}
 	embyAttachImageOwnerIDs(item)

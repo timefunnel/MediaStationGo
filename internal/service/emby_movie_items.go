@@ -75,6 +75,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		if err := epQ.Find(&episodicRows).Error; err != nil {
 			return nil, err
 		}
+		episodicRows = e.filterMediaRowsByEmbyGenres(episodicRows, p)
 	}
 	seriesGroups := e.seriesGroupsFromMedia(episodicRows)
 	if includeSeries && hasMultipart {
@@ -88,6 +89,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 			Limit(embySeriesGroupingLimit).Find(&multipartRows).Error; err != nil {
 			return nil, err
 		}
+		multipartRows = e.filterMediaRowsByEmbyGenres(multipartRows, p)
 		seriesGroups = append(seriesGroups, e.multipartSeriesGroupsFromMedia(multipartRows)...)
 	}
 
@@ -104,6 +106,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		if err := movieQ.Find(&movieRows).Error; err != nil {
 			return nil, err
 		}
+		movieRows = e.filterMediaRowsByEmbyGenres(movieRows, p)
 	}
 	movieItems, err := e.payloadsForMedia(ctx, movieRows, p.UserID)
 	if err != nil {

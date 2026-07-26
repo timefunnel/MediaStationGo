@@ -16,6 +16,9 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 	if personName, ok := embyPersonName(mediaID); ok {
 		return e.personItem(ctx, userID, personName)
 	}
+	if genreName, ok := embyGenreName(mediaID); ok {
+		return e.genreItem(ctx, userID, genreName)
+	}
 	if lib, err := e.repo.Library.FindByID(ctx, mediaID); err != nil {
 		return nil, err
 	} else if lib != nil {
@@ -295,6 +298,7 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		userData["LastPlayedDate"] = watchedAtValues[0].UTC().Format(time.RFC3339Nano)
 	}
 	people := e.embyPeopleFromCSV(ctx, m.Actors)
+	genres := e.embyGenresForMedia(m, "")
 
 	item := map[string]any{
 		"Id":                m.ID,
@@ -324,7 +328,8 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 		"SeriesName":        seriesName,
 		"ImageTags":         imageTags,
 		"BackdropImageTags": backdropTags,
-		"Genres":            splitCSV(m.Genres),
+		"Genres":            genres,
+		"GenreItems":        embyGenreItems(genres),
 		"People":            people,
 		"ProviderIds": map[string]string{
 			"Tmdb":    intToStr(m.TMDbID),

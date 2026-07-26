@@ -130,6 +130,8 @@ type ItemsParams struct {
 	ParentID         string
 	IDs              []string
 	PersonIDs        []string
+	GenreIDs         []string
+	Genres           []string
 	SearchTerm       string
 	NameStartsWith   string
 	IncludeItemTypes []string
@@ -178,6 +180,11 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 	if len(p.IncludeItemTypes) > 0 && !containsSupportedEmbyItemType(p.IncludeItemTypes) {
 		return emptyItemsEnvelope(p.StartIndex), nil
 	}
+	if genre, ok := embyGenreName(p.ParentID); ok {
+		p.ParentID = ""
+		p.Genres = append(p.Genres, genre)
+		p.Recursive = true
+	}
 	p = normalizeEmbyGlobalSearchParams(p)
 
 	if len(p.IDs) > 0 {
@@ -209,7 +216,7 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 	}
 
-	if p.ParentID == "" && !embyHasMediaSearch(p) && !p.Recursive && len(p.IncludeItemTypes) == 0 && len(p.Filters) == 0 {
+	if p.ParentID == "" && !embyHasMediaFilter(p) && !p.Recursive && len(p.IncludeItemTypes) == 0 && len(p.Filters) == 0 {
 		return e.Views(ctx, p.UserID)
 	}
 

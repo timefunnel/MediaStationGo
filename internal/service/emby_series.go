@@ -21,6 +21,7 @@ type embySeriesGroup struct {
 	ReleaseDate string
 	TMDbID      int
 	BangumiID   int
+	Genres      []string
 	CreatedAt   time.Time
 	Episodes    []model.Media
 }
@@ -133,6 +134,7 @@ func (e *EmbyService) seriesGroupsFromMedia(rows []model.Media) []embySeriesGrou
 				ReleaseDate: row.ReleaseDate,
 				TMDbID:      row.TMDbID,
 				BangumiID:   row.BangumiID,
+				Genres:      e.embyGenresForMedia(&row, ""),
 				CreatedAt:   row.CreatedAt,
 			}
 			byID[seriesID] = group
@@ -164,6 +166,7 @@ func (e *EmbyService) seriesGroupsFromMedia(rows []model.Media) []embySeriesGrou
 		if group.Year == 0 && row.Year > 0 {
 			group.Year = row.Year
 		}
+		group.Genres = uniqueFoldedStrings(append(group.Genres, e.embyGenresForMedia(&row, "")...))
 		group.Episodes = append(group.Episodes, row)
 	}
 	groups := make([]embySeriesGroup, 0, len(order))

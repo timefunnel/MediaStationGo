@@ -83,4 +83,7 @@ func TestAttachLibraryMetadataUsesEmbyAdultDisplayTitle(t *testing.T) {
 	if items[0].DisplayTitle != "SSIS-218 测试标题" {
 		t.Fatalf("display_title = %q", items[0].DisplayTitle)
 	}
+	if items[0].AutoCategory != "成人" {
+		t.Fatalf("auto_category = %q, want 成人", items[0].AutoCategory)
+	}
 }

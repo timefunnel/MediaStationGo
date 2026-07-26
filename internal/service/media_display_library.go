@@ -23,6 +23,10 @@ func (s *MediaService) attachLibraryMetadata(ctx context.Context, items []model.
 		byID[lib.ID] = lib
 	}
 	resolver := newMediaDisplayLibraryResolver(ctx, s.repo, libs)
+	var categories map[string]string
+	if s.cfg != nil {
+		categories = s.cfg.Organizer.Categories
+	}
 	for i := range items {
 		var own model.Library
 		var hasOwn bool
@@ -49,6 +53,11 @@ func (s *MediaService) attachLibraryMetadata(ctx context.Context, items []model.
 		if items[i].DisplayTitle == items[i].Title {
 			items[i].DisplayTitle = ""
 		}
+		mediaType := ""
+		if hasOwn {
+			mediaType = own.Type
+		}
+		items[i].AutoCategory = automaticMediaCategory(&items[i], mediaType, categories)
 	}
 }
 

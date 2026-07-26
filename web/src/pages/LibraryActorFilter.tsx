@@ -1,44 +1,93 @@
-import { UserRound, X } from 'lucide-react'
+import { Tags, UserRound, X } from 'lucide-react'
 
+import type { ReactNode } from 'react'
 import type { ActorFacet } from './libraryActorFilterModel'
+import type { CategoryFacet } from './libraryCategoryFilterModel'
 
-export function LibraryActorFilter({
+export function LibraryFilterBar({
+  categories,
+  selectedCategory,
+  onCategoryChange,
   actors,
-  selected,
-  onChange,
+  selectedActor,
+  onActorChange,
 }: {
+  categories: CategoryFacet[]
+  selectedCategory: string
+  onCategoryChange: (category: string) => void
   actors: ActorFacet[]
-  selected: string
-  onChange: (actor: string) => void
+  selectedActor: string
+  onActorChange: (actor: string) => void
 }) {
-  if (actors.length === 0) return null
+  if (categories.length === 0 && actors.length === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-y border-gray-200 py-3">
-      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-brand-600" title="按演员筛选">
-        <UserRound size={18} />
+    <div className="grid gap-2 border-y border-gray-200 py-3 sm:grid-cols-2">
+      {categories.length > 0 && (
+        <FilterSelect
+          icon={<Tags size={18} />}
+          label="按自动分类筛选"
+          emptyLabel="全部分类"
+          value={selectedCategory}
+          options={categories}
+          onChange={onCategoryChange}
+        />
+      )}
+      {actors.length > 0 && (
+        <FilterSelect
+          icon={<UserRound size={18} />}
+          label="按演员筛选"
+          emptyLabel="全部演员"
+          value={selectedActor}
+          options={actors}
+          onChange={onActorChange}
+        />
+      )}
+    </div>
+  )
+}
+
+function FilterSelect({
+  icon,
+  label,
+  emptyLabel,
+  value,
+  options,
+  onChange,
+}: {
+  icon: ReactNode
+  label: string
+  emptyLabel: string
+  value: string
+  options: Array<{ name: string; count: number }>
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-brand-600" title={label}>
+        {icon}
       </span>
-      <label className="min-w-0 flex-1 sm:max-w-sm">
-        <span className="sr-only">按演员筛选</span>
+      <label className="min-w-0 flex-1">
+        <span className="sr-only">{label}</span>
         <select
           className="input-base h-11 w-full py-2 text-base leading-6 sm:text-sm"
-          value={selected}
+          value={value}
           onChange={(event) => onChange(event.target.value)}
         >
-          <option value="">全部演员</option>
-          {actors.map((actor) => (
-            <option key={actor.name} value={actor.name}>
-              {actor.name} ({actor.count})
+          <option value="">{emptyLabel}</option>
+          {options.map((option) => (
+            <option key={option.name} value={option.name}>
+              {option.name} ({option.count})
             </option>
           ))}
         </select>
       </label>
-      {selected && (
+      {value && (
         <button
           type="button"
           className="btn-ghost h-10 w-10 shrink-0 justify-center p-0"
-          title="清除演员筛选"
-          aria-label="清除演员筛选"
+          title={`清除${label.replace('按', '')}`}
+          aria-label={`清除${label.replace('按', '')}`}
           onClick={() => onChange('')}
         >
           <X size={17} />

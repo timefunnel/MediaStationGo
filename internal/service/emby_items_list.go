@@ -73,10 +73,6 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		q = e.filterEpisodeItems(ctx, q)
 	}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, err
-	}
 	desc := !strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending")
 	order := mediaReleaseOrderSQL(true)
 	orderIncludesDirection := true
@@ -102,10 +98,36 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		}
 	}
 
-	fetchLimit := p.Limit
-	fetchOffset := p.StartIndex
 	collapseVersions := e.shouldCollapseMediaVersions(ctx, p)
 	collapseAllMultipart := p.ParentID != "" && e.libraryHasMultipartContent(ctx, p.ParentID)
+	if hasEmbyGenreFilter(p) {
+		var rows []model.Media
+		if err := q.Order(order).Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		rows = e.filterMediaRowsByEmbyGenres(rows, p)
+		if collapseVersions {
+			rows = e.collapseMediaVersionRows(ctx, rows)
+		}
+		total := int64(len(rows))
+		rows = pageSlice(rows, p.StartIndex, p.Limit)
+		items, err := e.payloadsForMedia(ctx, rows, p.UserID)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}
+		if e.cache != nil {
+			e.cache.SetJSON(ctx, cacheKey, embyItemsCacheValue{Items: items, TotalRecordCount: total, StartIndex: p.StartIndex}, e.embyMediaCacheTTL())
+		}
+		return out, nil
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	fetchLimit := p.Limit
+	fetchOffset := p.StartIndex
 	if fetchLimit > 0 && collapseVersions {
 		// Duplicates across merged local/cloud libraries collapse into one Emby
 		// item with multiple MediaSources. Fetch a wider window so duplicates do
@@ -150,6 +172,7 @@ func (e *EmbyService) episodeItems(ctx context.Context, rows []model.Media, p It
 		}
 		rows = filtered
 	}
+	rows = e.filterMediaRowsByEmbyGenres(rows, p)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].SeasonNum != rows[j].SeasonNum {
 			return rows[i].SeasonNum < rows[j].SeasonNum
@@ -284,6 +307,7 @@ func (e *EmbyService) seriesItemsForLibrary(ctx context.Context, libraryID strin
 	if err := q.Order(mediaReleaseOrderSQL(true)).Limit(embySeriesGroupingLimit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	rows = e.filterMediaRowsByEmbyGenres(rows, p)
 	groups := e.seriesGroupsFromMedia(rows)
 	partQ := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Where("COALESCE(part_group_key, '') <> ''")
@@ -297,6 +321,7 @@ func (e *EmbyService) seriesItemsForLibrary(ctx context.Context, libraryID strin
 		Limit(embySeriesGroupingLimit).Find(&multipartRows).Error; err != nil {
 		return nil, err
 	}
+	multipartRows = e.filterMediaRowsByEmbyGenres(multipartRows, p)
 	groups = append(groups, e.multipartSeriesGroupsFromMedia(multipartRows)...)
 	sortSeriesGroups(groups, p)
 	total := len(groups)

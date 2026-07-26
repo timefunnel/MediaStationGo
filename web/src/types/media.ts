@@ -7,6 +7,7 @@ export interface Media {
   display_library_id?: string
   display_library_name?: string
   display_library_path?: string
+  auto_category?: string
   series_id?: string
   title: string
   display_title?: string
