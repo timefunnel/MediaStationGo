@@ -1,7 +1,7 @@
 import { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Library as LibraryIcon, Search } from 'lucide-react'
+import { Library as LibraryIcon, Search, X } from 'lucide-react'
 import clsx from 'clsx'
 
 import { imageURL } from '../api/client'
@@ -16,6 +16,7 @@ type LayoutSearchBoxProps = {
   cards: SeriesCard[]
   total: number
   onQueryChange: (value: string) => void
+  onClear: () => void
   onFocusedChange: (focused: boolean) => void
   onSubmit: (event: FormEvent) => void
 }
@@ -28,6 +29,7 @@ export function LayoutSearchBox({
   cards,
   total,
   onQueryChange,
+  onClear,
   onFocusedChange,
   onSubmit,
 }: LayoutSearchBoxProps) {
@@ -52,11 +54,24 @@ export function LayoutSearchBox({
         placeholder="搜索片名、原名、演员或类型..."
         className="w-full rounded-full border border-[var(--app-border)] bg-[var(--app-control-bg)] py-2.5 pl-11 pr-12 text-sm text-[var(--app-text)] placeholder:text-[var(--app-muted)] outline-none transition-all duration-300 focus:border-brand-500 focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-brand-100/40"
       />
-      <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
-        <span className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--app-muted)]">
-          Enter
-        </span>
-      </div>
+      {query.length > 0 ? (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onClear}
+          title="清空搜索"
+          aria-label="清空搜索"
+          className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]"
+        >
+          <X size={15} />
+        </button>
+      ) : (
+        <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
+          <span className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--app-muted)]">
+            Enter
+          </span>
+        </div>
+      )}
       <AnimatePresence>
         {focused && trimmedQuery && (
           <motion.div

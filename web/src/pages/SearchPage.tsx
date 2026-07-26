@@ -20,6 +20,7 @@ export function SearchPage() {
         aiOn={search.aiOn}
         query={search.q}
         onQueryChange={search.setQ}
+        onClear={search.clearQuery}
         onAISubmit={search.onAISubmit}
       />
 

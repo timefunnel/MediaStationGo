@@ -73,8 +73,28 @@ export function useLayoutSearch({ pathname, locationSearch, navigate }: UseLayou
     }
   }
 
+  const clear = () => {
+    ++searchSeq.current
+    setQuery('')
+    setCards([])
+    setTotal(0)
+    setError('')
+    setLoading(false)
+    setFocused(true)
+
+    if (pathname === '/search') {
+      const next = new URLSearchParams(locationSearch)
+      if (next.has('q')) {
+        next.delete('q')
+        const search = next.toString()
+        navigate({ pathname, search: search ? `?${search}` : '' }, { replace: true })
+      }
+    }
+  }
+
   return {
     cards,
+    clear,
     error,
     focused,
     loading,

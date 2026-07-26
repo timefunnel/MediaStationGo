@@ -13,7 +13,7 @@ function apiErrorMessage(err: unknown, fallback: string): string {
 }
 
 export function useSearchPage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const urlQuery = searchParams.get('q') ?? ''
   const [q, setQ] = useState('')
   const [localCards, setLocalCards] = useState<SeriesCard[]>([])
@@ -129,6 +129,27 @@ export function useSearchPage() {
     }
   }, [loading, loadingMore, localCards.length, nextPage, q, searchTotal])
 
+  const clearQuery = useCallback(() => {
+    activeController.current?.abort()
+    ++searchSeq.current
+    setQ('')
+    setLocalCards([])
+    setExternalItems([])
+    setIntent(null)
+    setSearchTotal(0)
+    setNextPage(2)
+    setHasSearched(false)
+    setLoading(false)
+    setLoadingMore(false)
+    setError('')
+
+    const next = new URLSearchParams(searchParams)
+    if (next.has('q')) {
+      next.delete('q')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
   const onAISubmit = async (event: FormEvent) => {
     event.preventDefault()
     const trimmedQuery = q.trim()
@@ -158,6 +179,7 @@ export function useSearchPage() {
   return {
     aiAvailable,
     aiOn,
+    clearQuery,
     error,
     externalItems,
     hasMore: !aiOn && localCards.length < searchTotal,
