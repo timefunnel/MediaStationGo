@@ -299,7 +299,7 @@ func TestEmbyUserItemByIDRouteReturnsLibraryView(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatalf("decode item: %v", err)
 	}
-	if item["Id"] != "lib-tv" || item["Type"] != "CollectionFolder" || item["CollectionType"] != "tvshows" {
+	if item["Id"] != "lib-tv" || item["Type"] != "CollectionFolder" || item["CollectionType"] != "tvshows" || item["MediaStationLibraryType"] != "tv" {
 		t.Fatalf("unexpected library payload: %#v", item)
 	}
 }

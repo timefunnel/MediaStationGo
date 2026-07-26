@@ -355,6 +355,13 @@ func TestAdminBlockedUserFiltersAdultWorksInsideMixedLibrary(t *testing.T) {
 	if got := sortedMediaTitles(items); !slices.Equal(got, []string{"普通作品"}) {
 		t.Fatalf("blocked search leaked adult works: %#v", got)
 	}
+	works, total, err := svc.SearchMediaVisibleSeriesPage(t.Context(), "作品", 1, 20, visibility)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(works) != 1 || works[0].Rep.Title != "普通作品" {
+		t.Fatalf("blocked work search leaked adult works: total=%d works=%#v", total, works)
+	}
 	recent, err := svc.ListRecentSeriesCards(t.Context(), 20, visibility)
 	if err != nil {
 		t.Fatal(err)

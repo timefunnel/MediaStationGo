@@ -42,8 +42,8 @@ func applyEmbyMediaSearch(q *gorm.DB, p ItemsParams) *gorm.DB {
 	for _, term := range search.terms {
 		pattern := "%" + escapeEmbyLike(term) + "%"
 		q = q.Where(
-			"(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.actors, '')) LIKE ? ESCAPE '\\')",
-			pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+			"(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.actors, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.search_pinyin, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.search_initials, '')) LIKE ? ESCAPE '\\')",
+			pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
 		)
 	}
 	return q
@@ -75,6 +75,8 @@ func embyMediaMatchesSearch(row model.Media, p ItemsParams) bool {
 		strings.ToLower(row.Overview),
 		strings.ToLower(row.Genres),
 		strings.ToLower(row.Actors),
+		strings.ToLower(row.SearchPinyin),
+		strings.ToLower(row.SearchInitials),
 	)
 	for _, term := range search.terms {
 		matched := false

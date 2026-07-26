@@ -163,6 +163,7 @@ func (e *EmbyService) libraryAsView(ctx context.Context, l *model.Library) map[s
 		"Id":                       l.ID,
 		"Name":                     l.Name,
 		"CollectionType":           collectionType,
+		"MediaStationLibraryType":  strings.ToLower(strings.TrimSpace(l.Type)),
 		"ServerId":                 embyServerID,
 		"Type":                     "CollectionFolder",
 		"IsFolder":                 true,

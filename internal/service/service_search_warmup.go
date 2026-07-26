@@ -30,6 +30,7 @@ func (c *Container) warmMediaSearchIndex(ctx context.Context) {
 	}
 	batchSize := mediaSearchWarmupBatchSize(ctx, c.Repo)
 	pause := mediaSearchWarmupPause(ctx, c.Repo)
+	idle := mediaSearchWarmupIdleInterval(ctx, c.Repo)
 	total := int64(0)
 	for {
 		select {
@@ -37,16 +38,31 @@ func (c *Container) warmMediaSearchIndex(ctx context.Context) {
 			return
 		default:
 		}
-		n, err := c.Repo.Media.BackfillSearchIndex(ctx, batchSize)
+		aliases, err := c.Repo.Media.BackfillSearchAliases(ctx, batchSize)
 		if err != nil {
 			c.Log.Debug("media search index warmup stopped", zap.Error(err))
 			return
 		}
+		n := aliases
+		if aliases == 0 {
+			indexed, err := c.Repo.Media.BackfillSearchIndex(ctx, batchSize)
+			if err != nil {
+				c.Log.Debug("media search index warmup stopped", zap.Error(err))
+				return
+			}
+			n = indexed
+		}
 		if n == 0 {
 			if total > 0 {
-				c.Log.Info("media search index warmed", zap.Int64("indexed", total))
+				c.Log.Info("media search index warmed", zap.Int64("updated", total))
 			}
-			return
+			total = 0
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(idle):
+			}
+			continue
 		}
 		total += n
 		select {
@@ -55,6 +71,14 @@ func (c *Container) warmMediaSearchIndex(ctx context.Context) {
 		case <-time.After(pause):
 		}
 	}
+}
+
+func mediaSearchWarmupIdleInterval(ctx context.Context, repo *repository.Container) time.Duration {
+	seconds := mediaSearchWarmupIntSetting(ctx, repo, "search.index_warmup_idle_seconds", 60)
+	if seconds < 30 {
+		seconds = 30
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func mediaSearchWarmupEnabled(ctx context.Context, repo *repository.Container) bool {

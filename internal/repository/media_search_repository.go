@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
@@ -93,7 +94,13 @@ func (r *MediaRepository) searchFilteredFTS(ctx context.Context, query string, o
 	if total == 0 {
 		return items, 0, true
 	}
-	err := q.Select("media.*").Order("bm25(media_search_fts), media.created_at DESC").Offset(offset).Limit(limit).Find(&items).Error
+	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+	prefix := escapeLike(normalizedQuery) + "%"
+	order := gorm.Expr(
+		"CASE WHEN LOWER(COALESCE(media.title, '')) = ? THEN 0 WHEN LOWER(COALESCE(media.original_name, '')) = ? THEN 1 WHEN LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' THEN 2 WHEN LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\' THEN 3 ELSE 4 END, bm25(media_search_fts, 0.0, 12.0, 8.0, 1.0, 3.0, 4.0, 2.0, 2.0), media.created_at DESC",
+		normalizedQuery, normalizedQuery, prefix, prefix,
+	)
+	err := q.Select("media.*").Clauses(clause.OrderBy{Expression: order}).Offset(offset).Limit(limit).Find(&items).Error
 	if err != nil {
 		return nil, 0, false
 	}
@@ -109,8 +116,8 @@ func (r *MediaRepository) searchFilteredLIKE(ctx context.Context, query string, 
 	for _, term := range terms {
 		like := "%" + escapeLike(term) + "%"
 		q = q.Where(
-			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(actors, '')) LIKE ? ESCAPE '\\')",
-			like, like, like, like, like, like, like,
+			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(actors, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(search_pinyin, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(search_initials, '')) LIKE ? ESCAPE '\\')",
+			like, like, like, like, like, like, like, like, like,
 		)
 	}
 	if err := q.Count(&total).Error; err != nil {
@@ -120,10 +127,11 @@ func (r *MediaRepository) searchFilteredLIKE(ctx context.Context, query string, 
 		normalizedQuery := strings.ToLower(strings.TrimSpace(query))
 		prefix := escapeLike(normalizedQuery) + "%"
 		exact := normalizedQuery
-		q = q.Order(gorm.Expr(
+		order := gorm.Expr(
 			"CASE WHEN LOWER(COALESCE(title, '')) = ? THEN 0 WHEN LOWER(COALESCE(original_name, '')) = ? THEN 1 WHEN LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' THEN 2 WHEN LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' THEN 3 ELSE 4 END, created_at desc",
 			exact, exact, prefix, prefix,
-		))
+		)
+		q = q.Clauses(clause.OrderBy{Expression: order})
 	} else {
 		q = q.Order("created_at desc")
 	}
@@ -207,8 +215,8 @@ func (r *MediaRepository) BackfillSearchIndex(ctx context.Context, batchLimit in
 	// 上百亿次行访问，曾把 CPU 钉满数小时。v2 布局下 FTS 行 rowid 与
 	// media.rowid 对齐，NOT EXISTS 走 rowid 点查，且无需排序。
 	res := r.db.WithContext(ctx).Exec(`
-INSERT INTO media_search_fts(rowid, media_id, title, original_name, path, genres)
-SELECT m.rowid, m.id, COALESCE(m.title, ''), COALESCE(m.original_name, ''), COALESCE(m.path, ''), COALESCE(m.genres, '')
+INSERT INTO media_search_fts(rowid, media_id, title, original_name, path, genres, actors, search_pinyin, search_initials)
+SELECT m.rowid, m.id, COALESCE(m.title, ''), COALESCE(m.original_name, ''), COALESCE(m.path, ''), COALESCE(m.genres, ''), COALESCE(m.actors, ''), COALESCE(m.search_pinyin, ''), COALESCE(m.search_initials, '')
 FROM media AS m
 WHERE m.deleted_at IS NULL
   AND NOT EXISTS (

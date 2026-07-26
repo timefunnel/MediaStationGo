@@ -77,6 +77,9 @@ func TestEmbyVirtualFoldersRouteReturnsJSON(t *testing.T) {
 	if folders[1]["CollectionType"] != "tvshows" || folders[2]["CollectionType"] != "tvshows" {
 		t.Fatalf("episodic libraries should expose tvshows collection type: %#v", folders)
 	}
+	if folders[0]["MediaStationLibraryType"] != "movie" || folders[1]["MediaStationLibraryType"] != "tv" {
+		t.Fatalf("folders should expose explicit MediaStation library types: %#v", folders)
+	}
 }
 
 func TestEmbyItemsCountsRouteReturnsJSON(t *testing.T) {

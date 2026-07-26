@@ -30,6 +30,7 @@ func (r *MediaRepository) Upsert(ctx context.Context, m *model.Media) error {
 }
 
 func (r *MediaRepository) upsert(ctx context.Context, m *model.Media) error {
+	prepareMediaSearchAliases(m)
 	existing, created, err := r.findOrCreateMediaByPath(ctx, m)
 	if err != nil {
 		return err
@@ -297,10 +298,25 @@ func (r *MediaRepository) applyMediaUpsertUpdates(ctx context.Context, m *model.
 	}
 	// 回写 ID / 不可变字段，让 caller 拿到完整的现有行。
 	*m = existing
-	if fresh, err := r.FindByID(ctx, existing.ID); err == nil && fresh != nil {
-		*m = *fresh
-		r.indexMediaBestEffort(ctx, *fresh)
+	fresh, err := r.FindByID(ctx, existing.ID)
+	if err != nil {
+		return err
 	}
+	if fresh == nil {
+		return errors.New("updated media not found")
+	}
+	*m = *fresh
+	if err := r.RefreshSearchAliases(ctx, fresh.ID); err != nil {
+		return err
+	}
+	indexed, err := r.FindByID(ctx, fresh.ID)
+	if err != nil {
+		return err
+	}
+	if indexed == nil {
+		return errors.New("updated media search aliases not found")
+	}
+	*m = *indexed
 	return nil
 }
 

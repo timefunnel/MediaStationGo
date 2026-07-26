@@ -42,6 +42,9 @@ export function SearchPage() {
         itemCount={search.itemCount}
         searchTotal={search.searchTotal}
         loading={search.loading}
+        loadingMore={search.loadingMore}
+        hasMore={search.hasMore}
+        onLoadMore={() => void search.loadMore()}
       />
 
       {search.externalItems.length > 0 && (

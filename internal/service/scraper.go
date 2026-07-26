@@ -184,6 +184,9 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 			s.fetchAndSaveTMDbEpisodeDetails(ctx, m, match.TMDbID, match.Year, options)
 		}
 	}
+	if err := s.repo.Media.RefreshSearchAliases(ctx, m.ID); err != nil {
+		return err
+	}
 	if !(options.DeferEpisodeDetails && m != nil && m.EpisodeNum > 0) {
 		s.writeMediaNFOAfterScrape(ctx, m, lib)
 	}

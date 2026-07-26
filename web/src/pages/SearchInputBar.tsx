@@ -29,7 +29,7 @@ export function SearchInputBar({ aiOn, query, onQueryChange, onAISubmit }: Searc
     <input
       autoFocus
       className="input-base"
-      placeholder="按标题搜索…"
+      placeholder="搜索片名、原名、演员或类型…"
       value={query}
       onChange={(e: ChangeEvent<HTMLInputElement>) => onQueryChange(e.target.value)}
     />

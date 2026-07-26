@@ -240,3 +240,42 @@ func TestSearchMediaVisiblePageGroupedPaginatesAfterVersionGrouping(t *testing.T
 		t.Fatalf("primary version = %q, want %q", page[0].Media.Path, rows[0].Path)
 	}
 }
+
+func TestSearchMediaVisibleSeriesPagePaginatesWorksAndKeepsExactMatchFirst(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	lib := model.Library{Name: "电影", Path: "/media/movies", Type: "movie", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{LibraryID: lib.ID, Title: "黑衣人归来", Path: "/media/movies/returns/movie.mkv"},
+		{LibraryID: lib.ID, Title: "黑衣人", Path: "/media/movies/men-in-black/mib-4k.mkv", TMDbID: 607, Width: 3840},
+		{LibraryID: lib.ID, Title: "黑衣人", Path: "/media/movies/men-in-black/mib-1080p.mkv", TMDbID: 607, Width: 1920},
+		{LibraryID: lib.ID, Title: "黑衣人：全球追缉", Path: "/media/movies/international/movie.mkv"},
+	}
+	for i := range rows {
+		if err := repos.Media.Upsert(t.Context(), &rows[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+	firstPage, total, err := svc.SearchMediaVisibleSeriesPage(t.Context(), "黑衣人", 1, 1, MediaVisibility{IncludeNSFW: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Fatalf("work total = %d, want 3", total)
+	}
+	if len(firstPage) != 1 || firstPage[0].Rep.Title != "黑衣人" || firstPage[0].Count != 2 {
+		t.Fatalf("first work should be exact-title grouped versions, got %#v", firstPage)
+	}
+	secondPage, secondTotal, err := svc.SearchMediaVisibleSeriesPage(t.Context(), "黑衣人", 2, 1, MediaVisibility{IncludeNSFW: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondTotal != total || len(secondPage) != 1 || secondPage[0].Rep.Title == "黑衣人" {
+		t.Fatalf("second work page = %#v total=%d", secondPage, secondTotal)
+	}
+}

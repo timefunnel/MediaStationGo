@@ -76,3 +76,24 @@ func (s *MediaService) SearchMediaVisiblePageGrouped(ctx context.Context, query 
 	grouped := groupMediaVersions(items)
 	return paginateMediaItems(grouped, page, pageSize), int64(len(grouped)), nil
 }
+
+func (s *MediaService) SearchMediaVisibleSeriesPage(ctx context.Context, query string, page, pageSize int, visibility MediaVisibility) ([]SeriesCard, int64, error) {
+	page, pageSize = normalizeGroupedMediaPage(page, pageSize)
+	items, err := s.SearchMediaVisible(ctx, query, maxMediaSearchLimit, visibility)
+	if err != nil {
+		return nil, 0, err
+	}
+	cards := groupMediaSearchCards(items)
+	if len(cards) == 0 {
+		return []SeriesCard{}, 0, nil
+	}
+	start := (page - 1) * pageSize
+	if start >= len(cards) {
+		return []SeriesCard{}, int64(len(cards)), nil
+	}
+	end := start + pageSize
+	if end > len(cards) {
+		end = len(cards)
+	}
+	return cards[start:end], int64(len(cards)), nil
+}

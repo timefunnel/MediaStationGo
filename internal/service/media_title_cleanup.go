@@ -175,6 +175,11 @@ func (s *MediaService) ApplyTitleCleanup(ctx context.Context, libraryID string, 
 	if err != nil {
 		return nil, err
 	}
+	for _, row := range rows {
+		if err := s.repo.Media.RefreshSearchAliases(ctx, row.ID); err != nil {
+			return nil, err
+		}
+	}
 	s.invalidateMediaCache(ctx)
 	return &MediaTitleCleanupApplyResult{Updated: len(rows)}, nil
 }

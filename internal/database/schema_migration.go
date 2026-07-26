@@ -29,11 +29,49 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := ensurePerformanceIndexes(db); err != nil {
 		return err
 	}
+	if err := ensureMediaSearchAliasInvalidation(db); err != nil {
+		return err
+	}
 	if err := ensureLibraryRootsCompatibility(db); err != nil {
 		return err
 	}
 	if isSQLite(db) {
 		return ensureMediaSearchIndex(db)
+	}
+	return nil
+}
+
+func ensureMediaSearchAliasInvalidation(db *gorm.DB) error {
+	switch {
+	case isSQLite(db):
+		return db.Exec(`
+CREATE TRIGGER IF NOT EXISTS media_search_alias_dirty
+AFTER UPDATE OF title, original_name, genres, actors ON media
+WHEN new.search_alias_version = old.search_alias_version
+BEGIN
+  UPDATE media SET search_alias_version = 0 WHERE id = new.id;
+END`).Error
+	case isPostgres(db):
+		for _, stmt := range []string{
+			`CREATE OR REPLACE FUNCTION mark_media_search_alias_dirty() RETURNS trigger AS $$
+BEGIN
+  IF (OLD.title, OLD.original_name, OLD.genres, OLD.actors)
+     IS DISTINCT FROM
+     (NEW.title, NEW.original_name, NEW.genres, NEW.actors) THEN
+    NEW.search_alias_version = 0;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql`,
+			`DROP TRIGGER IF EXISTS media_search_alias_dirty ON media`,
+			`CREATE TRIGGER media_search_alias_dirty
+BEFORE UPDATE OF title, original_name, genres, actors ON media
+FOR EACH ROW EXECUTE FUNCTION mark_media_search_alias_dirty()`,
+		} {
+			if err := db.Exec(stmt).Error; err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -272,11 +272,29 @@ func updateMediaMetadataHandler(svc *service.Container) gin.HandlerFunc {
 
 func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		q := c.Query("q")
+		q := strings.TrimSpace(c.Query("q"))
+		if len([]rune(q)) > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "搜索词长度不能超过 100 个字符"})
+			return
+		}
 		groupVersions := c.DefaultQuery("group_versions", "1") != "0"
 		if c.Query("page") != "" || c.Query("page_size") != "" {
 			page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 			size, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+			if c.Query("group_series") == "1" {
+				items, total, err := svc.Media.SearchMediaVisibleSeriesPage(c.Request.Context(), q, page, size, mediaVisibilityForRequest(c, svc))
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"items":     items,
+					"total":     total,
+					"page":      page,
+					"page_size": size,
+				})
+				return
+			}
 			if !groupVersions {
 				items, total, err := svc.Media.SearchMediaVisiblePage(c.Request.Context(), q, page, size, mediaVisibilityForRequest(c, svc))
 				if err != nil {

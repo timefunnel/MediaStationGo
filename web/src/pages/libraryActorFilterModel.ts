@@ -5,6 +5,10 @@ export interface ActorFacet {
   count: number
 }
 
+export function librarySupportsActorFilter(libraryType?: string): boolean {
+  return libraryType === 'adult'
+}
+
 const nonActorFacetKeys = new Set([
   'actor',
   'actors',

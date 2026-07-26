@@ -19,7 +19,7 @@ import { LibraryResourceImportStatus } from './LibraryResourceImportStatus'
 import { ResourceSearchDrawer } from './ResourceSearchDrawer'
 import { resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './resourceImportModel'
 import { LibraryFilterBar } from './LibraryActorFilter'
-import { buildActorFacets, mediaHasActor } from './libraryActorFilterModel'
+import { buildActorFacets, librarySupportsActorFilter, mediaHasActor } from './libraryActorFilterModel'
 import { buildCategoryFacets, mediaHasCategory } from './libraryCategoryFilterModel'
 import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
 import { ManualMediaAggregationDialog } from '../components/ManualMediaAggregationDialog'
@@ -120,8 +120,13 @@ export function LibraryPage() {
   })
 
   const resourceImports = useLibraryResourceImports(id, userID, reloadCurrentLibrary)
-  const actorFacets = useMemo(() => buildActorFacets(items), [items])
-  const selectedActor = searchParams.get('actor')?.trim() ?? ''
+  const supportsActorFilter = librarySupportsActorFilter(library?.type)
+  const actorFacets = useMemo(
+    () => supportsActorFilter && !isSeries ? buildActorFacets(items) : [],
+    [isSeries, items, supportsActorFilter],
+  )
+  const requestedActor = searchParams.get('actor')?.trim() ?? ''
+  const selectedActor = supportsActorFilter ? requestedActor : ''
   const selectedCategory = searchParams.get('category')?.trim() ?? ''
   const categoryFacets = useMemo(
     () => buildCategoryFacets(isSeries ? seriesCards.map((series) => series.rep) : items),
@@ -138,11 +143,12 @@ export function LibraryPage() {
   )
 
   useEffect(() => {
-    if (loading || loadingAllText || !selectedActor || actorFacets.some((actor) => actor.name === selectedActor)) return
+    if (loading || !library || !requestedActor) return
+    if (supportsActorFilter && (loadingAllText || actorFacets.some((actor) => actor.name === requestedActor))) return
     const next = new URLSearchParams(searchParams)
     next.delete('actor')
     setSearchParams(next, { replace: true })
-  }, [actorFacets, loading, loadingAllText, searchParams, selectedActor, setSearchParams])
+  }, [actorFacets, library, loading, loadingAllText, requestedActor, searchParams, setSearchParams, supportsActorFilter])
 
   useEffect(() => {
     if (loading || loadingAllText || !selectedCategory || categoryFacets.some((category) => category.name === selectedCategory)) return
@@ -260,7 +266,7 @@ export function LibraryPage() {
         categories={categoryFacets}
         selectedCategory={selectedCategory}
         onCategoryChange={selectCategory}
-        actors={isSeries ? [] : actorFacets}
+        actors={supportsActorFilter ? actorFacets : []}
         selectedActor={selectedActor}
         onActorChange={selectActor}
       />

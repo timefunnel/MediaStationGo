@@ -60,6 +60,55 @@ func TestEmbySearchTermMatchesCaseInsensitiveTitleAndPath(t *testing.T) {
 	}
 }
 
+func TestEmbySearchTermMatchesPinyinAndCompactCode(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "媒体", Path: `/media/all`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	rows := []model.Media{
+		{Base: model.Base{ID: "men-in-black"}, LibraryID: lib.ID, Title: "黑衣人", Path: `/media/all/黑衣人.mkv`, Genres: "科幻"},
+		{Base: model.Base{ID: "mizd-534"}, LibraryID: lib.ID, Title: "MIZD-534", Path: `/media/all/MIZD-534.mp4`},
+	}
+	for i := range rows {
+		if err := svc.repo.Media.Upsert(t.Context(), &rows[i]); err != nil {
+			t.Fatalf("create media: %v", err)
+		}
+	}
+
+	for query, wantID := range map[string]string{
+		"heiyiren": "men-in-black",
+		"hyr":      "men-in-black",
+		"kehuan":   "men-in-black",
+		"mizd534":  "mizd-534",
+	} {
+		t.Run(query, func(t *testing.T) {
+			out, err := svc.Items(t.Context(), ItemsParams{ParentID: lib.ID, SearchTerm: query, Limit: 50})
+			if err != nil {
+				t.Fatalf("items: %v", err)
+			}
+			items := out["Items"].([]map[string]any)
+			if len(items) != 1 || items[0]["Id"] != wantID {
+				t.Fatalf("SearchTerm %q = %#v, want %q", query, items, wantID)
+			}
+		})
+	}
+}
+
+func TestEmbyLibraryViewExposesExplicitAdultType(t *testing.T) {
+	svc := newTestEmbyService(t)
+	view := svc.libraryAsView(t.Context(), &model.Library{
+		Base:    model.Base{ID: "adult-library"},
+		Name:    "成人",
+		Path:    "/media/adult",
+		Type:    "adult",
+		Enabled: true,
+	})
+	if view["CollectionType"] != "movies" || view["MediaStationLibraryType"] != "adult" {
+		t.Fatalf("adult library view = %#v", view)
+	}
+}
+
 func TestEmbyNameStartsWithMatchesTitlePrefixOnly(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "Adult", Path: `/media/adult`, Type: "movie", Enabled: true}

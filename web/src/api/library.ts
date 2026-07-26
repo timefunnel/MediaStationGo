@@ -214,6 +214,20 @@ export const mediaAPI = {
       })
       .then((r) => r.data),
 
+  searchSeriesPage: (q: string, page = 1, pageSize = 36, signal?: AbortSignal) =>
+    api
+      .get<SeriesPage>('/media', {
+        params: {
+          q,
+          page,
+          page_size: pageSize,
+          group_series: 1,
+        },
+        signal,
+        timeout: LONG_REQUEST_TIMEOUT,
+      })
+      .then((r) => r.data),
+
   get: (id: string) => api.get<Media>(`/media/${id}`).then((r) => r.data),
 
   listVersions: (id: string) => api.get<MediaVersionList>(`/media/${id}/versions`).then((r) => r.data),

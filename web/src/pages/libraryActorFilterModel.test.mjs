@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildActorFacets, isActorFacetName } from './libraryActorFilterModel.ts'
+import { buildActorFacets, isActorFacetName, librarySupportsActorFilter } from './libraryActorFilterModel.ts'
 
 test('演员筛选排除有码无码等分类标签', () => {
   const facets = buildActorFacets([
@@ -15,4 +15,12 @@ test('演员筛选排除有码无码等分类标签', () => {
   ])
   assert.equal(isActorFacetName('无码女优'), false)
   assert.equal(isActorFacetName('Actor Name'), true)
+})
+
+test('仅成人媒体库启用演员筛选', () => {
+  assert.equal(librarySupportsActorFilter('adult'), true)
+  assert.equal(librarySupportsActorFilter('movie'), false)
+  assert.equal(librarySupportsActorFilter('tv'), false)
+  assert.equal(librarySupportsActorFilter('anime'), false)
+  assert.equal(librarySupportsActorFilter(undefined), false)
 })

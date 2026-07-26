@@ -108,6 +108,9 @@ func (s *MediaService) UpdateMetadata(ctx context.Context, id string, req MediaM
 	if err := s.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return nil, err
 	}
+	if err := s.repo.Media.RefreshSearchAliases(ctx, id); err != nil {
+		return nil, err
+	}
 	s.invalidateMediaCache(ctx)
 	return s.repo.Media.FindByID(ctx, id)
 }

@@ -80,6 +80,9 @@ type Media struct {
 	Countries                string  `gorm:"size:128" json:"countries,omitempty"` // 逗号分隔的 ISO 3166-1，如 "CN,US"
 	Genres                   string  `gorm:"type:text" json:"genres,omitempty"`   // 逗号分隔的类型名，如 "Action,Animation"
 	Actors                   string  `gorm:"type:text" json:"actors,omitempty"`
+	SearchPinyin             string  `gorm:"type:text" json:"-"`
+	SearchInitials           string  `gorm:"type:text" json:"-"`
+	SearchAliasVersion       int     `gorm:"index;not null;default:0" json:"-"`
 	NSFW                     bool    `gorm:"default:false" json:"nsfw"`
 
 	// STRMURL is the indirection target for .strm files: when present the

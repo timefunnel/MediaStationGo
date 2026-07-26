@@ -96,6 +96,14 @@ func (s *MediaService) listAllMediaVisible(ctx context.Context, libraryID string
 }
 
 func groupMediaSeriesCards(items []model.Media) []SeriesCard {
+	return groupMediaSeriesCardsWithOrder(items, true)
+}
+
+func groupMediaSearchCards(items []model.Media) []SeriesCard {
+	return groupMediaSeriesCardsWithOrder(items, false)
+}
+
+func groupMediaSeriesCardsWithOrder(items []model.Media, sortByLatest bool) []SeriesCard {
 	if len(items) == 0 {
 		return nil
 	}
@@ -135,9 +143,11 @@ func groupMediaSeriesCards(items []model.Media) []SeriesCard {
 			latest: seriesMediaTime(item),
 		})
 	}
-	sort.SliceStable(groups, func(i, j int) bool {
-		return groups[i].latest.After(groups[j].latest)
-	})
+	if sortByLatest {
+		sort.SliceStable(groups, func(i, j int) bool {
+			return groups[i].latest.After(groups[j].latest)
+		})
+	}
 	cards := make([]SeriesCard, 0, len(groups))
 	for _, group := range groups {
 		cards = append(cards, group.card)
