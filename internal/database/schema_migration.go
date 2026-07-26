@@ -1,13 +1,29 @@
 package database
 
 import (
+	"errors"
+	"fmt"
+
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
 // AutoMigrate creates tables for every model registered in the model package.
-func AutoMigrate(db *gorm.DB) error {
+func AutoMigrate(db *gorm.DB) (err error) {
+	aliasTriggerSuspended, err := suspendMediaSearchAliasInvalidation(db)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if !aliasTriggerSuspended {
+			return
+		}
+		if restoreErr := ensureMediaSearchAliasInvalidation(db); restoreErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore media search alias trigger: %w", restoreErr))
+		}
+	}()
+
 	resourceImportTableExisted := db.Migrator().HasTable(&model.ResourceImportJob{})
 	hadKeepOldVersion := resourceImportTableExisted && db.Migrator().HasColumn(&model.ResourceImportJob{}, "keep_old_version")
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
@@ -32,6 +48,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := ensureMediaSearchAliasInvalidation(db); err != nil {
 		return err
 	}
+	aliasTriggerSuspended = false
 	if err := ensureLibraryRootsCompatibility(db); err != nil {
 		return err
 	}
@@ -39,6 +56,30 @@ func AutoMigrate(db *gorm.DB) error {
 		return ensureMediaSearchIndex(db)
 	}
 	return nil
+}
+
+func suspendMediaSearchAliasInvalidation(db *gorm.DB) (bool, error) {
+	if !isPostgres(db) || !db.Migrator().HasTable(&model.Media{}) {
+		return false, nil
+	}
+	var exists bool
+	if err := db.Raw(`
+SELECT EXISTS (
+  SELECT 1
+  FROM pg_trigger
+  WHERE tgname = 'media_search_alias_dirty'
+    AND tgrelid = 'media'::regclass
+    AND NOT tgisinternal
+)`).Scan(&exists).Error; err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	if err := db.Exec(`DROP TRIGGER media_search_alias_dirty ON media`).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func ensureMediaSearchAliasInvalidation(db *gorm.DB) error {
