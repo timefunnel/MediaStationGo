@@ -68,6 +68,7 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 			if err != nil {
 				return PipelineScrapeResult{}, err
 			}
+			matches = pipelineScrapeMatchesForMediaType(matches, mediaType)
 			if len(matches) != 1 {
 				continue
 			}
@@ -109,6 +110,20 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 		result.AppliedCount = 1 + propagated
 	}
 	return result, nil
+}
+
+func pipelineScrapeMatchesForMediaType(matches []ExternalMediaResult, mediaType string) []ExternalMediaResult {
+	mediaType = strings.TrimSpace(mediaType)
+	if mediaType == "" {
+		return matches
+	}
+	filtered := make([]ExternalMediaResult, 0, len(matches))
+	for _, match := range matches {
+		if strings.EqualFold(strings.TrimSpace(match.MediaType), mediaType) {
+			filtered = append(filtered, match)
+		}
+	}
+	return filtered
 }
 
 func (s *PipelineScrapeService) applySelectedMatch(

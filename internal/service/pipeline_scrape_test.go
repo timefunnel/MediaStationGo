@@ -194,3 +194,18 @@ func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
 		t.Fatalf("FD2 match was not applied: %+v", got)
 	}
 }
+
+func TestPipelineScrapeMatchesForMediaType(t *testing.T) {
+	matches := []ExternalMediaResult{
+		{MediaType: "movie", Title: "黑衣人2", TMDbID: 608},
+		{MediaType: "tv", Title: "Bo' Selecta!", TMDbID: 608},
+	}
+
+	filtered := pipelineScrapeMatchesForMediaType(matches, "movie")
+	if len(filtered) != 1 {
+		t.Fatalf("filtered matches = %d, want 1", len(filtered))
+	}
+	if filtered[0].MediaType != "movie" || filtered[0].Title != "黑衣人2" || filtered[0].TMDbID != 608 {
+		t.Fatalf("filtered match = %+v", filtered[0])
+	}
+}
