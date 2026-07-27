@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/helper"
+	"go.uber.org/zap"
 )
 
 const (
@@ -58,6 +59,12 @@ type fd2PPVCredentials struct {
 	username  string
 	password  string
 	signature [sha256.Size]byte
+}
+
+type fd2PPVLoginPage struct {
+	body      string
+	cookies   []helper.FlareSolverrCookie
+	userAgent string
 }
 
 func newFD2PPVClient() *fd2PPVClient {
@@ -337,30 +344,11 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	}
 
 	baseURL := strings.TrimRight(fd2PPVBaseURL, "/")
-	var solution *helper.FlareSolverrSolution
-	csrf := ""
-	for attempt := 0; attempt < fd2PPVLoginPageAttempts; attempt++ {
-		var err error
-		solution, err = helper.FetchURLWithFlareSolverrResultContext(
-			ctx,
-			provider.flareSolverrURL,
-			baseURL+"/",
-			nil,
-			provider.flareSolverrTimeout,
-			"",
-			provider.log,
-		)
-		if err != nil {
-			return fmt.Errorf("fd2ppv login page: %w", err)
-		}
-		csrf = fd2PPVCSRFToken(solution.Response)
-		if csrf != "" {
-			break
-		}
+	loginPage, err := c.resolveLoginPage(ctx, provider, baseURL+"/")
+	if err != nil {
+		return err
 	}
-	if csrf == "" {
-		return fmt.Errorf("fd2ppv login page did not contain a CSRF token after %d attempts", fd2PPVLoginPageAttempts)
-	}
+	csrf := fd2PPVCSRFToken(loginPage.body)
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -370,7 +358,7 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	if err != nil {
 		return fmt.Errorf("parse fd2ppv base URL: %w", err)
 	}
-	jar.SetCookies(rootURL, netHTTPCookies(solution.Cookies))
+	jar.SetCookies(rootURL, netHTTPCookies(loginPage.cookies))
 
 	payload, err := json.Marshal(map[string]string{
 		"user":     credentials.username,
@@ -388,7 +376,7 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", baseURL)
 	request.Header.Set("Referer", baseURL+"/")
-	request.Header.Set("User-Agent", firstNonEmpty(strings.TrimSpace(solution.UserAgent), "Mozilla/5.0"))
+	request.Header.Set("User-Agent", firstNonEmpty(strings.TrimSpace(loginPage.userAgent), fd2PPVChrome133UserAgent))
 
 	client := &http.Client{
 		Transport: provider.client.Transport,
@@ -437,10 +425,99 @@ func (c *fd2PPVClient) login(ctx context.Context, provider *AdultProvider, crede
 		return errors.New("fd2ppv login did not return a member cookie")
 	}
 
-	c.cookies = memberCookies
-	c.userAgent = firstNonEmpty(strings.TrimSpace(solution.UserAgent), fd2PPVChrome133UserAgent)
+	c.cookies = mergeFD2PPVCookies(loginPage.cookies, memberCookies)
+	c.userAgent = firstNonEmpty(strings.TrimSpace(loginPage.userAgent), fd2PPVChrome133UserAgent)
 	c.credentialSignature = credentials.signature
 	return nil
+}
+
+func (c *fd2PPVClient) resolveLoginPage(
+	ctx context.Context,
+	provider *AdultProvider,
+	targetURL string,
+) (fd2PPVLoginPage, error) {
+	directPage, directErr := fetchFD2PPVLoginPageDirect(ctx, provider, targetURL)
+	if directErr == nil {
+		if fd2PPVCSRFToken(directPage.body) != "" {
+			return directPage, nil
+		}
+		directErr = errors.New("direct response did not contain a CSRF token")
+	}
+	if err := ctx.Err(); err != nil {
+		return fd2PPVLoginPage{}, err
+	}
+	if provider.log != nil {
+		provider.log.Info("fd2ppv direct login page unavailable; using FlareSolverr",
+			zap.Error(directErr))
+	}
+
+	for attempt := 0; attempt < fd2PPVLoginPageAttempts; attempt++ {
+		solution, err := helper.FetchURLWithFlareSolverrResultContext(
+			ctx,
+			provider.flareSolverrURL,
+			targetURL,
+			nil,
+			provider.flareSolverrTimeout,
+			"",
+			provider.log,
+		)
+		if err != nil {
+			return fd2PPVLoginPage{}, fmt.Errorf("fd2ppv login page direct request failed (%v); FlareSolverr request: %w", directErr, err)
+		}
+		if fd2PPVCSRFToken(solution.Response) == "" {
+			continue
+		}
+		return fd2PPVLoginPage{
+			body:      solution.Response,
+			cookies:   cloneFD2PPVCookies(solution.Cookies),
+			userAgent: firstNonEmpty(strings.TrimSpace(solution.UserAgent), fd2PPVChrome133UserAgent),
+		}, nil
+	}
+	return fd2PPVLoginPage{}, fmt.Errorf(
+		"fd2ppv login page direct request failed (%v); FlareSolverr response did not contain a CSRF token after %d attempts",
+		directErr,
+		fd2PPVLoginPageAttempts,
+	)
+}
+
+func fetchFD2PPVLoginPageDirect(
+	ctx context.Context,
+	provider *AdultProvider,
+	targetURL string,
+) (fd2PPVLoginPage, error) {
+	if provider == nil || provider.client == nil {
+		return fd2PPVLoginPage{}, errors.New("fd2ppv direct HTTP client is unavailable")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return fd2PPVLoginPage{}, fmt.Errorf("create fd2ppv direct login page request: %w", err)
+	}
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	request.Header.Set("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+	request.Header.Set("User-Agent", fd2PPVChrome133UserAgent)
+
+	response, err := provider.client.Do(request)
+	if err != nil {
+		return fd2PPVLoginPage{}, fmt.Errorf("fd2ppv direct login page request failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusBadRequest {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return fd2PPVLoginPage{}, fmt.Errorf("fd2ppv direct login page returned HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if err != nil {
+		return fd2PPVLoginPage{}, fmt.Errorf("read fd2ppv direct login page: %w", err)
+	}
+	host := ""
+	if response.Request != nil && response.Request.URL != nil {
+		host = response.Request.URL.Hostname()
+	}
+	return fd2PPVLoginPage{
+		body:      string(body),
+		cookies:   fd2PPVNetHTTPCookies(response.Cookies(), host),
+		userAgent: fd2PPVChrome133UserAgent,
+	}, nil
 }
 
 func fd2PPVCSRFToken(body string) string {
@@ -471,6 +548,22 @@ func netHTTPCookies(cookies []helper.FlareSolverrCookie) []*http.Cookie {
 			Domain: cookie.Domain,
 			Path:   firstNonEmpty(strings.TrimSpace(cookie.Path), "/"),
 			Secure: true,
+		})
+	}
+	return out
+}
+
+func fd2PPVNetHTTPCookies(cookies []*http.Cookie, fallbackDomain string) []helper.FlareSolverrCookie {
+	out := make([]helper.FlareSolverrCookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil || strings.TrimSpace(cookie.Name) == "" {
+			continue
+		}
+		out = append(out, helper.FlareSolverrCookie{
+			Name:   cookie.Name,
+			Value:  cookie.Value,
+			Domain: firstNonEmpty(strings.TrimPrefix(strings.TrimSpace(cookie.Domain), "."), fallbackDomain),
+			Path:   firstNonEmpty(strings.TrimSpace(cookie.Path), "/"),
 		})
 	}
 	return out

@@ -123,6 +123,18 @@ func TestSchedulerStartRegistersFD2PPVSessionCheck(t *testing.T) {
 	t.Fatal("fd2ppv_session_check was not registered")
 }
 
+func TestFD2PPVSessionTimeoutCoversConfiguredFlareSolverrAttempts(t *testing.T) {
+	if got, want := fd2PPVSessionTimeout(60), 200*time.Second; got != want {
+		t.Fatalf("timeout = %s, want %s", got, want)
+	}
+	if got, want := fd2PPVSessionTimeout(0), 200*time.Second; got != want {
+		t.Fatalf("default timeout = %s, want %s", got, want)
+	}
+	if got, want := fd2PPVSessionTimeout(5), 90*time.Second; got != want {
+		t.Fatalf("custom timeout = %s, want %s", got, want)
+	}
+}
+
 func TestSchedulerFD2PPVSessionCheckRecordsFailure(t *testing.T) {
 	provider := newConfiguredFD2PPVTestProvider(t, "fd2-user", "fd2-password")
 	provider.SetFlareSolverr("http://flaresolverr.invalid", 5)

@@ -166,6 +166,73 @@ func TestFD2PPVAuthenticatedFetchRetriesIncompletePageAndReusesCache(t *testing.
 	}
 }
 
+func TestFD2PPVLoginUsesFastDirectPageWithoutFlareSolverr(t *testing.T) {
+	const (
+		username = "fd2-user"
+		password = "fd2-password"
+	)
+	var loginCalls atomic.Int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/":
+			http.SetCookie(w, &http.Cookie{Name: "lang", Value: "ja", Path: "/"})
+			_, _ = w.Write([]byte(`<html><input type="hidden" name="_csrf" value="direct-csrf"></html>`))
+		case r.Method == http.MethodPost && r.URL.Path == "/fetch/login.php":
+			loginCalls.Add(1)
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["user"] != username || payload["password"] != password || payload["_csrf"] != "direct-csrf" {
+				t.Fatalf("unexpected direct login payload")
+			}
+			http.SetCookie(w, &http.Cookie{Name: "member", Value: "member-token", Path: "/"})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"script":"bG9jYXRpb24ucmVsb2FkKCk7"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer site.Close()
+
+	originalBaseURL := fd2PPVBaseURL
+	fd2PPVBaseURL = site.URL
+	t.Cleanup(func() { fd2PPVBaseURL = originalBaseURL })
+
+	var flareCalls atomic.Int32
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flareCalls.Add(1)
+		http.Error(w, "FlareSolverr should not be called", http.StatusInternalServerError)
+	}))
+	defer flare.Close()
+
+	provider := newConfiguredFD2PPVTestProvider(t, username, password)
+	provider.client = site.Client()
+	provider.SetFlareSolverr(flare.URL, 5)
+	provider.fd2ppv.direct = fd2PPVDirectFetcherFunc(func(
+		_ context.Context,
+		_ string,
+		_ string,
+		cookies []helper.FlareSolverrCookie,
+	) (fd2PPVDirectFetchResult, error) {
+		if !fd2PPVHasCookie(cookies, "member") || !fd2PPVHasCookie(cookies, "lang") {
+			t.Fatalf("direct target request did not retain login cookies: %+v", cookies)
+		}
+		return fd2PPVDirectFetchResult{
+			body:       fd2PPVAuthenticatedTestHTML("fast direct login"),
+			statusCode: http.StatusOK,
+		}, nil
+	})
+
+	body, err := provider.fetchFD2PPVText(t.Context(), site.URL+"/articles/3780016")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "fast direct login") || loginCalls.Load() != 1 || flareCalls.Load() != 0 {
+		t.Fatalf("body=%q login=%d flare=%d", body, loginCalls.Load(), flareCalls.Load())
+	}
+}
+
 func TestFD2PPVDirectTransportErrorDoesNotInvokeTargetChallenge(t *testing.T) {
 	const targetURL = "https://fd2ppv.cc/articles/3780016"
 	var targetChallengeCalls atomic.Int32
@@ -225,6 +292,12 @@ func TestFD2PPVDirectTransportErrorDoesNotInvokeTargetChallenge(t *testing.T) {
 }
 
 func TestFD2PPVFetchErrorsAreNotCached(t *testing.T) {
+	loginSite := httptest.NewServer(http.NotFoundHandler())
+	defer loginSite.Close()
+	originalBaseURL := fd2PPVBaseURL
+	fd2PPVBaseURL = loginSite.URL
+	t.Cleanup(func() { fd2PPVBaseURL = originalBaseURL })
+
 	var flareCalls atomic.Int32
 	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flareCalls.Add(1)
@@ -365,6 +438,12 @@ func TestFD2PPVSessionCheckRefreshesExpiredSharedSession(t *testing.T) {
 }
 
 func TestFD2PPVSessionCheckStopsAfterBoundedMissingCSRFRetries(t *testing.T) {
+	loginSite := httptest.NewServer(http.NotFoundHandler())
+	defer loginSite.Close()
+	originalBaseURL := fd2PPVBaseURL
+	fd2PPVBaseURL = loginSite.URL
+	t.Cleanup(func() { fd2PPVBaseURL = originalBaseURL })
+
 	var flareCalls atomic.Int32
 	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flareCalls.Add(1)
