@@ -13,6 +13,7 @@ import toast from 'react-hot-toast'
 
 import { libraryAPI } from '../api/library'
 import type { Media } from '../types'
+import { compareMediaFilename, mediaFilename } from '../utils/mediaFilename'
 
 type ManualMediaAggregationDialogProps = {
   open: boolean
@@ -305,15 +306,6 @@ function aggregationSearchText(tree: AggregationTree): string {
 
 function mediaTitle(media: Media): string {
   return media.display_title || media.title || mediaFilename(media)
-}
-
-function mediaFilename(media: Media): string {
-  const parts = media.path.split('\\').join('/').split('/').filter(Boolean)
-  return parts[parts.length - 1] || media.path
-}
-
-function compareMediaFilename(left: Media, right: Media): number {
-  return mediaFilename(left).localeCompare(mediaFilename(right), 'zh-CN', { numeric: true, sensitivity: 'base' })
 }
 
 function aggregationError(error: unknown, fallback: string): string {

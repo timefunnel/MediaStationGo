@@ -19,7 +19,7 @@ export interface Media {
   part_index?: number
   version_group_key?: string
   title_cleanup_version?: number
-  path: string
+  path?: string
   relative_path?: string
   size_bytes: number
   duration_sec: number

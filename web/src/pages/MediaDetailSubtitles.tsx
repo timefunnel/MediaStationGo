@@ -14,6 +14,7 @@ import {
 } from '../api/subtitles'
 import { confirmAction } from '../components/confirmAction'
 import type { MediaVersion } from '../types'
+import { mediaFilename } from '../utils/mediaFilename'
 
 type MediaDetailSubtitlesProps = {
   mediaId: string
@@ -469,7 +470,7 @@ function SubtitlePreviewDialog({ preview, onClose }: { preview: NonNullable<Prev
 }
 
 function versionOptionLabel(version: MediaVersion): string {
-  const fileName = version.path.split(/[\\/]/).pop() || version.path || '未命名片源'
+  const fileName = mediaFilename(version)
   return `${version.is_current ? '当前 · ' : ''}${fileName}`
 }
 
