@@ -37,7 +37,7 @@ export function MediaDetailVersions({ versions, loading, isAdmin, deletingID, on
                 <span>{versionLabel(version)}</span>
                 {version.is_current && <span className="text-xs font-normal text-[#c9954a]">当前播放版本</span>}
               </div>
-              <p className="truncate text-xs text-sand-500" title={version.path}>{version.path}</p>
+              {version.path && <p className="truncate text-xs text-sand-500" title={version.path}>{version.path}</p>}
               <p className="text-xs text-ink-50">{versionTechnicalText(version, isAdmin)}</p>
             </div>
             {version.can_manage && (

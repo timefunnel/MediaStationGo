@@ -50,6 +50,13 @@ export function RequirePermission({ permission, children }: { permission: string
     )
   }
   if (!loaded || loading) return <p className="px-6 py-8 text-sand-500">正在加载菜单权限…</p>
-  if (permissions[permission] !== true) return <Navigate to="/profile" replace />
+  if (permissions[permission] !== true) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+        <p className="font-semibold">无权访问此页面</p>
+        <p className="mt-1">当前账号未获得所需权限，请联系管理员调整。</p>
+      </div>
+    )
+  }
   return <>{children}</>
 }

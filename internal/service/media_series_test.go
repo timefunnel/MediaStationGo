@@ -141,6 +141,66 @@ func TestGroupMediaSeriesCardsSortsByLatestEpisodeTime(t *testing.T) {
 	}
 }
 
+func TestGroupMediaSeriesCardsSortsByIngestTimeNotReleaseDate(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	olderIngest := model.Media{
+		Base:        model.Base{CreatedAt: now.Add(-24 * time.Hour), UpdatedAt: now},
+		LibraryID:   "lib-movie",
+		Title:       "新上映但更早入库",
+		Path:        `/media/movies/new-release.mkv`,
+		ReleaseDate: "2026-12-31",
+		Year:        2026,
+		TMDbID:      1001,
+	}
+	newerIngest := model.Media{
+		Base:        model.Base{CreatedAt: now, UpdatedAt: now},
+		LibraryID:   "lib-movie",
+		Title:       "旧作品但刚入库",
+		Path:        `/media/movies/old-release.mkv`,
+		ReleaseDate: "1999-01-01",
+		Year:        1999,
+		TMDbID:      1002,
+	}
+
+	cards := groupMediaSeriesCards([]model.Media{olderIngest, newerIngest})
+	if len(cards) != 2 {
+		t.Fatalf("cards=%#v, want two cards", cards)
+	}
+	if cards[0].Rep.Title != newerIngest.Title {
+		t.Fatalf("first card=%q, want newest ingested item %q", cards[0].Rep.Title, newerIngest.Title)
+	}
+}
+
+func TestMediaSeriesKeyIgnoresOpenListSingleFileWrapperDirectory(t *testing.T) {
+	first := model.Media{
+		LibraryID:  "lib-tv",
+		Title:      "异形：地球",
+		Path:       `cloud://openlist/115/剧集/Alien.Earth.S01E01.2160p/Alien.Earth.S01E01.2160p.mkv`,
+		SeasonNum:  1,
+		EpisodeNum: 1,
+		TMDbID:     157239,
+	}
+	second := model.Media{
+		LibraryID:  "lib-tv",
+		Title:      "异形：地球",
+		Path:       `cloud://openlist/115/剧集/Alien.Earth.S01E02.2160p/Alien.Earth.S01E02.2160p.mkv`,
+		SeasonNum:  1,
+		EpisodeNum: 2,
+		TMDbID:     157239,
+	}
+
+	if got := seriesTitleFromMediaPath(first.Path); got != "" {
+		t.Fatalf("single-file wrapper produced path title %q, want empty", got)
+	}
+	if got, want := mediaSeriesKey(first), mediaSeriesKey(second); got != want {
+		t.Fatalf("single-file wrapper split series key=%q, want %q", got, want)
+	}
+	cards := groupMediaSeriesCards([]model.Media{first, second})
+	if len(cards) != 1 || cards[0].Count != 2 {
+		t.Fatalf("cards=%#v, want one merged series with two episodes", cards)
+	}
+}
+
 func TestMediaSeriesKeyCollapsesSpecialTitleSuffix(t *testing.T) {
 	main := model.Media{
 		LibraryID:  "lib-tv",

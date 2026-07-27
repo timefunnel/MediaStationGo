@@ -17,6 +17,8 @@ import { MediaDetailSubtitles } from './MediaDetailSubtitles'
 interface MediaDetailPlaybackActionsProps {
   media: Media
   favourite: boolean
+  canFavorite: boolean
+  canExternalPlayer: boolean
   onToggleFavourite: () => void
   onUpgrade: () => void
   upgradeOpening: boolean
@@ -102,6 +104,8 @@ export function MediaDetailBackButton({ onBack }: { onBack: () => void }) {
 export function MediaDetailPlaybackActions({
   media,
   favourite,
+  canFavorite,
+  canExternalPlayer,
   onToggleFavourite,
   onUpgrade,
   upgradeOpening,
@@ -125,7 +129,7 @@ export function MediaDetailPlaybackActions({
         <span>HLS 兼容转码播放</span>
       </Link>
 
-      <ExternalPlayerButton mediaId={media.id} />
+      {canExternalPlayer && <ExternalPlayerButton mediaId={media.id} />}
 
       <button
         type="button"
@@ -149,18 +153,20 @@ export function MediaDetailPlaybackActions({
         </button>
       )}
 
-      <button
-        onClick={onToggleFavourite}
-        className={
-          'btn-outline gap-2 ' +
-          (favourite
-            ? '!border-red-200 !bg-red-50 !text-red-600 hover:!bg-red-100/50'
-            : 'hover:border-red-200 hover:text-red-600 hover:bg-red-50/50')
-        }
-      >
-        <Heart size={14} fill={favourite ? 'currentColor' : 'none'} />
-        <span>{favourite ? '取消收藏' : '加入收藏'}</span>
-      </button>
+      {canFavorite && (
+        <button
+          onClick={onToggleFavourite}
+          className={
+            'btn-outline gap-2 ' +
+            (favourite
+              ? '!border-red-200 !bg-red-50 !text-red-600 hover:!bg-red-100/50'
+              : 'hover:border-red-200 hover:text-red-600 hover:bg-red-50/50')
+          }
+        >
+          <Heart size={14} fill={favourite ? 'currentColor' : 'none'} />
+          <span>{favourite ? '取消收藏' : '加入收藏'}</span>
+        </button>
+      )}
     </div>
   )
 }
@@ -169,6 +175,8 @@ export function MediaDetailMainContent({
   media,
   isAdmin,
   favourite,
+  canFavorite,
+  canExternalPlayer,
   scrapeEpisodeArtwork,
   onToggleFavourite,
   onUpgrade,
@@ -204,6 +212,8 @@ export function MediaDetailMainContent({
           <MediaDetailPlaybackActions
             media={media}
             favourite={favourite}
+            canFavorite={canFavorite}
+            canExternalPlayer={canExternalPlayer}
             onToggleFavourite={onToggleFavourite}
             onUpgrade={onUpgrade}
             upgradeOpening={upgradeOpening}

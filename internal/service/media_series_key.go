@@ -124,6 +124,12 @@ func seriesTitleFromMediaPath(path string) string {
 	if len(parts) < 2 {
 		return ""
 	}
+	if last := parts[len(parts)-1]; seriesPathPartLooksLikeFile(last) && singleFileWrapperDirectory(parts[len(parts)-2], last) {
+		// OpenList may expose one remote file as <filename>/<filename>.mkv.
+		// That synthetic wrapper is not a series directory; returning no path
+		// title lets the shared series ID / metadata grouping rules decide.
+		return ""
+	}
 	dirIndex := len(parts) - 2
 	if last := parts[len(parts)-1]; !seriesPathPartLooksLikeFile(last) && !seriesSeasonDirRE.MatchString(filepath.Base(last)) {
 		dirIndex = len(parts) - 1
@@ -139,6 +145,16 @@ func seriesTitleFromMediaPath(path string) string {
 		return ""
 	}
 	return title
+}
+
+func singleFileWrapperDirectory(directory, filename string) bool {
+	directory = strings.TrimSpace(filepath.Base(directory))
+	filename = strings.TrimSpace(filepath.Base(filename))
+	if directory == "" || filename == "" {
+		return false
+	}
+	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	return strings.EqualFold(directory, filename) || strings.EqualFold(directory, stem)
 }
 
 func seriesPathPartLooksLikeFile(part string) bool {

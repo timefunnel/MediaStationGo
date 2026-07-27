@@ -4,15 +4,18 @@ import { SearchInputBar } from './SearchInputBar'
 import { SearchLocalResults } from './SearchLocalResults'
 import { SearchStatusPanels } from './SearchStatusPanels'
 import { useSearchPage } from './useSearchPage'
+import { usePermission } from '../hooks/usePermission'
 
 export function SearchPage() {
-  const search = useSearchPage()
+  const canUseAI = usePermission('can_use_ai')
+  const search = useSearchPage({ canUseAI })
 
   return (
     <div className="space-y-6">
       <SearchHeader
         aiOn={search.aiOn}
         aiAvailable={search.aiAvailable}
+        canUseAI={canUseAI}
         onToggleAI={() => search.setAiOn((on) => !on)}
       />
 

@@ -18,7 +18,6 @@ const DownloadsPage = lazy(() => import('./pages/DownloadsPage').then((m) => ({ 
 const SubscriptionsPage = lazy(() =>
   import('./pages/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })),
 )
-const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
 const StatsPage = lazy(() => import('./pages/StatsPage').then((m) => ({ default: m.StatsPage })))
 const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })))
 const TasksPage = lazy(() => import('./pages/TasksPage').then((m) => ({ default: m.TasksPage })))
@@ -71,7 +70,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'libraries', element: <LibrariesPage />, permission: 'can_play_media' },
   { path: 'library/:id', element: <LibraryPage />, permission: 'can_play_media' },
   { path: 'discover', element: <DiscoverPage />, permission: 'can_view_discover' },
-  { path: 'search', element: <SearchPage />, permission: 'can_use_ai' },
+  { path: 'search', element: <SearchPage />, permission: 'can_play_media' },
   { path: 'favourites', element: <FavouritesPage />, permission: 'can_favorite' },
   { path: 'playlists', element: <PlaylistsPage />, permission: 'can_play_media' },
   { path: 'playlist/:id', element: <PlaylistDetailPage />, permission: 'can_play_media' },
@@ -79,7 +78,6 @@ export const appRoutes: AppRoute[] = [
   { path: 'play/:id', element: <PlayerPage />, permission: 'can_play_media' },
   { path: 'downloads', element: <DownloadsPage />, permission: 'can_manage_downloads' },
   { path: 'subscriptions', element: <SubscriptionsPage />, adminOnly: true },
-  { path: 'profile', element: <ProfilePage /> },
   { path: 'dlna', element: <DlnaPage />, permission: 'can_cast' },
   { path: 'history', element: <WatchHistoryPage />, permission: 'can_view_history' },
   { path: 'poster-wall', element: <PosterWallPage />, permission: 'can_play_media' },

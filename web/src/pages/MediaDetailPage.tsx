@@ -7,6 +7,7 @@ import type { ResourceImportTask } from '../api/resourceImports'
 import { buildResourceImportFeedURL, buildSubscriptionAliases, subscriptionsAPI } from '../api/subscriptions'
 import { confirmAction } from '../components/confirmAction'
 import { GeneratedArtworkDialog } from '../components/GeneratedArtworkDialog'
+import { usePermission } from '../hooks/usePermission'
 import { useAuthStore } from '../stores/auth'
 import type { Library, MediaPart, MediaVersion } from '../types'
 import { MediaDetailBackdrop } from './MediaDetailArtwork'
@@ -25,7 +26,9 @@ export function MediaDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const role = useAuthStore((s) => s.user?.role)
-  const detail = useMediaDetailPageState({ id, navigate })
+  const canFavorite = usePermission('can_favorite')
+  const canExternalPlayer = usePermission('can_external_player')
+  const detail = useMediaDetailPageState({ id, navigate, canFavorite })
   const [upgradeOpening, setUpgradeOpening] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [upgradeLibrary, setUpgradeLibrary] = useState<Library | null>(null)
@@ -111,9 +114,14 @@ export function MediaDetailPage() {
 
   const deleteVersion = useCallback(async (version: MediaVersion) => {
     if (!detail.media || versionDeletingID) return
+    const versionName = version.path?.trim() || [
+      version.width > 0 && version.height > 0 ? `${version.width}x${version.height}` : '',
+      version.container?.toUpperCase(),
+      version.video_codec?.toUpperCase(),
+    ].filter(Boolean).join(' · ') || '此片源版本'
     const confirmed = await confirmAction({
       title: '删除这个片源版本',
-      message: `将「${version.path}」移入回收站？其他版本不受影响，云盘文件会在回收站彻底删除时才移除。`,
+      message: `将「${versionName}」移入回收站？其他版本不受影响，云盘文件会在回收站彻底删除时才移除。`,
       confirmText: '移入回收站',
     })
     if (!confirmed) return
@@ -194,6 +202,8 @@ export function MediaDetailPage() {
         media={media}
         isAdmin={role === 'admin'}
         favourite={detail.favourite}
+        canFavorite={canFavorite}
+        canExternalPlayer={canExternalPlayer}
         scrapeEpisodeArtwork={detail.scrapeEpisodeArtwork}
         onToggleFavourite={detail.toggleFavourite}
         onUpgrade={() => void openUpgrade()}

@@ -56,7 +56,7 @@ func recentHistoryHandler(svc *service.Container) gin.HandlerFunc {
 				filtered = append(filtered, item)
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"items": filtered})
+		c.JSON(http.StatusOK, gin.H{"items": historyItemsForResponse(c, filtered)})
 	}
 }
 
@@ -90,13 +90,13 @@ func listFavouritesHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		visibility := mediaVisibilityForRequest(c, svc)
-		filtered := make([]any, 0, len(items))
+		filtered := items[:0]
 		for i := range items {
 			if visibility.Allows(&items[i]) {
 				filtered = append(filtered, items[i])
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"items": filtered})
+		c.JSON(http.StatusOK, gin.H{"items": mediaSliceForResponse(c, filtered)})
 	}
 }
 
@@ -159,7 +159,7 @@ func getPlaylistHandler(svc *service.Container) gin.HandlerFunc {
 			}
 		}
 		detail.Items = filtered
-		c.JSON(http.StatusOK, detail)
+		c.JSON(http.StatusOK, playlistDetailForResponse(c, detail))
 	}
 }
 

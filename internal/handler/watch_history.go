@@ -43,7 +43,7 @@ func historyListHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"items": items, "total": total, "page": page, "page_size": pageSize,
+			"items": historyItemsForResponse(c, items), "total": total, "page": page, "page_size": pageSize,
 		})
 	}
 }
@@ -120,7 +120,7 @@ func historyContinueHandler(svc *service.Container) gin.HandlerFunc {
 			if !mediaVisibleForRequest(c, svc, &m) {
 				continue
 			}
-			mIdx[m.ID] = m
+			mIdx[m.ID] = mediaForResponse(c, m)
 		}
 		out := make([]gin.H, 0, len(rows))
 		for _, r := range rows {

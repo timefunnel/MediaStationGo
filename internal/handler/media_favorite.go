@@ -106,7 +106,7 @@ func aiScrapeMediaHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		reclassifyMediaAfterScrape(c.Request.Context(), svc, m.ID)
 		refreshed, _ := svc.Repo.Media.FindByID(c.Request.Context(), m.ID)
-		c.JSON(http.StatusOK, refreshed)
+		c.JSON(http.StatusOK, mediaPointerForResponse(c, refreshed))
 	}
 }
 

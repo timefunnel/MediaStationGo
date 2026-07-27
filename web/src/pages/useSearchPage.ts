@@ -12,7 +12,7 @@ function apiErrorMessage(err: unknown, fallback: string): string {
   return (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? fallback
 }
 
-export function useSearchPage() {
+export function useSearchPage({ canUseAI }: { canUseAI: boolean }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlQuery = searchParams.get('q') ?? ''
   const [q, setQ] = useState('')
@@ -31,11 +31,16 @@ export function useSearchPage() {
   const activeController = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    if (!canUseAI) {
+      setAiAvailable(false)
+      setAiOn(false)
+      return
+    }
     aiAPI
       .status()
       .then((status) => setAiAvailable(status.enabled))
       .catch(() => setAiAvailable(false))
-  }, [])
+  }, [canUseAI])
 
   useEffect(() => {
     setQ(urlQuery)

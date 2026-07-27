@@ -55,7 +55,7 @@ func listSeasonsHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		out := make([]seasonGroup, 0, len(buckets))
 		for s, items := range buckets {
-			out = append(out, seasonGroup{Season: s, Episodes: items})
+			out = append(out, seasonGroup{Season: s, Episodes: mediaSliceForResponse(c, items)})
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Season < out[j].Season })
 		c.JSON(http.StatusOK, gin.H{"seasons": out})
@@ -92,7 +92,7 @@ func listLibrarySeriesHandler(svc *service.Container) gin.HandlerFunc {
 		if end > len(items) {
 			end = len(items)
 		}
-		pageItems := items[start:end]
+		pageItems := seriesCardsForResponse(c, items[start:end])
 		if pageItems == nil {
 			// 非 nil 空切片，避免空库返回 "items": null 触发前端崩溃。
 			pageItems = []service.SeriesCard{}
@@ -125,6 +125,6 @@ func listLibrarySeriesEpisodesHandler(svc *service.Container) gin.HandlerFunc {
 			writeInternalOrCanceled(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+		c.JSON(http.StatusOK, gin.H{"items": mediaSliceForResponse(c, items), "total": len(items)})
 	}
 }

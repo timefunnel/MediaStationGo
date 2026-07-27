@@ -36,7 +36,7 @@ func listRecycleHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		c.JSON(http.StatusOK, gin.H{"items": recycleItemsForResponse(c, items)})
 	}
 }
 
@@ -116,7 +116,7 @@ func getMediaVersionsHandler(svc *service.Container) gin.HandlerFunc {
 			writeMediaVersionError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, mediaVersionListForResponse(c, result))
 	}
 }
 
@@ -136,7 +136,7 @@ func getMediaPartsHandler(svc *service.Container) gin.HandlerFunc {
 			writeMediaVersionError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, mediaPartListForResponse(c, result))
 	}
 }
 

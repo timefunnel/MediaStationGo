@@ -53,7 +53,7 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
       { to: '/libraries', label: '媒体库', icon: Library, permission: 'can_play_media' },
       { to: '/poster-wall', label: '海报墙', icon: Image, permission: 'can_play_media' },
       { to: '/discover', label: '精彩发现', icon: Compass, permission: 'can_view_discover' },
-      { to: '/search', label: '智能搜索', icon: Search, permission: 'can_use_ai' },
+      { to: '/search', label: '搜索', icon: Search, permission: 'can_play_media' },
       { to: '/dlna', label: 'DLNA 投屏', icon: Cast, permission: 'can_cast' },
       { to: '/ai', label: 'AI 助理', icon: Sparkles, permission: 'can_use_ai_assistant' },
     ],
@@ -62,7 +62,7 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     id: 'personal',
     label: '个人观影',
     icon: User,
-    activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/profile', '/play-profiles', '/recycle'],
+    activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/play-profiles', '/recycle'],
     items: [
       { to: '/favourites', label: '我的收藏', icon: Heart, permission: 'can_favorite' },
       { to: '/playlists', label: '播放列表', icon: ListMusic, permission: 'can_play_media' },

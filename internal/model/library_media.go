@@ -36,7 +36,7 @@ type Media struct {
 	PartIndex                int     `json:"part_index,omitempty"`
 	VersionGroupKey          string  `gorm:"index;size:64" json:"version_group_key,omitempty"`
 	TitleCleanupVersion      int     `json:"title_cleanup_version,omitempty"`
-	Path                     string  `gorm:"uniqueIndex;size:1024;not null" json:"path"`
+	Path                     string  `gorm:"uniqueIndex;size:1024;not null" json:"path,omitempty"`
 	RelativePath             string  `gorm:"size:1024" json:"relative_path,omitempty"`
 	SizeBytes                int64   `json:"size_bytes"`
 	DurationSec              int     `json:"duration_sec"`

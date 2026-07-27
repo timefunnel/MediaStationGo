@@ -37,7 +37,7 @@ export function MediaDetailParts({ parts, loading }: MediaDetailPartsProps) {
                 </Link>
                 {part.is_current && <span className="text-xs font-normal text-[#c9954a]">当前片段</span>}
               </div>
-              <p className="truncate text-xs text-sand-500" title={part.path}>{part.path}</p>
+              {part.path && <p className="truncate text-xs text-sand-500" title={part.path}>{part.path}</p>}
               <p className="text-xs text-ink-50">{partTechnicalText(part)}</p>
             </div>
             <Link

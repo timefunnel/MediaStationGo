@@ -200,7 +200,7 @@ export function RecycleBinPage() {
                   </td>
                   <td className="max-w-md text-ink-50">
                     <div>{[m.width && m.height ? `${m.width}x${m.height}` : '', m.container?.toUpperCase(), m.size_bytes ? formatSize(m.size_bytes) : ''].filter(Boolean).join(' · ') || '未探测版本'}</div>
-                    <div className="truncate text-xs text-sand-500" title={m.path}>{m.path}</div>
+                    {m.path && <div className="truncate text-xs text-sand-500" title={m.path}>{m.path}</div>}
                   </td>
                   <td className="space-x-2 py-2 text-right">
                     <button

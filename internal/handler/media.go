@@ -204,6 +204,7 @@ func listMediaHandler(svc *service.Container) gin.HandlerFunc {
 			if items == nil {
 				items = []model.Media{}
 			}
+			items = mediaSliceForResponse(c, items)
 			c.JSON(http.StatusOK, gin.H{
 				"items":     items,
 				"total":     total,
@@ -220,6 +221,7 @@ func listMediaHandler(svc *service.Container) gin.HandlerFunc {
 		if items == nil {
 			items = []service.MediaItem{}
 		}
+		items = mediaItemsForResponse(c, items)
 		c.JSON(http.StatusOK, gin.H{
 			"items":     items,
 			"total":     total,
@@ -244,7 +246,7 @@ func getMediaHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		c.JSON(http.StatusOK, m)
+		c.JSON(http.StatusOK, mediaForResponse(c, *m))
 	}
 }
 
@@ -288,7 +290,7 @@ func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 					return
 				}
 				c.JSON(http.StatusOK, gin.H{
-					"items":     items,
+					"items":     seriesCardsForResponse(c, items),
 					"total":     total,
 					"page":      page,
 					"page_size": size,
@@ -302,7 +304,7 @@ func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 					return
 				}
 				c.JSON(http.StatusOK, gin.H{
-					"items":     items,
+					"items":     mediaSliceForResponse(c, items),
 					"total":     total,
 					"page":      page,
 					"page_size": size,
@@ -315,7 +317,7 @@ func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{
-				"items":     items,
+				"items":     mediaItemsForResponse(c, items),
 				"total":     total,
 				"page":      page,
 				"page_size": size,
@@ -329,7 +331,7 @@ func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"items": items})
+			c.JSON(http.StatusOK, gin.H{"items": mediaSliceForResponse(c, items)})
 			return
 		}
 		items, err := svc.Media.SearchMediaVisibleGrouped(c.Request.Context(), q, limit, mediaVisibilityForRequest(c, svc))
@@ -337,7 +339,7 @@ func searchMediaHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		c.JSON(http.StatusOK, gin.H{"items": mediaItemsForResponse(c, items)})
 	}
 }
 

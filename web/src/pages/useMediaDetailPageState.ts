@@ -13,10 +13,12 @@ import { mediaLibraryBackTarget } from './MediaDetailPageModel'
 interface MediaDetailPageStateParams {
   id: string
   navigate: NavigateFunction
+  canFavorite: boolean
 }
 
 interface MediaDetailRefreshParams {
   id: string
+  canFavorite: boolean
   setMedia: Dispatch<SetStateAction<Media | null>>
   setFavourite: Dispatch<SetStateAction<boolean>>
   setLoading: Dispatch<SetStateAction<boolean>>
@@ -30,7 +32,7 @@ interface MediaDetailActionsParams {
   setFavourite: Dispatch<SetStateAction<boolean>>
 }
 
-export function useMediaDetailPageState({ id, navigate }: MediaDetailPageStateParams) {
+export function useMediaDetailPageState({ id, navigate, canFavorite }: MediaDetailPageStateParams) {
   const [media, setMedia] = useState<Media | null>(null)
   const [favourite, setFavourite] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -39,7 +41,7 @@ export function useMediaDetailPageState({ id, navigate }: MediaDetailPageStatePa
   const [organizeOpen, setOrganizeOpen] = useState(false)
   const [scrapeEpisodeArtwork, setScrapeEpisodeArtwork] = useState(false)
 
-  const refresh = useMediaDetailRefresh({ id, setMedia, setFavourite, setLoading })
+  const refresh = useMediaDetailRefresh({ id, canFavorite, setMedia, setFavourite, setLoading })
   const actions = useMediaDetailActions({
     media,
     scrapeEpisodeArtwork,
@@ -49,7 +51,7 @@ export function useMediaDetailPageState({ id, navigate }: MediaDetailPageStatePa
   })
 
   useEffect(() => {
-    refresh().catch(() => undefined)
+    refresh().catch((err: unknown) => toast.error(apiErrorMessage(err, '媒体详情加载失败')))
   }, [refresh])
 
   const handleMetadataSaved = useCallback(async (next: Media) => {
@@ -77,6 +79,7 @@ export function useMediaDetailPageState({ id, navigate }: MediaDetailPageStatePa
 
 function useMediaDetailRefresh({
   id,
+  canFavorite,
   setMedia,
   setFavourite,
   setLoading,
@@ -87,12 +90,21 @@ function useMediaDetailRefresh({
     try {
       const nextMedia = await mediaAPI.get(id)
       setMedia(nextMedia)
-      const favourites = await playbackAPI.listFavourites().catch(() => [])
-      setFavourite(favourites.some((item) => item.id === nextMedia.id))
+      if (!canFavorite) {
+        setFavourite(false)
+        return
+      }
+      try {
+        const favourites = await playbackAPI.listFavourites()
+        setFavourite(favourites.some((item) => item.id === nextMedia.id))
+      } catch (err) {
+        setFavourite(false)
+        toast.error(apiErrorMessage(err, '收藏状态加载失败'))
+      }
     } finally {
       setLoading(false)
     }
-  }, [id, setFavourite, setLoading, setMedia])
+  }, [canFavorite, id, setFavourite, setLoading, setMedia])
 }
 
 function useMediaDetailActions({

@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { libraryAPI, mediaAPI } from '../api/library'
 import { playbackAPI, type HistoryItem } from '../api/playback'
+import { usePermission } from '../hooks/usePermission'
 import type { Library, Media } from '../types'
-import { groupSeries, type SeriesCard } from '../utils/groupSeries'
+import type { SeriesCard } from '../utils/groupSeries'
 import { hasMediaArtwork, mediaBackdropArtworkURL, mediaPrimaryArtworkURL } from '../utils/mediaArtwork'
 import {
   ContinueWatchingSection,
   HomeEmptyState,
   HomeFeaturedSection,
+  HomeLoadError,
   HomeLoadingState,
   RecentMediaSection,
 } from './HomePageSections'
@@ -20,31 +22,39 @@ export function HomePage() {
   const [recentCards, setRecentCards] = useState<SeriesCard[]>([])
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [loadVersion, setLoadVersion] = useState(0)
+  const canPlayMedia = usePermission('can_play_media')
+  const canViewHistory = usePermission('can_view_history')
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
+      setError('')
       try {
         const [libs, recentItems, hist] = await Promise.all([
-          libraryAPI.list().then((rows) => asArray<Library>(rows)).catch(() => [] as Library[]),
-          mediaAPI.recent(24).then((rows) => asArray<SeriesCard>(rows)).catch(async () => {
-            const fallback = await mediaAPI.search('', 120).then((d) => asArray<Media>(d?.items)).catch(() => [] as Media[])
-            return groupSeries(fallback).slice(0, 24)
-          }),
-          playbackAPI.recentHistory().then((rows) => asArray<HistoryItem>(rows)).catch(() => [] as HistoryItem[]),
+          canPlayMedia ? libraryAPI.list().then((rows) => asArray<Library>(rows)) : Promise.resolve([] as Library[]),
+          mediaAPI.recent(24).then((rows) => asArray<SeriesCard>(rows)),
+          canViewHistory ? playbackAPI.recentHistory().then((rows) => asArray<HistoryItem>(rows)) : Promise.resolve([] as HistoryItem[]),
         ])
         if (cancelled) return
         setLibraries(libs)
         setRecentCards(recentItems)
         setHistory(hist.filter((h) => h && !h.completed && !!h.media))
+      } catch (err) {
+        if (cancelled) return
+        setLibraries([])
+        setRecentCards([])
+        setHistory([])
+        setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || '首页内容加载失败')
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [canPlayMedia, canViewHistory, loadVersion])
 
   const featuredItem = useMemo(() => {
     const candidates = [
@@ -60,6 +70,10 @@ export function HomePage() {
 
   if (loading) {
     return <HomeLoadingState />
+  }
+
+  if (error) {
+    return <HomeLoadError message={error} onRetry={() => setLoadVersion((version) => version + 1)} />
   }
 
   if (empty) {

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRight, Clock, Film, Play, Sparkles } from 'lucide-react'
+import { ArrowRight, Clock, Film, Play, RefreshCw, Sparkles } from 'lucide-react'
 
 import { imageURL } from '../api/client'
 import { MediaCard } from '../components/MediaCard'
@@ -37,6 +37,22 @@ export function HomeEmptyState() {
       <Link to="/admin" className="mt-8 btn-primary">
         前往管理后台
       </Link>
+    </div>
+  )
+}
+
+export function HomeLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center justify-center py-32 text-center">
+      <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-red-200 bg-red-50 text-red-500 shadow-sm">
+        <Film className="h-9 w-9" />
+      </div>
+      <p className="text-xl font-bold text-[var(--app-text)]">首页内容加载失败</p>
+      <p className="mt-2 text-sm leading-relaxed text-[var(--app-muted)]">{message}</p>
+      <button type="button" onClick={onRetry} className="mt-8 btn-primary gap-2">
+        <RefreshCw size={15} />
+        重新加载
+      </button>
     </div>
   )
 }
