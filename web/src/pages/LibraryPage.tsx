@@ -21,6 +21,7 @@ import { resourceSearchAlternateQuery, resourceSearchPrimaryQuery } from './reso
 import { LibraryFilterBar } from './LibraryActorFilter'
 import { buildActorFacets, librarySupportsActorFilter, mediaHasActor } from './libraryActorFilterModel'
 import { buildCategoryFacets, mediaHasCategory } from './libraryCategoryFilterModel'
+import { buildAdultTypeFacets, mediaHasAdultType } from './libraryAdultTypeFilterModel'
 import { AITitleCleanupDialog } from '../components/AITitleCleanupDialog'
 import { ManualMediaAggregationDialog } from '../components/ManualMediaAggregationDialog'
 
@@ -128,14 +129,25 @@ export function LibraryPage() {
   const requestedActor = searchParams.get('actor')?.trim() ?? ''
   const selectedActor = supportsActorFilter ? requestedActor : ''
   const selectedCategory = searchParams.get('category')?.trim() ?? ''
+  const supportsAdultTypeFilter = library?.type === 'adult'
+  const requestedAdultType = searchParams.get('adult_type')?.trim() ?? ''
+  const selectedAdultType = supportsAdultTypeFilter ? requestedAdultType : ''
+  const adultTypeFacets = useMemo(
+    () => supportsAdultTypeFilter && !isSeries ? buildAdultTypeFacets(items) : [],
+    [isSeries, items, supportsAdultTypeFilter],
+  )
   const categoryFacets = useMemo(
     () => buildCategoryFacets(isSeries ? seriesCards.map((series) => series.rep) : items),
     [isSeries, items, seriesCards],
   )
   const requestedResourceQuery = searchParams.get('resource_query')?.trim() ?? ''
   const filteredItems = useMemo(
-    () => items.filter((media) => mediaHasActor(media, selectedActor) && mediaHasCategory(media, selectedCategory)),
-    [items, selectedActor, selectedCategory],
+    () => items.filter((media) => (
+      mediaHasAdultType(media, selectedAdultType)
+      && mediaHasActor(media, selectedActor)
+      && mediaHasCategory(media, selectedCategory)
+    )),
+    [items, selectedActor, selectedAdultType, selectedCategory],
   )
   const filteredSeriesCards = useMemo(
     () => seriesCards.filter((series) => mediaHasCategory(series.rep, selectedCategory)),
@@ -156,6 +168,14 @@ export function LibraryPage() {
     next.delete('category')
     setSearchParams(next, { replace: true })
   }, [categoryFacets, loading, loadingAllText, searchParams, selectedCategory, setSearchParams])
+
+  useEffect(() => {
+    if (loading || loadingAllText || !requestedAdultType) return
+    if (supportsAdultTypeFilter && adultTypeFacets.some((adultType) => adultType.name === requestedAdultType.toUpperCase())) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('adult_type')
+    setSearchParams(next, { replace: true })
+  }, [adultTypeFacets, loading, loadingAllText, requestedAdultType, searchParams, setSearchParams, supportsAdultTypeFilter])
 
   useEffect(() => {
     if (loading || !library || !requestedResourceQuery) return
@@ -181,6 +201,13 @@ export function LibraryPage() {
     const next = new URLSearchParams(searchParams)
     if (category) next.set('category', category)
     else next.delete('category')
+    setSearchParams(next)
+  }
+
+  const selectAdultType = (adultType: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (adultType) next.set('adult_type', adultType)
+    else next.delete('adult_type')
     setSearchParams(next)
   }
 
@@ -220,7 +247,7 @@ export function LibraryPage() {
         library={library}
         itemCount={isSeries
           ? selectedCategory ? filteredSeriesCards.length : seriesCards.length
-          : selectedActor || selectedCategory ? filteredItems.length : total}
+          : selectedActor || selectedAdultType || selectedCategory ? filteredItems.length : total}
         loadingAllText={loadingAllText}
         scanProgress={scanProgress}
         isAdmin={role === 'admin'}
@@ -266,6 +293,9 @@ export function LibraryPage() {
         categories={categoryFacets}
         selectedCategory={selectedCategory}
         onCategoryChange={selectCategory}
+        adultTypes={adultTypeFacets}
+        selectedAdultType={selectedAdultType}
+        onAdultTypeChange={selectAdultType}
         actors={supportsActorFilter ? actorFacets : []}
         selectedActor={selectedActor}
         onActorChange={selectActor}

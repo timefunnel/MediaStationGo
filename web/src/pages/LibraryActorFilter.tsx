@@ -1,13 +1,17 @@
-import { Tags, UserRound, X } from 'lucide-react'
+import { Clapperboard, Tags, UserRound, X } from 'lucide-react'
 
 import type { ReactNode } from 'react'
 import type { ActorFacet } from './libraryActorFilterModel'
 import type { CategoryFacet } from './libraryCategoryFilterModel'
+import type { AdultTypeFacet } from './libraryAdultTypeFilterModel'
 
 export function LibraryFilterBar({
   categories,
   selectedCategory,
   onCategoryChange,
+  adultTypes,
+  selectedAdultType,
+  onAdultTypeChange,
   actors,
   selectedActor,
   onActorChange,
@@ -15,14 +19,17 @@ export function LibraryFilterBar({
   categories: CategoryFacet[]
   selectedCategory: string
   onCategoryChange: (category: string) => void
+  adultTypes: AdultTypeFacet[]
+  selectedAdultType: string
+  onAdultTypeChange: (adultType: string) => void
   actors: ActorFacet[]
   selectedActor: string
   onActorChange: (actor: string) => void
 }) {
-  if (categories.length === 0 && actors.length === 0) return null
+  if (categories.length === 0 && adultTypes.length === 0 && actors.length === 0) return null
 
   return (
-    <div className="grid gap-2 border-y border-gray-200 py-3 sm:grid-cols-2">
+    <div className="grid gap-2 border-y border-gray-200 py-3 sm:grid-cols-2 lg:grid-cols-3">
       {categories.length > 0 && (
         <FilterSelect
           icon={<Tags size={18} />}
@@ -31,6 +38,16 @@ export function LibraryFilterBar({
           value={selectedCategory}
           options={categories}
           onChange={onCategoryChange}
+        />
+      )}
+      {adultTypes.length > 0 && (
+        <FilterSelect
+          icon={<Clapperboard size={18} />}
+          label="按成人类型筛选"
+          emptyLabel="全部成人类型"
+          value={selectedAdultType}
+          options={adultTypes}
+          onChange={onAdultTypeChange}
         />
       )}
       {actors.length > 0 && (

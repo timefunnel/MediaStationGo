@@ -141,11 +141,18 @@ export const MediaCard = ({
           </p>
           <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[var(--app-muted)]">
             <span>{media.year > 0 ? media.year : "未知年份"}</span>
-            {media.video_codec && (
-              <span className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-1.5 py-0.5 text-[var(--app-subtle)]">
-                {media.video_codec}
-              </span>
-            )}
+            <span className="flex items-center gap-1">
+              {media.adult_type && (
+                <span className="rounded-xl border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-brand-700">
+                  {media.adult_type}
+                </span>
+              )}
+              {media.video_codec && (
+                <span className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-1.5 py-0.5 text-[var(--app-subtle)]">
+                  {media.video_codec}
+                </span>
+              )}
+            </span>
           </div>
         </div>
       </motion.div>

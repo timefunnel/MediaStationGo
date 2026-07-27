@@ -23,6 +23,11 @@ export function MediaDetailMetadata({ media }: MediaDetailMetadataProps) {
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2.5 text-xs text-gray-500 font-bold tracking-wide uppercase">
+          {media.adult_type && (
+            <span className="inline-flex items-center rounded-xl border border-brand-200 bg-brand-50 px-2.5 py-1 text-brand-700">
+              {media.adult_type}
+            </span>
+          )}
           {media.year > 0 && (
             <span className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200/50 px-2.5 py-1 rounded-xl text-gray-700">
               <Calendar size={13} className="text-brand-500" />

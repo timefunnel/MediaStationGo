@@ -134,7 +134,9 @@ func (e *EmbyService) embyGenresForMedia(media *model.Media, mediaType string) [
 		categories = e.cfg.Organizer.Categories
 	}
 	values := make([]string, 0, len(splitCSV(media.Genres))+1)
-	if category := automaticMediaCategory(media, mediaType, categories); category != "" {
+	if adultType := adultMediaDisplayType(media, mediaType); adultType != "" {
+		values = append(values, adultType)
+	} else if category := automaticMediaCategory(media, mediaType, categories); category != "" {
 		values = append(values, category)
 	}
 	for _, genre := range splitCSV(media.Genres) {

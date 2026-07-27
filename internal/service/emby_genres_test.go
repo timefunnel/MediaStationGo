@@ -75,14 +75,14 @@ func TestEmbyGenresRespectAdultVisibility(t *testing.T) {
 		}
 	}
 	viewer := model.User{
-		Base:                  model.Base{ID: "viewer"},
-		Username:              "viewer",
-		PasswordHash:          "x",
-		Role:                  "user",
-		AllowedLibraryIDs:     []string{movieLibrary.ID, adultLibrary.ID},
-		HideAdult:             false,
-		AdultContentBlocked:   true,
-		IsActive:              true,
+		Base:                model.Base{ID: "viewer"},
+		Username:            "viewer",
+		PasswordHash:        "x",
+		Role:                "user",
+		AllowedLibraryIDs:   []string{movieLibrary.ID, adultLibrary.ID},
+		HideAdult:           false,
+		AdultContentBlocked: true,
+		IsActive:            true,
 	}
 	if err := svc.repo.User.Create(t.Context(), &viewer); err != nil {
 		t.Fatal(err)
@@ -109,6 +109,50 @@ func TestEmbyGenresRespectAdultVisibility(t *testing.T) {
 	}
 	if !slices.Contains(names, "华语电影") || !slices.Contains(names, "剧情") {
 		t.Fatalf("visible genres missing from %#v", names)
+	}
+}
+
+func TestEmbyAdultGenresSeparateAVAndFC2(t *testing.T) {
+	svc := newTestEmbyService(t)
+	adultLibrary := model.Library{Name: "成人", Path: "/media/成人", Type: "adult", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &adultLibrary); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{Base: model.Base{ID: "av"}, LibraryID: adultLibrary.ID, Title: "MIZD-534", OriginalName: "MIZD-534", Path: "/media/成人/MIZD-534.mp4", Genres: "Adult,javdb", NSFW: true},
+		{Base: model.Base{ID: "fc2"}, LibraryID: adultLibrary.ID, Title: "FC2 作品", OriginalName: "FC2-PPV-3780016", Path: "/media/成人/FC2-PPV-3780016.mp4", Genres: "Adult,fd2ppv", NSFW: true},
+	}
+	for i := range rows {
+		if err := svc.repo.DB.Create(&rows[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	genres, err := svc.Genres(t.Context(), ItemsParams{ParentID: adultLibrary.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := genrePayloadNames(genres["Items"].([]map[string]any))
+	for _, want := range []string{adultMediaTypeAV, adultMediaTypeFC2} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("genres = %#v, missing %q", names, want)
+		}
+	}
+	if slices.Contains(names, "成人") {
+		t.Fatalf("adult smart category should be replaced by AV/FC2, got %#v", names)
+	}
+
+	items, err := svc.Items(t.Context(), ItemsParams{
+		ParentID: adultLibrary.ID,
+		GenreIDs: []string{embyGenreID(adultMediaTypeFC2)},
+		Limit:    50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered := items["Items"].([]map[string]any)
+	if len(filtered) != 1 || filtered[0]["Id"] != "fc2" {
+		t.Fatalf("FC2 genre filter = %#v", filtered)
 	}
 }
 

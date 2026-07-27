@@ -45,10 +45,11 @@ func (s *MediaService) attachLibraryMetadata(ctx context.Context, items []model.
 				items[i].LibraryPath = lib.Path
 			}
 		}
+		isAdult := items[i].NSFW || (hasOwn && LibraryIsAdult(own))
 		items[i].DisplayTitle = adultDisplayNameForMedia(
 			&items[i],
 			items[i].Title,
-			items[i].NSFW || (hasOwn && LibraryIsAdult(own)),
+			isAdult,
 		)
 		if items[i].DisplayTitle == items[i].Title {
 			items[i].DisplayTitle = ""
@@ -58,6 +59,7 @@ func (s *MediaService) attachLibraryMetadata(ctx context.Context, items []model.
 			mediaType = own.Type
 		}
 		items[i].AutoCategory = automaticMediaCategory(&items[i], mediaType, categories)
+		items[i].AdultType = adultMediaDisplayType(&items[i], mediaType)
 	}
 }
 

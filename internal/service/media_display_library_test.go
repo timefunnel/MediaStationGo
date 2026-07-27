@@ -86,4 +86,29 @@ func TestAttachLibraryMetadataUsesEmbyAdultDisplayTitle(t *testing.T) {
 	if items[0].AutoCategory != "成人" {
 		t.Fatalf("auto_category = %q, want 成人", items[0].AutoCategory)
 	}
+	if items[0].AdultType != adultMediaTypeAV {
+		t.Fatalf("adult_type = %q, want AV", items[0].AdultType)
+	}
+}
+
+func TestAttachLibraryMetadataMarksFC2AdultType(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	adult := model.Library{Name: "成人", Path: "cloud://openlist/115/成人", Type: "adult", Enabled: true}
+	if err := repos.Library.Create(t.Context(), &adult); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMediaService(&config.Config{}, zap.NewNop(), repos)
+	items := []model.Media{{
+		LibraryID:    adult.ID,
+		Title:        "FC2 作品",
+		OriginalName: "FC2-PPV-3780016",
+		Path:         "cloud://openlist/115/成人/FC2-PPV-3780016/main.mp4",
+	}}
+
+	svc.attachLibraryMetadata(t.Context(), items)
+
+	if items[0].AdultType != adultMediaTypeFC2 {
+		t.Fatalf("adult_type = %q, want FC2", items[0].AdultType)
+	}
 }

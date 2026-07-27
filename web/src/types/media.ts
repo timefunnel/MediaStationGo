@@ -8,6 +8,7 @@ export interface Media {
   display_library_name?: string
   display_library_path?: string
   auto_category?: string
+  adult_type?: 'AV' | 'FC2'
   series_id?: string
   title: string
   display_title?: string
