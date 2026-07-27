@@ -111,3 +111,18 @@ func (s *MediaService) GetMedia(ctx context.Context, id string) (*model.Media, e
 	*media = items[0]
 	return media, nil
 }
+
+// GetMediaByIDs returns active media rows with the same display metadata as GetMedia.
+func (s *MediaService) GetMediaByIDs(ctx context.Context, ids []string) ([]model.Media, error) {
+	items, err := s.repo.Media.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	s.attachLibraryMetadata(ctx, items)
+	for i := range items {
+		if title := strings.TrimSpace(items[i].PartGroupTitle); title != "" {
+			items[i].DisplayTitle = title
+		}
+	}
+	return items, nil
+}

@@ -15,6 +15,7 @@ import {
 import { confirmAction } from '../components/confirmAction'
 import type { MediaVersion } from '../types'
 import { mediaFilename } from '../utils/mediaFilename'
+import { subtitleASRStageLabel } from './subtitleASRTaskModel'
 
 type MediaDetailSubtitlesProps = {
   mediaId: string
@@ -485,19 +486,6 @@ function subtitleSourceLabel(source: string): string {
     '115': '115 网盘',
     'sensevoice-deepseek': 'SenseVoice + DeepSeek',
   }[source?.toLowerCase()] || source || '未知来源'
-}
-
-function subtitleASRStageLabel(stage: SubtitleASRTask['stage']): string {
-  return {
-    queued: '等待生成',
-    starting: '正在启动任务',
-    extracting_audio: '正在抽取音轨',
-    transcribing: 'SenseVoice 正在识别',
-    translating: 'DeepSeek 正在翻译为简体中文',
-    saving: '正在保存字幕',
-    completed: 'AI 字幕已生成',
-    failed: 'AI 字幕生成失败',
-  }[stage] || stage
 }
 
 function errorMessage(error: unknown, fallback: string): string {

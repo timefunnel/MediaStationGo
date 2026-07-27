@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -67,6 +68,14 @@ type SubtitleASRTask struct {
 	UpdatedAt       int64              `json:"updated_at"`
 	StartedAt       int64              `json:"started_at"`
 	CompletedAt     int64              `json:"completed_at"`
+	AttemptCount    int                `json:"attempt_count"`
+	MediaTitle      string             `json:"media_title,omitempty"`
+	MediaFilename   string             `json:"media_filename,omitempty"`
+	MediaAvailable  bool               `json:"media_available"`
+}
+
+type SubtitleASRTaskList struct {
+	Items []SubtitleASRTask `json:"items"`
 }
 
 type subtitlePipelineClient interface {
@@ -75,6 +84,7 @@ type subtitlePipelineClient interface {
 	ApplySubtitle(context.Context, string, string, string, string) (SubtitleApplyResult, error)
 	CreateSubtitleASR(context.Context, string, string, string) (SubtitleASRTask, error)
 	GetSubtitleASR(context.Context, string, string) (SubtitleASRTask, error)
+	ListSubtitleASR(context.Context, int) ([]SubtitleASRTask, error)
 }
 
 func (c *resourcePipelineHTTPClient) CreateSubtitleASR(ctx context.Context, ownerID, mediaID, sourceLanguage string) (SubtitleASRTask, error) {
@@ -90,6 +100,16 @@ func (c *resourcePipelineHTTPClient) GetSubtitleASR(ctx context.Context, ownerID
 	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "?owner_id=" + url.QueryEscape(ownerID)
 	err := c.doJSON(ctx, "GET", endpoint, nil, "", &out)
 	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) ListSubtitleASR(ctx context.Context, limit int) ([]SubtitleASRTask, error) {
+	var out SubtitleASRTaskList
+	endpoint := "/v1/subtitles/asr?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	err := c.doJSON(ctx, "GET", endpoint, nil, "", &out)
+	if out.Items == nil {
+		out.Items = []SubtitleASRTask{}
+	}
+	return out.Items, err
 }
 
 type subtitlePipelineSelectionRequest struct {
@@ -199,6 +219,19 @@ func (s *SubtitleService) GetASRTask(ctx context.Context, ownerID, taskID string
 		return SubtitleASRTask{}, errors.New("subtitle owner and task are required")
 	}
 	return s.pipeline.GetSubtitleASR(ctx, ownerID, taskID)
+}
+
+func (s *SubtitleService) ListASRTasks(ctx context.Context, limit int) ([]SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return nil, errors.New("subtitle pipeline unavailable")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	return s.pipeline.ListSubtitleASR(ctx, limit)
 }
 
 func validSubtitleASRLanguage(value string) bool {

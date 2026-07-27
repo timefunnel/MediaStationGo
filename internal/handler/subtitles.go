@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/middleware"
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
@@ -232,6 +233,49 @@ func getSubtitleASRHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, task)
+	}
+}
+
+func listSubtitleASRTasksHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tasks, err := svc.Subtitle.ListASRTasks(c.Request.Context(), 50)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		mediaIDs := make([]string, 0, len(tasks))
+		for i := range tasks {
+			mediaIDs = append(mediaIDs, tasks[i].MediaID)
+		}
+		mediaRows, mediaErr := svc.Media.GetMediaByIDs(c.Request.Context(), mediaIDs)
+		if mediaErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": mediaErr.Error()})
+			return
+		}
+		mediaByID := make(map[string]model.Media, len(mediaRows))
+		for i := range mediaRows {
+			mediaByID[mediaRows[i].ID] = mediaRows[i]
+		}
+		for i := range tasks {
+			media, ok := mediaByID[tasks[i].MediaID]
+			if !ok {
+				continue
+			}
+			tasks[i].MediaAvailable = true
+			tasks[i].MediaTitle = strings.TrimSpace(media.DisplayTitle)
+			if tasks[i].MediaTitle == "" {
+				tasks[i].MediaTitle = strings.TrimSpace(media.Title)
+			}
+			if tasks[i].MediaTitle == "" {
+				tasks[i].MediaTitle = strings.TrimSpace(media.OriginalName)
+			}
+			normalizedPath := strings.Trim(strings.ReplaceAll(strings.TrimSpace(media.Path), "\\", "/"), "/")
+			if slash := strings.LastIndex(normalizedPath, "/"); slash >= 0 {
+				normalizedPath = normalizedPath[slash+1:]
+			}
+			tasks[i].MediaFilename = normalizedPath
+		}
+		c.JSON(http.StatusOK, service.SubtitleASRTaskList{Items: tasks})
 	}
 }
 

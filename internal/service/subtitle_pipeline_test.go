@@ -42,6 +42,16 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 				MediaID: "media-1", Status: "success", Source: "subtitlecat", Filename: "subtitle.srt", Count: 1,
 			})
 		case "/v1/subtitles/asr":
+			if r.Method == http.MethodGet {
+				if r.URL.Query().Get("limit") != "50" {
+					t.Fatalf("unexpected ASR list query: %s", r.URL.RawQuery)
+				}
+				_ = json.NewEncoder(w).Encode(SubtitleASRTaskList{Items: []SubtitleASRTask{{
+					ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
+					Status: "completed", Stage: "completed",
+				}}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(SubtitleASRTask{
 				ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
 				Status: "queued", Stage: "queued",
@@ -95,5 +105,9 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	asr, err = client.GetSubtitleASR(t.Context(), "admin-id", "asr-1")
 	if err != nil || asr.Status != "completed" || asr.Result == nil || asr.Result.Source != "sensevoice-deepseek" {
 		t.Fatalf("unexpected ASR get response: %#v err=%v", asr, err)
+	}
+	listed, err := client.ListSubtitleASR(t.Context(), 50)
+	if err != nil || len(listed) != 1 || listed[0].ID != "asr-1" {
+		t.Fatalf("unexpected ASR list response: %#v err=%v", listed, err)
 	}
 }

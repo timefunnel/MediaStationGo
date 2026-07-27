@@ -3,7 +3,9 @@ import toast from 'react-hot-toast'
 import { Activity, Copy } from 'lucide-react'
 
 import { tasksAPI, type BackgroundTask, type TasksSnapshot } from '../api/tasks'
+import { subtitlesAPI, type SubtitleASRTask } from '../api/subtitles'
 import { useAuthStore } from '../stores/auth'
+import { SubtitleASRTasksSection } from './SubtitleASRTasksSection'
 import { TorrentTaskTable, TranscodeTaskTable } from './TaskRuntimeTables'
 
 const metricLabels: Record<string, string> = {
@@ -160,6 +162,8 @@ function BackgroundTaskTable({ tasks, empty }: { tasks: BackgroundTask[]; empty:
 // TasksPage is the admin-only runtime diagnostics surface.
 export function TasksPage() {
   const [snap, setSnap] = useState<TasksSnapshot | null>(null)
+  const [subtitleTasks, setSubtitleTasks] = useState<SubtitleASRTask[] | null>(null)
+  const [subtitleTaskError, setSubtitleTaskError] = useState('')
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
 
   useEffect(() => {
@@ -169,6 +173,28 @@ export function TasksPage() {
       tasksAPI.snapshot().then((s) => {
         if (!cancelled) setSnap(s)
       })
+    void tick()
+    const id = window.setInterval(tick, 3_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    const tick = () => {
+      subtitlesAPI.listASRTasks()
+        .then((tasks) => {
+          if (cancelled) return
+          setSubtitleTasks(tasks)
+          setSubtitleTaskError('')
+        })
+        .catch((error) => {
+          if (!cancelled) setSubtitleTaskError(subtitleTaskErrorMessage(error))
+        })
+    }
     void tick()
     const id = window.setInterval(tick, 3_000)
     return () => {
@@ -203,6 +229,8 @@ export function TasksPage() {
         </div>
       </section>}
 
+      {isAdmin && <SubtitleASRTasksSection tasks={subtitleTasks} error={subtitleTaskError} />}
+
       {isAdmin && snap && <section className="glass-panel">
         <h2 className="mb-3 font-display text-lg font-semibold text-ink-600">转码任务</h2>
         <TranscodeTaskTable transcodes={snap.transcodes} />
@@ -214,4 +242,9 @@ export function TasksPage() {
       </section>}
     </div>
   )
+}
+
+function subtitleTaskErrorMessage(error: unknown): string {
+  return (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+    || (error instanceof Error ? error.message : 'AI 字幕任务加载失败')
 }

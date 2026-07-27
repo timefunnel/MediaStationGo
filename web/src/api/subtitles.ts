@@ -72,6 +72,10 @@ export interface SubtitleASRTask {
   updated_at: number
   started_at: number
   completed_at: number
+  attempt_count: number
+  media_title?: string
+  media_filename?: string
+  media_available: boolean
 }
 
 export const subtitlesAPI = {
@@ -127,6 +131,11 @@ export const subtitlesAPI = {
         `/media/${encodeURIComponent(mediaId)}/subtitles/asr/${encodeURIComponent(taskId)}`,
       )
       .then((r) => r.data),
+
+  listASRTasks: () =>
+    api
+      .get<{ items: SubtitleASRTask[] | null }>('/subtitles/asr/tasks')
+      .then((r) => r.data.items ?? []),
 
   url: (mediaId: string, path: string) => {
     const token = useAuthStore.getState().token ?? ''

@@ -77,6 +77,18 @@ func (r *MediaRepository) FindByID(ctx context.Context, id string) (*model.Media
 	return &m, nil
 }
 
+// FindByIDs returns active media rows for the requested IDs in one query.
+func (r *MediaRepository) FindByIDs(ctx context.Context, ids []string) ([]model.Media, error) {
+	if len(ids) == 0 {
+		return []model.Media{}, nil
+	}
+	var items []model.Media
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // ListByLibrary returns paginated media items for a library.
 func (r *MediaRepository) ListByLibrary(ctx context.Context, libraryID string, offset, limit int) ([]model.Media, int64, error) {
 	return r.ListByLibraryFiltered(ctx, libraryID, offset, limit, MediaQueryFilter{IncludeNSFW: true})
