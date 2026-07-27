@@ -15,10 +15,12 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
 		}
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if body["owner_id"] != "admin-id" || body["media_id"] != "media-1" {
+		if body != nil && (body["owner_id"] != "admin-id" || body["media_id"] != "media-1") {
 			t.Fatalf("unexpected request body: %#v", body)
 		}
 		switch r.URL.Path {
@@ -38,6 +40,20 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 		case "/v1/subtitles/apply":
 			_ = json.NewEncoder(w).Encode(SubtitleApplyResult{
 				MediaID: "media-1", Status: "success", Source: "subtitlecat", Filename: "subtitle.srt", Count: 1,
+			})
+		case "/v1/subtitles/asr":
+			_ = json.NewEncoder(w).Encode(SubtitleASRTask{
+				ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
+				Status: "queued", Stage: "queued",
+			})
+		case "/v1/subtitles/asr/asr-1":
+			if r.URL.Query().Get("owner_id") != "admin-id" {
+				t.Fatalf("unexpected owner query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(SubtitleASRTask{
+				ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
+				Status: "completed", Stage: "completed",
+				Result: &SubtitleASRResult{Filename: "sensevoice-deepseek-zh-cn.srt", Source: "sensevoice-deepseek"},
 			})
 		default:
 			http.NotFound(w, r)
@@ -71,5 +87,13 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	}
 	if applied.Status != "success" || applied.Filename != "subtitle.srt" {
 		t.Fatalf("unexpected apply response: %#v", applied)
+	}
+	asr, err := client.CreateSubtitleASR(t.Context(), "admin-id", "media-1", "ja")
+	if err != nil || asr.ID != "asr-1" || asr.SourceLanguage != "ja" {
+		t.Fatalf("unexpected ASR create response: %#v err=%v", asr, err)
+	}
+	asr, err = client.GetSubtitleASR(t.Context(), "admin-id", "asr-1")
+	if err != nil || asr.Status != "completed" || asr.Result == nil || asr.Result.Source != "sensevoice-deepseek" {
+		t.Fatalf("unexpected ASR get response: %#v err=%v", asr, err)
 	}
 }

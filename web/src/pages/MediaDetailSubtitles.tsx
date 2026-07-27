@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { Captions, Eye, LoaderCircle, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { Captions, Eye, LoaderCircle, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 
 import {
   subtitlesAPI,
   type SubtitleCandidatePreview,
+  type SubtitleASRSourceLanguage,
+  type SubtitleASRTask,
   type SubtitleSearchCandidate,
   type SubtitleSearchResponse,
   type SubtitleTrack,
@@ -42,6 +44,13 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   const [searchResult, setSearchResult] = useState<SubtitleSearchResponse | null>(null)
   const [preview, setPreview] = useState<PreviewState>(null)
   const [applyingCandidateId, setApplyingCandidateId] = useState('')
+  const [asrLanguage, setAsrLanguage] = useState<SubtitleASRSourceLanguage>('auto')
+  const [asrCreating, setAsrCreating] = useState(false)
+  const [asrTask, setAsrTask] = useState<SubtitleASRTask | null>(null)
+  const [asrError, setAsrError] = useState('')
+  const announcedASRTask = useRef('')
+  const asrPollingTaskID = asrTask?.id
+  const asrPolling = asrTask?.status === 'queued' || asrTask?.status === 'running'
 
   useEffect(() => {
     if (!versions.some((version) => version.id === selectedMediaId)) {
@@ -68,7 +77,47 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     setSearchOpen(false)
     setSearchResult(null)
     setPreview(null)
+    setAsrTask(null)
+    setAsrError('')
   }, [loadTracks])
+
+  useEffect(() => {
+    if (!asrPollingTaskID || !asrPolling) return
+    let stopped = false
+    let timer = 0
+    const poll = async () => {
+      try {
+        const task = await subtitlesAPI.getASR(selectedMediaId, asrPollingTaskID)
+        if (stopped) return
+        setAsrTask(task)
+        setAsrError('')
+        if (['queued', 'running'].includes(task.status)) {
+          timer = window.setTimeout(() => void poll(), 1500)
+        }
+      } catch (error) {
+        if (stopped) return
+        setAsrError(errorMessage(error, 'AI 字幕任务状态读取失败'))
+        timer = window.setTimeout(() => void poll(), 3000)
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 1000)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [asrPolling, asrPollingTaskID, selectedMediaId])
+
+  useEffect(() => {
+    if (!asrTask || announcedASRTask.current === asrTask.id) return
+    if (asrTask.status === 'completed') {
+      announcedASRTask.current = asrTask.id
+      toast.success('AI 简体中文字幕已保存到当前片源')
+      void loadTracks()
+    } else if (asrTask.status === 'failed') {
+      announcedASRTask.current = asrTask.id
+      toast.error(asrTask.error || 'AI 字幕生成失败')
+    }
+  }, [asrTask, loadTracks])
 
   const openExistingPreview = useCallback(async (track: SubtitleTrack) => {
     setPreview({ title: track.name || track.label, content: '', loading: true, error: '' })
@@ -153,6 +202,23 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     }
   }, [applyingCandidateId, loadTracks, searchResult, selectedMediaId])
 
+  const createASR = useCallback(async () => {
+    if (asrCreating || ['queued', 'running'].includes(asrTask?.status || '')) return
+    setAsrCreating(true)
+    setAsrError('')
+    try {
+      const task = await subtitlesAPI.createASR(selectedMediaId, asrLanguage)
+      announcedASRTask.current = ''
+      setAsrTask(task)
+    } catch (error) {
+      const message = errorMessage(error, 'AI 字幕任务创建失败')
+      setAsrError(message)
+      toast.error(message)
+    } finally {
+      setAsrCreating(false)
+    }
+  }, [asrCreating, asrLanguage, asrTask?.status, selectedMediaId])
+
   return (
     <section className="space-y-3" aria-label="字幕文件">
       <div className="flex flex-wrap items-center gap-2">
@@ -187,8 +253,46 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
             <Search size={14} />
             搜索字幕
           </button>
+          <select
+            value={asrLanguage}
+            disabled={asrCreating || ['queued', 'running'].includes(asrTask?.status || '')}
+            onChange={(event) => setAsrLanguage(event.target.value as SubtitleASRSourceLanguage)}
+            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+            aria-label="AI 字幕源语言"
+          >
+            <option value="auto">自动识别</option>
+            <option value="ja">日语</option>
+            <option value="en">英语</option>
+            <option value="zh">中文</option>
+            <option value="ko">韩语</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void createASR()}
+            disabled={asrCreating || ['queued', 'running'].includes(asrTask?.status || '')}
+            className="btn-outline h-9 gap-1.5 px-3 text-xs"
+          >
+            {asrCreating || ['queued', 'running'].includes(asrTask?.status || '')
+              ? <LoaderCircle size={14} className="animate-spin" />
+              : <Sparkles size={14} />}
+            AI 生成字幕
+          </button>
         </div>
       </div>
+
+      {(asrTask || asrError) && (
+        <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
+          {asrTask && asrTask.status !== 'failed' && (
+            <span>
+              {subtitleASRStageLabel(asrTask.stage)}
+              {asrTask.progress_total > 0 ? ` · ${asrTask.progress_current}/${asrTask.progress_total}` : ''}
+              {asrTask.status === 'completed' && asrTask.result ? ` · ${asrTask.result.segment_count} 个分段` : ''}
+            </span>
+          )}
+          {asrTask?.status === 'failed' && <span>{asrTask.error || 'AI 字幕生成失败'}</span>}
+          {asrError && <span>{asrTask ? ' · ' : ''}{asrError}</span>}
+        </div>
+      )}
 
       {loadError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{loadError}</p>}
       {!loading && !loadError && tracks.length === 0 && (
@@ -378,7 +482,21 @@ function subtitleSourceLabel(source: string): string {
     opensubtitles: 'OpenSubtitles',
     openlist: 'OpenList',
     '115': '115 网盘',
+    'sensevoice-deepseek': 'SenseVoice + DeepSeek',
   }[source?.toLowerCase()] || source || '未知来源'
+}
+
+function subtitleASRStageLabel(stage: SubtitleASRTask['stage']): string {
+  return {
+    queued: '等待生成',
+    starting: '正在启动任务',
+    extracting_audio: '正在抽取音轨',
+    transcribing: 'SenseVoice 正在识别',
+    translating: 'DeepSeek 正在翻译为简体中文',
+    saving: '正在保存字幕',
+    completed: 'AI 字幕已生成',
+    failed: 'AI 字幕生成失败',
+  }[stage] || stage
 }
 
 function errorMessage(error: unknown, fallback: string): string {

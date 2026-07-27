@@ -3,10 +3,12 @@ package handler
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/middleware"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
@@ -24,6 +26,10 @@ type subtitleSearchRequest struct {
 type subtitleCandidateRequest struct {
 	SearchSessionID string `json:"search_session_id"`
 	CandidateID     string `json:"candidate_id"`
+}
+
+type subtitleASRRequest struct {
+	SourceLanguage string `json:"source_language"`
 }
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
@@ -189,6 +195,86 @@ func applySubtitleCandidateHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func createSubtitleASRHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		media, err := svc.Media.GetMedia(c.Request.Context(), c.Param("id"))
+		if err != nil || media == nil || !mediaVisibleForRequest(c, svc, media) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		var in subtitleASRRequest
+		if c.Request.ContentLength != 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		task, err := svc.Subtitle.CreateASRTask(
+			c.Request.Context(), middleware.GetUserID(c), media.ID, in.SourceLanguage,
+		)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusAccepted, task)
+	}
+}
+
+func getSubtitleASRHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		task, err := svc.Subtitle.GetASRTask(c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"))
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		if task.MediaID != c.Param("id") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusOK, task)
+	}
+}
+
+func pipelineASRAudioHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.Stream == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "media stream service unavailable"})
+			return
+		}
+		stream, wait, err := svc.Stream.StartASRAudioExtraction(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		defer stream.Close()
+		c.Header("Content-Type", "audio/mpeg")
+		c.Header("Content-Disposition", `attachment; filename="asr-audio.mp3"`)
+		c.Header("Cache-Control", "no-store")
+		copied, copyErr := io.Copy(c.Writer, stream)
+		waitErr := wait()
+		if copyErr == nil && waitErr == nil && copied > 0 {
+			return
+		}
+		if copied == 0 && !c.Writer.Written() {
+			c.Writer.Header().Del("Content-Type")
+			c.Writer.Header().Del("Content-Disposition")
+			if copyErr != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "audio extraction stream failed: " + copyErr.Error()})
+				return
+			}
+			if waitErr != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": waitErr.Error()})
+				return
+			}
+			c.JSON(http.StatusBadGateway, gin.H{"error": "audio extraction returned no data"})
+			return
+		}
+		if svc.Log != nil {
+			svc.Log.Error("ASR audio extraction stream failed", zap.Int64("bytes", copied), zap.Error(errors.Join(copyErr, waitErr)))
+		}
+	}
+}
+
 func bindSubtitleCandidateRequest(c *gin.Context) (subtitleCandidateRequest, bool) {
 	var in subtitleCandidateRequest
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -208,7 +294,7 @@ func writeSubtitlePipelineError(c *gin.Context, err error) {
 	var pipelineStatus interface{ HTTPStatus() int }
 	if errors.As(err, &pipelineStatus) {
 		status := pipelineStatus.HTTPStatus()
-		if status >= 400 && status < 500 {
+		if (status >= 400 && status < 500) || status == http.StatusServiceUnavailable {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 )
 
@@ -43,10 +44,52 @@ type SubtitleApplyResult struct {
 	Reason   string `json:"reason"`
 }
 
+type SubtitleASRResult struct {
+	Filename     string  `json:"filename"`
+	Source       string  `json:"source"`
+	Language     string  `json:"language"`
+	SegmentCount int     `json:"segment_count"`
+	Duration     float64 `json:"duration"`
+}
+
+type SubtitleASRTask struct {
+	ID              string             `json:"id"`
+	OwnerID         string             `json:"owner_id"`
+	MediaID         string             `json:"media_id"`
+	SourceLanguage  string             `json:"source_language"`
+	Status          string             `json:"status"`
+	Stage           string             `json:"stage"`
+	ProgressCurrent int                `json:"progress_current"`
+	ProgressTotal   int                `json:"progress_total"`
+	Result          *SubtitleASRResult `json:"result"`
+	Error           string             `json:"error"`
+	CreatedAt       int64              `json:"created_at"`
+	UpdatedAt       int64              `json:"updated_at"`
+	StartedAt       int64              `json:"started_at"`
+	CompletedAt     int64              `json:"completed_at"`
+}
+
 type subtitlePipelineClient interface {
 	SearchSubtitles(context.Context, string, string, int) (SubtitleSearchResponse, error)
 	PreviewSubtitle(context.Context, string, string, string, string) (SubtitleCandidatePreview, error)
 	ApplySubtitle(context.Context, string, string, string, string) (SubtitleApplyResult, error)
+	CreateSubtitleASR(context.Context, string, string, string) (SubtitleASRTask, error)
+	GetSubtitleASR(context.Context, string, string) (SubtitleASRTask, error)
+}
+
+func (c *resourcePipelineHTTPClient) CreateSubtitleASR(ctx context.Context, ownerID, mediaID, sourceLanguage string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	err := c.doJSON(ctx, "POST", "/v1/subtitles/asr", map[string]any{
+		"owner_id": ownerID, "media_id": mediaID, "source_language": sourceLanguage,
+	}, "", &out)
+	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) GetSubtitleASR(ctx context.Context, ownerID, taskID string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "?owner_id=" + url.QueryEscape(ownerID)
+	err := c.doJSON(ctx, "GET", endpoint, nil, "", &out)
+	return out, err
 }
 
 type subtitlePipelineSelectionRequest struct {
@@ -125,4 +168,44 @@ func (s *SubtitleService) ApplyCandidate(ctx context.Context, ownerID, mediaID, 
 		return SubtitleApplyResult{}, errors.New("subtitle pipeline did not save the selected subtitle")
 	}
 	return result, nil
+}
+
+func (s *SubtitleService) CreateASRTask(ctx context.Context, ownerID, mediaID, sourceLanguage string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	ownerID = strings.TrimSpace(ownerID)
+	mediaID = strings.TrimSpace(mediaID)
+	sourceLanguage = strings.ToLower(strings.TrimSpace(sourceLanguage))
+	if sourceLanguage == "" {
+		sourceLanguage = "auto"
+	}
+	if ownerID == "" || mediaID == "" {
+		return SubtitleASRTask{}, errors.New("subtitle owner and media are required")
+	}
+	if !validSubtitleASRLanguage(sourceLanguage) {
+		return SubtitleASRTask{}, errors.New("source_language must be one of: auto, ja, en, zh, ko")
+	}
+	return s.pipeline.CreateSubtitleASR(ctx, ownerID, mediaID, sourceLanguage)
+}
+
+func (s *SubtitleService) GetASRTask(ctx context.Context, ownerID, taskID string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	ownerID = strings.TrimSpace(ownerID)
+	taskID = strings.TrimSpace(taskID)
+	if ownerID == "" || taskID == "" {
+		return SubtitleASRTask{}, errors.New("subtitle owner and task are required")
+	}
+	return s.pipeline.GetSubtitleASR(ctx, ownerID, taskID)
+}
+
+func validSubtitleASRLanguage(value string) bool {
+	switch value {
+	case "auto", "ja", "en", "zh", "ko":
+		return true
+	default:
+		return false
+	}
 }

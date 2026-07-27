@@ -70,12 +70,15 @@ func registerAuthedMediaRoutes(authed *gin.RouterGroup, svc *service.Container) 
 	authed.POST("/media/:id/subtitles/search", middleware.AdminRequired(), searchSubtitleCandidatesHandler(svc))
 	authed.POST("/media/:id/subtitles/preview", middleware.AdminRequired(), previewSubtitleCandidateHandler(svc))
 	authed.POST("/media/:id/subtitles/apply", middleware.AdminRequired(), applySubtitleCandidateHandler(svc))
+	authed.POST("/media/:id/subtitles/asr", middleware.AdminRequired(), createSubtitleASRHandler(svc))
+	authed.GET("/media/:id/subtitles/asr/:task_id", middleware.AdminRequired(), getSubtitleASRHandler(svc))
 	authed.POST("/subtitles/cloud-cache/invalidate", middleware.AdminRequired(), invalidateCloudSubtitleCacheHandler(svc))
 	authed.POST("/media/:id/nfo", middleware.AdminRequired(), exportNFOHandler(svc))
 	authed.POST("/libraries/:id/nfo", middleware.AdminRequired(), exportLibraryNFOHandler(svc))
 }
 
 func registerAuthedPlaybackAndProxyRoutes(authed *gin.RouterGroup, svc *service.Container) {
+	authed.GET("/pipeline/media/:id/asr-audio", middleware.AdminRequired(), pipelineASRAudioHandler(svc))
 	authed.GET("/stream/:id", requirePermission(svc, "can_play_media"), streamHandler(svc))
 	authed.HEAD("/stream/:id", requirePermission(svc, "can_play_media"), streamHandler(svc))
 	authed.GET("/hls/:id/index.m3u8", requirePermission(svc, "can_play_media"), hlsPlaylistHandler(svc))

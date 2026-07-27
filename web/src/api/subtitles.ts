@@ -47,6 +47,33 @@ export interface SubtitleApplyResult {
   reason: string
 }
 
+export type SubtitleASRSourceLanguage = 'auto' | 'ja' | 'en' | 'zh' | 'ko'
+
+export interface SubtitleASRResult {
+  filename: string
+  source: string
+  language: string
+  segment_count: number
+  duration: number
+}
+
+export interface SubtitleASRTask {
+  id: string
+  owner_id: string
+  media_id: string
+  source_language: SubtitleASRSourceLanguage
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  stage: 'queued' | 'starting' | 'extracting_audio' | 'transcribing' | 'translating' | 'saving' | 'completed' | 'failed'
+  progress_current: number
+  progress_total: number
+  result: SubtitleASRResult | null
+  error: string
+  created_at: number
+  updated_at: number
+  started_at: number
+  completed_at: number
+}
+
 export const subtitlesAPI = {
   list: (mediaId: string) =>
     api
@@ -84,6 +111,20 @@ export const subtitlesAPI = {
       .post<{ result: SubtitleApplyResult; tracks: SubtitleTrack[] }>(
         `/media/${encodeURIComponent(mediaId)}/subtitles/apply`,
         { search_session_id: searchSessionId, candidate_id: candidateId },
+      )
+      .then((r) => r.data),
+
+  createASR: (mediaId: string, sourceLanguage: SubtitleASRSourceLanguage) =>
+    api
+      .post<SubtitleASRTask>(`/media/${encodeURIComponent(mediaId)}/subtitles/asr`, {
+        source_language: sourceLanguage,
+      })
+      .then((r) => r.data),
+
+  getASR: (mediaId: string, taskId: string) =>
+    api
+      .get<SubtitleASRTask>(
+        `/media/${encodeURIComponent(mediaId)}/subtitles/asr/${encodeURIComponent(taskId)}`,
       )
       .then((r) => r.data),
 
