@@ -35,8 +35,16 @@ type SubtitleService struct {
 	repo          *repository.Container
 	storage       *StorageConfigService
 	pipeline      subtitlePipelineClient
+	apiConfig     *APIConfigService
 	localCacheDir string
 	cloudCache    *cloudSubtitleDiscoveryCache
+}
+
+func (s *SubtitleService) SetAPIConfig(apiConfig *APIConfigService) *SubtitleService {
+	if s != nil {
+		s.apiConfig = apiConfig
+	}
+	return s
 }
 
 // NewSubtitleService is the constructor.

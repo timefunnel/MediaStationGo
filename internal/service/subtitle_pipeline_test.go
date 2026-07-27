@@ -98,7 +98,7 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	if applied.Status != "success" || applied.Filename != "subtitle.srt" {
 		t.Fatalf("unexpected apply response: %#v", applied)
 	}
-	asr, err := client.CreateSubtitleASR(t.Context(), "admin-id", "media-1", "ja")
+	asr, err := client.CreateSubtitleASR(t.Context(), "admin-id", "media-1", "ja", "local", "qwen-test")
 	if err != nil || asr.ID != "asr-1" || asr.SourceLanguage != "ja" {
 		t.Fatalf("unexpected ASR create response: %#v err=%v", asr, err)
 	}

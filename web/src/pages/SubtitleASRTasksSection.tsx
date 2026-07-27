@@ -1,10 +1,15 @@
-import { Captions } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
+import { Captions, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import type { SubtitleASRTask } from '../api/subtitles'
+import { subtitlesAPI, type SubtitleASRProfile, type SubtitleASRTask } from '../api/subtitles'
+import { confirmAction } from '../components/confirmAction'
 import {
   splitSubtitleASRTasks,
   subtitleASRLanguageLabel,
+  subtitleASRProfileLabel,
+  subtitleASRProgressLabel,
   subtitleASRResultSummary,
   subtitleASRStageLabel,
 } from './subtitleASRTaskModel'
@@ -12,27 +17,103 @@ import {
 type SubtitleASRTasksSectionProps = {
   tasks: SubtitleASRTask[] | null
   error: string
+  onChanged: () => Promise<void>
 }
 
-export function SubtitleASRTasksSection({ tasks, error }: SubtitleASRTasksSectionProps) {
+export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASRTasksSectionProps) {
   const grouped = splitSubtitleASRTasks(tasks ?? [])
+  const [profiles, setProfiles] = useState<SubtitleASRProfile[]>([])
+  const [profileKey, setProfileKey] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const [busyTaskID, setBusyTaskID] = useState('')
+  const selectedProfile = useMemo(
+    () => profiles.find((profile) => asrProfileKey(profile) === profileKey) ?? null,
+    [profileKey, profiles],
+  )
+
+  useEffect(() => {
+    subtitlesAPI.listASRProfiles()
+      .then((items) => {
+        setProfiles(items)
+        setProfileKey((current) => current || (items[0] ? asrProfileKey(items[0]) : ''))
+        setProfileError(items.length > 0 ? '' : '没有可用的本机或云端翻译模型')
+      })
+      .catch((cause) => setProfileError(errorMessage(cause, '翻译模型加载失败')))
+  }, [])
+
+  const retryTask = async (task: SubtitleASRTask) => {
+    if (!selectedProfile || busyTaskID) return
+    setBusyTaskID(task.id)
+    try {
+      await subtitlesAPI.retryASR(task.id, selectedProfile)
+      toast.success('字幕任务已按所选模型重新排队')
+      await onChanged()
+    } catch (cause) {
+      toast.error(errorMessage(cause, '字幕任务重试失败'))
+    } finally {
+      setBusyTaskID('')
+    }
+  }
+
+  const deleteTask = async (task: SubtitleASRTask) => {
+    if (busyTaskID) return
+    if (!(await confirmAction({
+      title: '删除字幕任务',
+      message: '确定删除该字幕任务及其缓存的音轨和识别结果吗？',
+      confirmText: '删除任务',
+    }))) return
+    setBusyTaskID(task.id)
+    try {
+      await subtitlesAPI.deleteASR(task.id)
+      toast.success('字幕任务及缓存已删除')
+      await onChanged()
+    } catch (cause) {
+      toast.error(errorMessage(cause, '字幕任务删除失败'))
+    } finally {
+      setBusyTaskID('')
+    }
+  }
+
   return (
     <section className="glass-panel">
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Captions size={18} className="text-brand-500" />
         <h2 className="font-display text-lg font-semibold text-ink-600">AI 字幕生产任务</h2>
+        <label className="ml-auto flex min-w-0 items-center gap-2 text-xs text-sand-500">
+          重试模型
+          <select
+            value={profileKey}
+            disabled={profiles.length === 0}
+            onChange={(event) => setProfileKey(event.target.value)}
+            className="h-9 max-w-80 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+          >
+            {profiles.map((profile) => (
+              <option key={asrProfileKey(profile)} value={asrProfileKey(profile)}>
+                {profile.provider_label} · {profile.model}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      {profileError && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{profileError}</p>}
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       {!error && tasks === null && <p className="text-sand-500">正在加载字幕任务…</p>}
       {!error && tasks !== null && (
         <div className="space-y-5">
           <div>
             <h3 className="mb-2 text-sm font-semibold text-ink-500">运行中</h3>
-            <SubtitleASRTaskTable tasks={grouped.active} empty="暂无正在生产的字幕。" />
+            <SubtitleASRTaskTable tasks={grouped.active} empty="暂无正在生产的字幕。" busyTaskID={busyTaskID} />
           </div>
           <div>
             <h3 className="mb-2 text-sm font-semibold text-ink-500">最近完成</h3>
-            <SubtitleASRTaskTable tasks={grouped.recent} empty="暂无已结束的字幕任务。" />
+            <SubtitleASRTaskTable
+              tasks={grouped.recent}
+              empty="暂无已结束的字幕任务。"
+              busyTaskID={busyTaskID}
+              retryEnabled={Boolean(selectedProfile)}
+              onRetry={(task) => void retryTask(task)}
+              onDelete={(task) => void deleteTask(task)}
+            />
           </div>
         </div>
       )}
@@ -40,19 +121,35 @@ export function SubtitleASRTasksSection({ tasks, error }: SubtitleASRTasksSectio
   )
 }
 
-function SubtitleASRTaskTable({ tasks, empty }: { tasks: SubtitleASRTask[]; empty: string }) {
+function SubtitleASRTaskTable({
+  tasks,
+  empty,
+  busyTaskID,
+  retryEnabled = false,
+  onRetry,
+  onDelete,
+}: {
+  tasks: SubtitleASRTask[]
+  empty: string
+  busyTaskID: string
+  retryEnabled?: boolean
+  onRetry?: (task: SubtitleASRTask) => void
+  onDelete?: (task: SubtitleASRTask) => void
+}) {
   if (tasks.length === 0) return <p className="text-sand-500">{empty}</p>
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-[860px] w-full text-left text-sm">
+      <table className="w-full min-w-[1080px] text-left text-sm">
         <thead className="text-xs uppercase tracking-wider text-sand-500">
           <tr>
             <th className="py-2">作品 / 片源</th>
             <th>源语言</th>
             <th>阶段</th>
+            <th>模型 / 缓存</th>
             <th>状态</th>
             <th>结果</th>
             <th>时间</th>
+            {(onRetry || onDelete) && <th className="text-right">操作</th>}
           </tr>
         </thead>
         <tbody>
@@ -73,8 +170,16 @@ function SubtitleASRTaskTable({ tasks, empty }: { tasks: SubtitleASRTask[]; empt
               <td className="text-ink-100">{subtitleASRLanguageLabel(task.source_language)}</td>
               <td className="text-ink-100">
                 <div>{subtitleASRStageLabel(task.stage)}</div>
-                {task.progress_total > 0 && (
-                  <div className="mt-1 text-xs text-sand-500">{task.progress_current}/{task.progress_total}</div>
+                {subtitleASRProgressLabel(task) && (
+                  <div className="mt-1 text-xs text-sand-500">{subtitleASRProgressLabel(task)}</div>
+                )}
+              </td>
+              <td className="max-w-72 text-xs text-ink-100">
+                <div className="break-words">{subtitleASRProfileLabel(task)}</div>
+                {(task.cached_audio || task.cached_transcript) && (
+                  <div className="mt-1 text-emerald-600">
+                    {[task.cached_audio ? '音轨已缓存' : '', task.cached_transcript ? '识别结果已缓存' : ''].filter(Boolean).join(' · ')}
+                  </div>
                 )}
               </td>
               <td>{subtitleASRStatusBadge(task.status)}</td>
@@ -82,6 +187,36 @@ function SubtitleASRTaskTable({ tasks, empty }: { tasks: SubtitleASRTask[]; empt
                 {subtitleASRResultSummary(task)}
               </td>
               <td className="whitespace-nowrap text-ink-100">{subtitleASRTaskTime(task)}</td>
+              {(onRetry || onDelete) && (
+                <td>
+                  <div className="flex justify-end gap-1">
+                    {task.status === 'failed' && onRetry && (
+                      <button
+                        type="button"
+                        onClick={() => onRetry(task)}
+                        disabled={!retryEnabled || Boolean(busyTaskID)}
+                        className="btn-outline h-9 w-9 justify-center p-0"
+                        title="使用所选模型重试"
+                        aria-label="重试字幕任务"
+                      >
+                        {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(task)}
+                        disabled={Boolean(busyTaskID)}
+                        className="btn-outline h-9 w-9 justify-center p-0 !border-red-100 !text-red-500"
+                        title="删除任务及缓存"
+                        aria-label="删除字幕任务"
+                      >
+                        {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -104,4 +239,13 @@ function subtitleASRStatusBadge(status: SubtitleASRTask['status']) {
 function subtitleASRTaskTime(task: SubtitleASRTask): string {
   const timestamp = task.completed_at || task.updated_at || task.started_at || task.created_at
   return timestamp > 0 ? new Date(timestamp * 1000).toLocaleString() : '-'
+}
+
+function asrProfileKey(profile: SubtitleASRProfile): string {
+  return `${profile.provider}\n${profile.model}`
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return (error as { response?: { data?: { error?: string } } })?.response?.data?.error
+    || (error instanceof Error ? error.message : fallback)
 }

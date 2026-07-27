@@ -49,12 +49,21 @@ export interface SubtitleApplyResult {
 
 export type SubtitleASRSourceLanguage = 'auto' | 'ja' | 'en' | 'zh' | 'ko'
 
+export interface SubtitleASRProfile {
+  provider: 'local' | 'openai' | 'deepseek' | 'siliconflow'
+  provider_label: string
+  model: string
+  local: boolean
+}
+
 export interface SubtitleASRResult {
   filename: string
   source: string
   language: string
   segment_count: number
   duration: number
+  translation_provider?: string
+  translation_model?: string
 }
 
 export interface SubtitleASRTask {
@@ -62,8 +71,10 @@ export interface SubtitleASRTask {
   owner_id: string
   media_id: string
   source_language: SubtitleASRSourceLanguage
+  translation_provider: string
+  translation_model: string
   status: 'queued' | 'running' | 'completed' | 'failed'
-  stage: 'queued' | 'starting' | 'extracting_audio' | 'transcribing' | 'translating' | 'saving' | 'completed' | 'failed'
+  stage: 'queued' | 'starting' | 'extracting_audio' | 'using_cached_audio' | 'uploading_audio' | 'transcribing' | 'using_cached_transcript' | 'translating' | 'saving' | 'completed' | 'failed'
   progress_current: number
   progress_total: number
   result: SubtitleASRResult | null
@@ -73,6 +84,8 @@ export interface SubtitleASRTask {
   started_at: number
   completed_at: number
   attempt_count: number
+  cached_audio: boolean
+  cached_transcript: boolean
   media_title?: string
   media_filename?: string
   media_available: boolean
@@ -118,10 +131,12 @@ export const subtitlesAPI = {
       )
       .then((r) => r.data),
 
-  createASR: (mediaId: string, sourceLanguage: SubtitleASRSourceLanguage) =>
+  createASR: (mediaId: string, sourceLanguage: SubtitleASRSourceLanguage, profile: SubtitleASRProfile) =>
     api
       .post<SubtitleASRTask>(`/media/${encodeURIComponent(mediaId)}/subtitles/asr`, {
         source_language: sourceLanguage,
+        translation_provider: profile.provider,
+        translation_model: profile.model,
       })
       .then((r) => r.data),
 
@@ -136,6 +151,24 @@ export const subtitlesAPI = {
     api
       .get<{ items: SubtitleASRTask[] | null }>('/subtitles/asr/tasks')
       .then((r) => r.data.items ?? []),
+
+  listASRProfiles: () =>
+    api
+      .get<{ items: SubtitleASRProfile[] | null }>('/subtitles/asr/profiles')
+      .then((r) => r.data.items ?? []),
+
+  retryASR: (taskId: string, profile: SubtitleASRProfile) =>
+    api
+      .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/retry`, {
+        translation_provider: profile.provider,
+        translation_model: profile.model,
+      })
+      .then((r) => r.data),
+
+  deleteASR: (taskId: string) =>
+    api
+      .delete<{ deleted: boolean }>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}`)
+      .then((r) => r.data),
 
   url: (mediaId: string, path: string) => {
     const token = useAuthStore.getState().token ?? ''

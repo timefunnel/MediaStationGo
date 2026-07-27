@@ -17,26 +17,31 @@ type asrAudioSource struct {
 	headers map[string]string
 }
 
+type ASRAudioInfo struct {
+	DurationSeconds int
+	BitrateBPS      int
+}
+
 // StartASRAudioExtraction starts a single ffmpeg process that converts the
 // first audio stream of a media version into a compact mono MP3 stream.
-func (s *StreamService) StartASRAudioExtraction(ctx context.Context, mediaID string) (io.ReadCloser, func() error, error) {
+func (s *StreamService) StartASRAudioExtraction(ctx context.Context, mediaID string) (io.ReadCloser, func() error, ASRAudioInfo, error) {
 	if s == nil || s.repo == nil || s.repo.Media == nil {
-		return nil, nil, errors.New("media stream service unavailable")
+		return nil, nil, ASRAudioInfo{}, errors.New("media stream service unavailable")
 	}
 	media, err := s.repo.Media.FindByID(ctx, strings.TrimSpace(mediaID))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ASRAudioInfo{}, err
 	}
 	if media == nil {
-		return nil, nil, ErrMediaNotFound
+		return nil, nil, ASRAudioInfo{}, ErrMediaNotFound
 	}
 	source, err := s.resolveASRAudioSource(ctx, media)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ASRAudioInfo{}, err
 	}
 	bin, err := resolveLocalExecutable(s.cfg.App.FFmpegPath, "ffmpeg")
 	if err != nil {
-		return nil, nil, fmt.Errorf("ffmpeg unavailable: %w", err)
+		return nil, nil, ASRAudioInfo{}, fmt.Errorf("ffmpeg unavailable: %w", err)
 	}
 	s.cfg.App.FFmpegPath = bin
 	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error"}
@@ -57,13 +62,13 @@ func (s *StreamService) StartASRAudioExtraction(ctx context.Context, mediaID str
 	cmd := exec.CommandContext(ctx, bin, args...) // #nosec G204 -- executable is resolved locally and arguments are not shell-expanded.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("open ffmpeg audio output: %w", err)
+		return nil, nil, ASRAudioInfo{}, fmt.Errorf("open ffmpeg audio output: %w", err)
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
-		return nil, nil, fmt.Errorf("start ffmpeg audio extraction: %w", err)
+		return nil, nil, ASRAudioInfo{}, fmt.Errorf("start ffmpeg audio extraction: %w", err)
 	}
 	wait := func() error {
 		if err := cmd.Wait(); err != nil {
@@ -72,7 +77,7 @@ func (s *StreamService) StartASRAudioExtraction(ctx context.Context, mediaID str
 		}
 		return nil
 	}
-	return stdout, wait, nil
+	return stdout, wait, ASRAudioInfo{DurationSeconds: media.DurationSec, BitrateBPS: 48000}, nil
 }
 
 func ffmpegASRAudioFailure(detail string) string {

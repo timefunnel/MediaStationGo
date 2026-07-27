@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +31,15 @@ type subtitleCandidateRequest struct {
 }
 
 type subtitleASRRequest struct {
-	SourceLanguage string `json:"source_language"`
+	SourceLanguage      string `json:"source_language"`
+	TranslationProvider string `json:"translation_provider"`
+	TranslationModel    string `json:"translation_model"`
+}
+
+type subtitleTranslationRequest struct {
+	Provider string                               `json:"provider"`
+	Model    string                               `json:"model"`
+	Segments []service.SubtitleTranslationSegment `json:"segments"`
 }
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
@@ -212,12 +221,55 @@ func createSubtitleASRHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		task, err := svc.Subtitle.CreateASRTask(
 			c.Request.Context(), middleware.GetUserID(c), media.ID, in.SourceLanguage,
+			in.TranslationProvider, in.TranslationModel,
 		)
 		if err != nil {
 			writeSubtitlePipelineError(c, err)
 			return
 		}
 		c.JSON(http.StatusAccepted, task)
+	}
+}
+
+func listSubtitleASRProfilesHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		profiles, err := svc.Subtitle.ListASRProfiles(c.Request.Context())
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, service.SubtitleASRProfileList{Items: profiles})
+	}
+}
+
+func retrySubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in subtitleASRRequest
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		task, err := svc.Subtitle.RetryASRTask(
+			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
+			in.TranslationProvider, in.TranslationModel,
+		)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusAccepted, task)
+	}
+}
+
+func deleteSubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := svc.Subtitle.DeleteASRTask(
+			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
+		); err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"deleted": true})
 	}
 }
 
@@ -285,7 +337,7 @@ func pipelineASRAudioHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "media stream service unavailable"})
 			return
 		}
-		stream, wait, err := svc.Stream.StartASRAudioExtraction(c.Request.Context(), c.Param("id"))
+		stream, wait, info, err := svc.Stream.StartASRAudioExtraction(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
@@ -294,6 +346,12 @@ func pipelineASRAudioHandler(svc *service.Container) gin.HandlerFunc {
 		c.Header("Content-Type", "audio/mpeg")
 		c.Header("Content-Disposition", `attachment; filename="asr-audio.mp3"`)
 		c.Header("Cache-Control", "no-store")
+		if info.DurationSeconds > 0 {
+			c.Header("X-Media-Duration-Seconds", strconv.Itoa(info.DurationSeconds))
+		}
+		if info.BitrateBPS > 0 {
+			c.Header("X-ASR-Audio-Bitrate", strconv.Itoa(info.BitrateBPS))
+		}
 		copied, copyErr := io.Copy(c.Writer, stream)
 		waitErr := wait()
 		if copyErr == nil && waitErr == nil && copied > 0 {
@@ -316,6 +374,24 @@ func pipelineASRAudioHandler(svc *service.Container) gin.HandlerFunc {
 		if svc.Log != nil {
 			svc.Log.Error("ASR audio extraction stream failed", zap.Int64("bytes", copied), zap.Error(errors.Join(copyErr, waitErr)))
 		}
+	}
+}
+
+func pipelineTranslateSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in subtitleTranslationRequest
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		result, err := svc.Subtitle.TranslateSegments(
+			c.Request.Context(), in.Provider, in.Model, in.Segments,
+		)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
 	}
 }
 

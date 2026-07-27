@@ -12,12 +12,37 @@ export function subtitleASRStageLabel(stage: SubtitleASRTask['stage']): string {
     queued: '等待生成',
     starting: '正在启动任务',
     extracting_audio: '正在抽取音轨',
+    using_cached_audio: '复用已抽取音轨',
+    uploading_audio: '正在上传音轨',
     transcribing: 'SenseVoice 正在识别',
+    using_cached_transcript: '复用 SenseVoice 识别结果',
     translating: '正在翻译为简体中文',
     saving: '正在保存字幕',
     completed: 'AI 字幕已生成',
     failed: 'AI 字幕生成失败',
   }[stage] || stage
+}
+
+export function subtitleASRProgressLabel(task: SubtitleASRTask): string {
+  if (task.progress_total <= 0) return ''
+  if (task.stage === 'extracting_audio') {
+    return `${formatDuration(task.progress_current)} / ${formatDuration(task.progress_total)}`
+  }
+  if (task.stage === 'uploading_audio') {
+    const percent = Math.min(100, Math.round((task.progress_current / task.progress_total) * 100))
+    return `${percent}%`
+  }
+  return `${task.progress_current}/${task.progress_total}`
+}
+
+export function subtitleASRProfileLabel(task: SubtitleASRTask): string {
+  const provider = {
+    local: '本机 Ollama',
+    openai: 'OpenAI',
+    deepseek: 'DeepSeek',
+    siliconflow: '硅基流动',
+  }[task.translation_provider] || task.translation_provider || '未记录'
+  return task.translation_model ? `${provider} · ${task.translation_model}` : provider
 }
 
 export function subtitleASRLanguageLabel(language: SubtitleASRTask['source_language']): string {
@@ -33,9 +58,7 @@ export function subtitleASRLanguageLabel(language: SubtitleASRTask['source_langu
 export function subtitleASRResultSummary(task: SubtitleASRTask): string {
   if (task.status === 'failed') return task.error || '任务失败但未返回错误原因'
   if (task.status !== 'completed') {
-    return task.progress_total > 0
-      ? `${task.progress_current}/${task.progress_total}`
-      : '处理中'
+    return subtitleASRProgressLabel(task) || '处理中'
   }
   if (!task.result) return '任务完成但未返回字幕结果'
   return [

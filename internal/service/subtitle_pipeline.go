@@ -46,32 +46,49 @@ type SubtitleApplyResult struct {
 }
 
 type SubtitleASRResult struct {
-	Filename     string  `json:"filename"`
-	Source       string  `json:"source"`
-	Language     string  `json:"language"`
-	SegmentCount int     `json:"segment_count"`
-	Duration     float64 `json:"duration"`
+	Filename            string  `json:"filename"`
+	Source              string  `json:"source"`
+	Language            string  `json:"language"`
+	SegmentCount        int     `json:"segment_count"`
+	Duration            float64 `json:"duration"`
+	TranslationProvider string  `json:"translation_provider,omitempty"`
+	TranslationModel    string  `json:"translation_model,omitempty"`
+}
+
+type SubtitleASRProfile struct {
+	Provider      string `json:"provider"`
+	ProviderLabel string `json:"provider_label"`
+	Model         string `json:"model"`
+	Local         bool   `json:"local"`
+}
+
+type SubtitleASRProfileList struct {
+	Items []SubtitleASRProfile `json:"items"`
 }
 
 type SubtitleASRTask struct {
-	ID              string             `json:"id"`
-	OwnerID         string             `json:"owner_id"`
-	MediaID         string             `json:"media_id"`
-	SourceLanguage  string             `json:"source_language"`
-	Status          string             `json:"status"`
-	Stage           string             `json:"stage"`
-	ProgressCurrent int                `json:"progress_current"`
-	ProgressTotal   int                `json:"progress_total"`
-	Result          *SubtitleASRResult `json:"result"`
-	Error           string             `json:"error"`
-	CreatedAt       int64              `json:"created_at"`
-	UpdatedAt       int64              `json:"updated_at"`
-	StartedAt       int64              `json:"started_at"`
-	CompletedAt     int64              `json:"completed_at"`
-	AttemptCount    int                `json:"attempt_count"`
-	MediaTitle      string             `json:"media_title,omitempty"`
-	MediaFilename   string             `json:"media_filename,omitempty"`
-	MediaAvailable  bool               `json:"media_available"`
+	ID                  string             `json:"id"`
+	OwnerID             string             `json:"owner_id"`
+	MediaID             string             `json:"media_id"`
+	SourceLanguage      string             `json:"source_language"`
+	TranslationProvider string             `json:"translation_provider"`
+	TranslationModel    string             `json:"translation_model"`
+	Status              string             `json:"status"`
+	Stage               string             `json:"stage"`
+	ProgressCurrent     int                `json:"progress_current"`
+	ProgressTotal       int                `json:"progress_total"`
+	Result              *SubtitleASRResult `json:"result"`
+	Error               string             `json:"error"`
+	CreatedAt           int64              `json:"created_at"`
+	UpdatedAt           int64              `json:"updated_at"`
+	StartedAt           int64              `json:"started_at"`
+	CompletedAt         int64              `json:"completed_at"`
+	AttemptCount        int                `json:"attempt_count"`
+	CachedAudio         bool               `json:"cached_audio"`
+	CachedTranscript    bool               `json:"cached_transcript"`
+	MediaTitle          string             `json:"media_title,omitempty"`
+	MediaFilename       string             `json:"media_filename,omitempty"`
+	MediaAvailable      bool               `json:"media_available"`
 }
 
 type SubtitleASRTaskList struct {
@@ -82,15 +99,19 @@ type subtitlePipelineClient interface {
 	SearchSubtitles(context.Context, string, string, int) (SubtitleSearchResponse, error)
 	PreviewSubtitle(context.Context, string, string, string, string) (SubtitleCandidatePreview, error)
 	ApplySubtitle(context.Context, string, string, string, string) (SubtitleApplyResult, error)
-	CreateSubtitleASR(context.Context, string, string, string) (SubtitleASRTask, error)
+	CreateSubtitleASR(context.Context, string, string, string, string, string) (SubtitleASRTask, error)
 	GetSubtitleASR(context.Context, string, string) (SubtitleASRTask, error)
 	ListSubtitleASR(context.Context, int) ([]SubtitleASRTask, error)
+	ListSubtitleASRModels(context.Context) ([]string, error)
+	RetrySubtitleASR(context.Context, string, string, string, string) (SubtitleASRTask, error)
+	DeleteSubtitleASR(context.Context, string, string) error
 }
 
-func (c *resourcePipelineHTTPClient) CreateSubtitleASR(ctx context.Context, ownerID, mediaID, sourceLanguage string) (SubtitleASRTask, error) {
+func (c *resourcePipelineHTTPClient) CreateSubtitleASR(ctx context.Context, ownerID, mediaID, sourceLanguage, provider, model string) (SubtitleASRTask, error) {
 	var out SubtitleASRTask
 	err := c.doJSON(ctx, "POST", "/v1/subtitles/asr", map[string]any{
 		"owner_id": ownerID, "media_id": mediaID, "source_language": sourceLanguage,
+		"translation_provider": provider, "translation_model": model,
 	}, "", &out)
 	return out, err
 }
@@ -110,6 +131,32 @@ func (c *resourcePipelineHTTPClient) ListSubtitleASR(ctx context.Context, limit 
 		out.Items = []SubtitleASRTask{}
 	}
 	return out.Items, err
+}
+
+func (c *resourcePipelineHTTPClient) ListSubtitleASRModels(ctx context.Context) ([]string, error) {
+	var out struct {
+		Models []string `json:"models"`
+	}
+	err := c.doJSON(ctx, "GET", "/v1/subtitles/asr/models", nil, "", &out)
+	if out.Models == nil {
+		out.Models = []string{}
+	}
+	return out.Models, err
+}
+
+func (c *resourcePipelineHTTPClient) RetrySubtitleASR(ctx context.Context, ownerID, taskID, provider, model string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "/retry"
+	err := c.doJSON(ctx, "POST", endpoint, map[string]any{
+		"owner_id": ownerID, "translation_provider": provider, "translation_model": model,
+	}, "", &out)
+	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) DeleteSubtitleASR(ctx context.Context, ownerID, taskID string) error {
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "?owner_id=" + url.QueryEscape(ownerID)
+	var out map[string]any
+	return c.doJSON(ctx, "DELETE", endpoint, nil, "", &out)
 }
 
 type subtitlePipelineSelectionRequest struct {
@@ -190,7 +237,7 @@ func (s *SubtitleService) ApplyCandidate(ctx context.Context, ownerID, mediaID, 
 	return result, nil
 }
 
-func (s *SubtitleService) CreateASRTask(ctx context.Context, ownerID, mediaID, sourceLanguage string) (SubtitleASRTask, error) {
+func (s *SubtitleService) CreateASRTask(ctx context.Context, ownerID, mediaID, sourceLanguage, provider, translationModel string) (SubtitleASRTask, error) {
 	if s == nil || s.pipeline == nil {
 		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
 	}
@@ -206,7 +253,11 @@ func (s *SubtitleService) CreateASRTask(ctx context.Context, ownerID, mediaID, s
 	if !validSubtitleASRLanguage(sourceLanguage) {
 		return SubtitleASRTask{}, errors.New("source_language must be one of: auto, ja, en, zh, ko")
 	}
-	return s.pipeline.CreateSubtitleASR(ctx, ownerID, mediaID, sourceLanguage)
+	profile, err := s.resolveASRProfile(ctx, provider, translationModel)
+	if err != nil {
+		return SubtitleASRTask{}, err
+	}
+	return s.pipeline.CreateSubtitleASR(ctx, ownerID, mediaID, sourceLanguage, profile.Provider, profile.Model)
 }
 
 func (s *SubtitleService) GetASRTask(ctx context.Context, ownerID, taskID string) (SubtitleASRTask, error) {
@@ -232,6 +283,92 @@ func (s *SubtitleService) ListASRTasks(ctx context.Context, limit int) ([]Subtit
 		limit = 200
 	}
 	return s.pipeline.ListSubtitleASR(ctx, limit)
+}
+
+func (s *SubtitleService) ListASRProfiles(ctx context.Context) ([]SubtitleASRProfile, error) {
+	if s == nil || s.pipeline == nil {
+		return nil, errors.New("subtitle pipeline unavailable")
+	}
+	models, err := s.pipeline.ListSubtitleASRModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profiles := make([]SubtitleASRProfile, 0, len(models)+3)
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			profiles = append(profiles, SubtitleASRProfile{
+				Provider: "local", ProviderLabel: "本机 Ollama", Model: model, Local: true,
+			})
+		}
+	}
+	if s.apiConfig == nil {
+		return profiles, nil
+	}
+	for _, provider := range []string{"openai", "deepseek", "siliconflow"} {
+		resolved, resolveErr := s.apiConfig.Resolve(ctx, provider)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if !resolved.Enabled || strings.TrimSpace(resolved.APIKey) == "" || strings.TrimSpace(resolved.BaseURL) == "" || strings.TrimSpace(resolved.Model) == "" {
+			continue
+		}
+		profiles = append(profiles, SubtitleASRProfile{
+			Provider: provider, ProviderLabel: subtitleASRProviderLabel(provider), Model: strings.TrimSpace(resolved.Model),
+		})
+	}
+	return profiles, nil
+}
+
+func (s *SubtitleService) RetryASRTask(ctx context.Context, ownerID, taskID, provider, translationModel string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	profile, err := s.resolveASRProfile(ctx, provider, translationModel)
+	if err != nil {
+		return SubtitleASRTask{}, err
+	}
+	return s.pipeline.RetrySubtitleASR(
+		ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID), profile.Provider, profile.Model,
+	)
+}
+
+func (s *SubtitleService) DeleteASRTask(ctx context.Context, ownerID, taskID string) error {
+	if s == nil || s.pipeline == nil {
+		return errors.New("subtitle pipeline unavailable")
+	}
+	return s.pipeline.DeleteSubtitleASR(ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID))
+}
+
+func (s *SubtitleService) resolveASRProfile(ctx context.Context, provider, translationModel string) (SubtitleASRProfile, error) {
+	profiles, err := s.ListASRProfiles(ctx)
+	if err != nil {
+		return SubtitleASRProfile{}, err
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	translationModel = strings.TrimSpace(translationModel)
+	if provider == "" && translationModel == "" && len(profiles) > 0 {
+		return profiles[0], nil
+	}
+	for _, profile := range profiles {
+		if profile.Provider == provider && profile.Model == translationModel {
+			return profile, nil
+		}
+	}
+	return SubtitleASRProfile{}, errors.New("selected AI subtitle translation model is not available")
+}
+
+func subtitleASRProviderLabel(provider string) string {
+	switch provider {
+	case "openai":
+		return "OpenAI"
+	case "deepseek":
+		return "DeepSeek"
+	case "siliconflow":
+		return "硅基流动"
+	default:
+		return provider
+	}
 }
 
 func validSubtitleASRLanguage(value string) bool {

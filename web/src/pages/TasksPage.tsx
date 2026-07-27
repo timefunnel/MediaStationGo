@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Activity, Copy } from 'lucide-react'
 
@@ -166,6 +166,15 @@ export function TasksPage() {
   const [subtitleTaskError, setSubtitleTaskError] = useState('')
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
 
+  const refreshSubtitleTasks = useCallback(async () => {
+    try {
+      setSubtitleTasks(await subtitlesAPI.listASRTasks())
+      setSubtitleTaskError('')
+    } catch (error) {
+      setSubtitleTaskError(subtitleTaskErrorMessage(error))
+    }
+  }, [])
+
   useEffect(() => {
     if (!isAdmin) return
     let cancelled = false
@@ -183,25 +192,12 @@ export function TasksPage() {
 
   useEffect(() => {
     if (!isAdmin) return
-    let cancelled = false
-    const tick = () => {
-      subtitlesAPI.listASRTasks()
-        .then((tasks) => {
-          if (cancelled) return
-          setSubtitleTasks(tasks)
-          setSubtitleTaskError('')
-        })
-        .catch((error) => {
-          if (!cancelled) setSubtitleTaskError(subtitleTaskErrorMessage(error))
-        })
-    }
-    void tick()
-    const id = window.setInterval(tick, 3_000)
+    void refreshSubtitleTasks()
+    const id = window.setInterval(() => void refreshSubtitleTasks(), 3_000)
     return () => {
-      cancelled = true
       window.clearInterval(id)
     }
-  }, [isAdmin])
+  }, [isAdmin, refreshSubtitleTasks])
 
   const torrents = snap?.torrents ?? []
   const background = snap?.background_tasks ?? { active: [], recent: [] }
@@ -229,7 +225,13 @@ export function TasksPage() {
         </div>
       </section>}
 
-      {isAdmin && <SubtitleASRTasksSection tasks={subtitleTasks} error={subtitleTaskError} />}
+      {isAdmin && (
+        <SubtitleASRTasksSection
+          tasks={subtitleTasks}
+          error={subtitleTaskError}
+          onChanged={refreshSubtitleTasks}
+        />
+      )}
 
       {isAdmin && snap && <section className="glass-panel">
         <h2 className="mb-3 font-display text-lg font-semibold text-ink-600">转码任务</h2>

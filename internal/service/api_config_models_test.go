@@ -65,6 +65,26 @@ func TestDiscoverOpenAICompatibleModels(t *testing.T) {
 	}
 }
 
+func TestDeepSeekConfigStoresSelectedModel(t *testing.T) {
+	db := newServiceTestDB(t, &model.APIConfig{})
+	svc := NewAPIConfigService(zap.NewNop(), repository.New(db), NewCryptoService("test-secret", zap.NewNop()))
+	modelID := "deepseek-chat"
+	view, err := svc.Update(t.Context(), "deepseek", APIConfigPatch{Model: &modelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Model != modelID {
+		t.Fatalf("model = %q, want %q", view.Model, modelID)
+	}
+	resolved, err := svc.Resolve(t.Context(), "deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Model != modelID {
+		t.Fatalf("resolved model = %q, want %q", resolved.Model, modelID)
+	}
+}
+
 func TestAIModelsEndpointAcceptsVersionedAndCompletionBaseURLs(t *testing.T) {
 	for input, want := range map[string]string{
 		"https://api.openai.com/v1":                "https://api.openai.com/v1/models",

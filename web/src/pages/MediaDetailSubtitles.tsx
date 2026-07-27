@@ -6,6 +6,7 @@ import { Captions, Eye, LoaderCircle, RefreshCw, Search, Sparkles, Trash2, X } f
 import {
   subtitlesAPI,
   type SubtitleCandidatePreview,
+  type SubtitleASRProfile,
   type SubtitleASRSourceLanguage,
   type SubtitleASRTask,
   type SubtitleSearchCandidate,
@@ -15,7 +16,7 @@ import {
 import { confirmAction } from '../components/confirmAction'
 import type { MediaVersion } from '../types'
 import { mediaFilename } from '../utils/mediaFilename'
-import { subtitleASRStageLabel } from './subtitleASRTaskModel'
+import { subtitleASRProgressLabel, subtitleASRStageLabel } from './subtitleASRTaskModel'
 
 type MediaDetailSubtitlesProps = {
   mediaId: string
@@ -47,12 +48,29 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   const [preview, setPreview] = useState<PreviewState>(null)
   const [applyingCandidateId, setApplyingCandidateId] = useState('')
   const [asrLanguage, setAsrLanguage] = useState<SubtitleASRSourceLanguage>('auto')
+  const [asrProfiles, setAsrProfiles] = useState<SubtitleASRProfile[]>([])
+  const [asrProfileKey, setAsrProfileKey] = useState('')
+  const [asrProfilesError, setAsrProfilesError] = useState('')
   const [asrCreating, setAsrCreating] = useState(false)
   const [asrTask, setAsrTask] = useState<SubtitleASRTask | null>(null)
   const [asrError, setAsrError] = useState('')
   const announcedASRTask = useRef('')
   const asrPollingTaskID = asrTask?.id
   const asrPolling = asrTask?.status === 'queued' || asrTask?.status === 'running'
+  const selectedASRProfile = useMemo(
+    () => asrProfiles.find((profile) => asrProfileValue(profile) === asrProfileKey) ?? null,
+    [asrProfileKey, asrProfiles],
+  )
+
+  useEffect(() => {
+    subtitlesAPI.listASRProfiles()
+      .then((profiles) => {
+        setAsrProfiles(profiles)
+        setAsrProfileKey((current) => current || (profiles[0] ? asrProfileValue(profiles[0]) : ''))
+        setAsrProfilesError(profiles.length > 0 ? '' : '没有可用的 AI 字幕翻译模型')
+      })
+      .catch((error) => setAsrProfilesError(errorMessage(error, 'AI 字幕翻译模型加载失败')))
+  }, [])
 
   useEffect(() => {
     if (!versions.some((version) => version.id === selectedMediaId)) {
@@ -205,11 +223,11 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   }, [applyingCandidateId, loadTracks, searchResult, selectedMediaId])
 
   const createASR = useCallback(async () => {
-    if (asrCreating || ['queued', 'running'].includes(asrTask?.status || '')) return
+    if (asrCreating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')) return
     setAsrCreating(true)
     setAsrError('')
     try {
-      const task = await subtitlesAPI.createASR(selectedMediaId, asrLanguage)
+      const task = await subtitlesAPI.createASR(selectedMediaId, asrLanguage, selectedASRProfile)
       announcedASRTask.current = ''
       setAsrTask(task)
     } catch (error) {
@@ -219,7 +237,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     } finally {
       setAsrCreating(false)
     }
-  }, [asrCreating, asrLanguage, asrTask?.status, selectedMediaId])
+  }, [asrCreating, asrLanguage, asrTask?.status, selectedASRProfile, selectedMediaId])
 
   return (
     <section className="space-y-3" aria-label="字幕文件">
@@ -256,8 +274,21 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
             搜索字幕
           </button>
           <select
+            value={asrProfileKey}
+            disabled={asrCreating || asrProfiles.length === 0 || ['queued', 'running'].includes(asrTask?.status || '')}
+            onChange={(event) => setAsrProfileKey(event.target.value)}
+            className="h-9 max-w-72 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+            aria-label="AI 字幕翻译模型"
+          >
+            {asrProfiles.map((profile) => (
+              <option key={asrProfileValue(profile)} value={asrProfileValue(profile)}>
+                {profile.provider_label} · {profile.model}
+              </option>
+            ))}
+          </select>
+          <select
             value={asrLanguage}
-            disabled={asrCreating || ['queued', 'running'].includes(asrTask?.status || '')}
+            disabled={asrCreating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
             onChange={(event) => setAsrLanguage(event.target.value as SubtitleASRSourceLanguage)}
             className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
             aria-label="AI 字幕源语言"
@@ -271,7 +302,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           <button
             type="button"
             onClick={() => void createASR()}
-            disabled={asrCreating || ['queued', 'running'].includes(asrTask?.status || '')}
+            disabled={asrCreating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
             className="btn-outline h-9 gap-1.5 px-3 text-xs"
           >
             {asrCreating || ['queued', 'running'].includes(asrTask?.status || '')
@@ -282,17 +313,18 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
         </div>
       </div>
 
-      {(asrTask || asrError) && (
-        <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
+      {(asrTask || asrError || asrProfilesError) && (
+        <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError || asrProfilesError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
           {asrTask && asrTask.status !== 'failed' && (
             <span>
               {subtitleASRStageLabel(asrTask.stage)}
-              {asrTask.progress_total > 0 ? ` · ${asrTask.progress_current}/${asrTask.progress_total}` : ''}
+              {subtitleASRProgressLabel(asrTask) ? ` · ${subtitleASRProgressLabel(asrTask)}` : ''}
               {asrTask.status === 'completed' && asrTask.result ? ` · ${asrTask.result.segment_count} 个分段` : ''}
             </span>
           )}
           {asrTask?.status === 'failed' && <span>{asrTask.error || 'AI 字幕生成失败'}</span>}
           {asrError && <span>{asrTask ? ' · ' : ''}{asrError}</span>}
+          {asrProfilesError && <span>{asrTask || asrError ? ' · ' : ''}{asrProfilesError}</span>}
         </div>
       )}
 
@@ -486,6 +518,10 @@ function subtitleSourceLabel(source: string): string {
     '115': '115 网盘',
     'sensevoice-deepseek': 'SenseVoice + DeepSeek',
   }[source?.toLowerCase()] || source || '未知来源'
+}
+
+function asrProfileValue(profile: SubtitleASRProfile): string {
+  return `${profile.provider}\n${profile.model}`
 }
 
 function errorMessage(error: unknown, fallback: string): string {

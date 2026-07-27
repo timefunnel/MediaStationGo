@@ -49,6 +49,8 @@ func (s *APIConfigService) SeedDefaults(ctx context.Context) error {
 		{Provider: "adult", BaseURL: "https://javdb.com", Extra: "https://javbus.sbs,https://www.javbus.com,https://www.cdnbus.cyou,https://www.javsee.cyou,https://www.busjav.cyou", Description: "Adult / 番号元数据（JavDB/JavBus）", Enabled: true},
 		{Provider: "fd2ppv", BaseURL: "https://fd2ppv.cc", Description: "FD2PPV 会员账号（FC2 元数据与图片）", Enabled: true},
 		{Provider: "openai", BaseURL: "https://api.openai.com/v1", Description: "OpenAI-compatible (smart search)", Enabled: true},
+		{Provider: "deepseek", BaseURL: "https://api.deepseek.com/v1", Description: "DeepSeek（AI 字幕翻译）", Enabled: true},
+		{Provider: "siliconflow", BaseURL: "https://api.siliconflow.cn/v1", Description: "硅基流动（AI 字幕翻译）", Enabled: true},
 	}
 	for i := range defaults {
 		var existing model.APIConfig
@@ -189,7 +191,7 @@ func (s *APIConfigService) Update(ctx context.Context, provider string, patch AP
 		updates["extra"] = *patch.Extra
 	}
 	if patch.Model != nil {
-		if provider != "openai" {
+		if !isAICompatibleProvider(provider) {
 			return nil, errors.New("model is only supported for openai-compatible config")
 		}
 		updates["extra"] = strings.TrimSpace(*patch.Model)
@@ -274,7 +276,7 @@ type AIModelDiscoveryInput struct {
 
 func (s *APIConfigService) DiscoverModels(ctx context.Context, provider string, input AIModelDiscoveryInput) ([]AIModelInfo, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider != "openai" {
+	if !isAICompatibleProvider(provider) {
 		return nil, errors.New("model discovery is only supported for openai-compatible config")
 	}
 	resolved, err := s.Resolve(ctx, provider)
@@ -348,8 +350,17 @@ func aiModelsEndpoint(baseURL string) string {
 }
 
 func apiConfigModel(provider, extra string) string {
-	if strings.EqualFold(strings.TrimSpace(provider), "openai") {
+	if isAICompatibleProvider(provider) {
 		return strings.TrimSpace(extra)
 	}
 	return ""
+}
+
+func isAICompatibleProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai", "deepseek", "siliconflow":
+		return true
+	default:
+		return false
+	}
 }

@@ -180,7 +180,7 @@ func (b *serviceContainerBuilder) initContentServices() {
 	b.c.Stream = NewStreamService(b.cfg, b.log, b.repos, b.c.Transcoder)
 	b.c.Playback = NewPlaybackService(b.log, b.repos)
 	b.c.Emby.SetPlaybackService(b.c.Playback)
-	b.c.Subtitle = NewSubtitleService(b.log, b.repos)
+	b.c.Subtitle = NewSubtitleService(b.log, b.repos).SetAPIConfig(b.c.APIConfig)
 	b.c.Stats = NewStatsService(b.log, b.repos).SetRuntimeCache(b.c.Cache)
 	b.c.Profile = NewProfileService(b.log, b.repos)
 	b.c.Audit = NewAuditService(b.log, b.repos)

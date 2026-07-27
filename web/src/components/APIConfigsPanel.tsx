@@ -71,7 +71,7 @@ export function APIConfigsPanel() {
                       {item.description && (
                         <p className="text-xs text-sand-500">{item.description}</p>
                       )}
-                      {item.provider === 'openai' && item.model && (
+                      {isAICompatibleProvider(item.provider) && item.model && (
                         <p className="mt-1 text-xs text-brand-500">模型：{item.model}</p>
                       )}
                     </td>
@@ -162,11 +162,11 @@ function EditingRow({
   const [detecting, setDetecting] = useState(false)
   const isAdult = item.provider === 'adult'
   const isFD2PPV = item.provider === 'fd2ppv'
-  const isOpenAI = item.provider === 'openai'
+  const isAICompatible = isAICompatibleProvider(item.provider)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (isOpenAI && !model.trim()) {
+    if (isAICompatible && !model.trim()) {
       toast.error('请先探测或填写模型')
       return
     }
@@ -175,7 +175,7 @@ function EditingRow({
       const patch: Record<string, unknown> = { base_url: baseURL, enabled }
       if (isAdult) patch.extra = extra
       if (isFD2PPV) patch.extra = extra.trim()
-      if (isOpenAI) patch.model = model.trim()
+      if (isAICompatible) patch.model = model.trim()
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       await apiConfigsAPI.update(item.provider, patch)
       toast.success(`${item.provider} 已保存`)
@@ -261,7 +261,7 @@ function EditingRow({
               />
             </label>
           )}
-          {isOpenAI && (
+          {isAICompatible && (
             <label className="min-w-64 flex-1 text-xs text-ink-50">
               模型
               <div className="mt-1 flex gap-2">
@@ -348,4 +348,8 @@ function apiConfigSourceCount(item: APIConfig): number {
     .split(/[\s,;]+/)
     .map((value) => value.trim())
     .filter(Boolean).length
+}
+
+function isAICompatibleProvider(provider: string): boolean {
+  return ['openai', 'deepseek', 'siliconflow'].includes(provider)
 }
