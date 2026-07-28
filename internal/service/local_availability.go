@@ -52,12 +52,19 @@ func EnrichExternalMediaLibraryLinks(
 	tmdbIDs := make([]int, 0)
 	bangumiIDs := make([]int, 0)
 	doubanIDs := make([]string, 0)
+	fd2PPVNumbers := make([]string, 0)
 	titleKeys := make([]string, 0)
 	seenTMDb, seenBangumi := map[int]struct{}{}, map[int]struct{}{}
-	seenDouban, seenTitle := map[string]struct{}{}, map[string]struct{}{}
+	seenDouban, seenFD2PPV, seenTitle := map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.MediaType), "person") {
 			continue
+		}
+		if number := fd2PPVExternalNumber(item); number != "" {
+			if _, ok := seenFD2PPV[number]; !ok {
+				seenFD2PPV[number] = struct{}{}
+				fd2PPVNumbers = append(fd2PPVNumbers, number)
+			}
 		}
 		if item.TMDbID > 0 {
 			if _, ok := seenTMDb[item.TMDbID]; !ok {
@@ -86,7 +93,7 @@ func EnrichExternalMediaLibraryLinks(
 			}
 		}
 	}
-	clauses := make([]string, 0, 4)
+	clauses := make([]string, 0, 4+len(fd2PPVNumbers))
 	args := make([]any, 0, 6)
 	if len(tmdbIDs) > 0 {
 		clauses = append(clauses, "tm_db_id IN ?")
@@ -99,6 +106,11 @@ func EnrichExternalMediaLibraryLinks(
 	if len(doubanIDs) > 0 {
 		clauses = append(clauses, "douban_id IN ?")
 		args = append(args, doubanIDs)
+	}
+	for _, number := range fd2PPVNumbers {
+		pattern := "%" + number + "%"
+		clauses = append(clauses, "nsfw = ? AND (LOWER(original_name) LIKE ? OR LOWER(title) LIKE ? OR LOWER(path) LIKE ?)")
+		args = append(args, true, pattern, pattern, pattern)
 	}
 	if len(titleKeys) > 0 {
 		clauses = append(clauses, "LOWER(TRIM(title)) IN ? OR LOWER(TRIM(original_name)) IN ?")
@@ -137,6 +149,13 @@ func EnrichExternalMediaLibraryLinks(
 }
 
 func bestLocalMediaLink(item ExternalMediaResult, rows []model.Media) *model.Media {
+	if number := fd2PPVExternalNumber(item); number != "" {
+		for index := range rows {
+			if rows[index].NSFW && fd2PPVLocalNumber(rows[index]) == number {
+				return &rows[index]
+			}
+		}
+	}
 	providerMatch := func(row model.Media) bool {
 		return (item.TMDbID > 0 && row.TMDbID == item.TMDbID && tmdbMediaTypeMatches(item.MediaType, row)) ||
 			(item.BangumiID > 0 && row.BangumiID == item.BangumiID) ||
@@ -166,6 +185,31 @@ func bestLocalMediaLink(item ExternalMediaResult, rows []model.Media) *model.Med
 		}
 	}
 	return nil
+}
+
+func fd2PPVExternalNumber(item ExternalMediaResult) string {
+	if !strings.EqualFold(strings.TrimSpace(item.Source), "fd2ppv") ||
+		!strings.EqualFold(strings.TrimSpace(item.MediaType), "adult") {
+		return ""
+	}
+	if number := strings.TrimSpace(item.ProviderID); adultFD2RawNumberPattern.MatchString(number) {
+		return number
+	}
+	for _, value := range []string{item.OriginalName, item.SubscribeKeyword, item.Title} {
+		if number := adultFC2Number(value); number != "" {
+			return number
+		}
+	}
+	return ""
+}
+
+func fd2PPVLocalNumber(row model.Media) string {
+	for _, value := range []string{row.OriginalName, row.Title, row.Path} {
+		if number := adultFC2Number(value); number != "" {
+			return number
+		}
+	}
+	return ""
 }
 
 func tmdbMediaTypeMatches(externalType string, row model.Media) bool {

@@ -46,3 +46,57 @@ func TestEnrichExternalMediaLibraryLinksUsesVisibleProviderMatch(t *testing.T) {
 		t.Fatalf("known year mismatch must not fall through: %#v", items[4])
 	}
 }
+
+func TestEnrichExternalMediaLibraryLinksMatchesFD2PPVCodeOnlyForAdultSource(t *testing.T) {
+	db := newServiceTestDB(t, &model.Media{})
+	repos := repository.New(db)
+	rows := []model.Media{
+		{
+			Base:         model.Base{ID: "fd2-adult"},
+			LibraryID:    "library-a",
+			Title:        "本地中文标题",
+			OriginalName: "fc2ppv-920821",
+			Path:         "/adult/fc2ppv920821/main.mp4",
+			Year:         2020,
+			NSFW:         true,
+		},
+		{
+			Base:         model.Base{ID: "regular-fc2-text"},
+			LibraryID:    "library-a",
+			Title:        "普通媒体",
+			OriginalName: "fc2ppv-930000",
+			Path:         "/movies/fc2ppv930000.mp4",
+			NSFW:         false,
+		},
+		{
+			Base:         model.Base{ID: "other-adult-source"},
+			LibraryID:    "library-a",
+			Title:        "其他成人来源",
+			OriginalName: "fc2ppv-940000",
+			Path:         "/adult/fc2ppv940000.mp4",
+			NSFW:         true,
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	items := []ExternalMediaResult{
+		{Source: "fd2ppv", MediaType: "adult", ProviderID: "920821", Title: "FD2 标题", OriginalName: "FC2-PPV-920821", Year: 2026},
+		{Source: "fd2ppv", MediaType: "adult", ProviderID: "930000", Title: "FD2 普通库碰撞", OriginalName: "FC2-PPV-930000"},
+		{Source: "javdb", MediaType: "adult", ProviderID: "940000", Title: "其他来源标题", OriginalName: "FC2-PPV-940000"},
+	}
+
+	EnrichExternalMediaLibraryLinks(t.Context(), repos, items, MediaVisibility{
+		IncludeNSFW: true, AllowedLibraryIDs: []string{"library-a"},
+	})
+
+	if !items[0].InLibrary || items[0].LocalMediaID != "fd2-adult" || items[0].LocalLibraryID != "library-a" {
+		t.Fatalf("FD2PPV code match = %#v", items[0])
+	}
+	if items[1].InLibrary || items[1].LocalMediaID != "" {
+		t.Fatalf("FD2PPV item must not match a non-adult local row: %#v", items[1])
+	}
+	if items[2].InLibrary || items[2].LocalMediaID != "" {
+		t.Fatalf("non-FD2 source must not use FD2PPV code matching: %#v", items[2])
+	}
+}
