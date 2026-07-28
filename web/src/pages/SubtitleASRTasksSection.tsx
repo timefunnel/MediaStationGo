@@ -120,7 +120,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
     if (busyTaskID) return
     if (!(await confirmAction({
       title: '删除字幕任务',
-      message: '确定删除该字幕任务及其缓存的音轨和识别结果吗？',
+      message: '确定删除该字幕任务及其识别、翻译缓存吗？同一片源的共享音轨会保留，供后续任务复用。',
       confirmText: '删除任务',
     }))) return
     setBusyTaskID(task.id)
@@ -338,7 +338,7 @@ function SubtitleASRTaskTable({
                         onClick={() => onDelete(task)}
                         disabled={Boolean(busyTaskID)}
                         className="btn-outline h-9 w-9 justify-center p-0 !border-red-100 !text-red-500"
-                        title="删除任务及缓存"
+                        title="删除任务及任务级缓存"
                         aria-label="删除字幕任务"
                       >
                         {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
