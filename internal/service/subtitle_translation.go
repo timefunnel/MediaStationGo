@@ -12,16 +12,19 @@ import (
 	"time"
 )
 
-type SubtitleTranslationSegment struct {
-	ID   int    `json:"id"`
-	Text string `json:"text"`
+const subtitleTranslationMaxContext = 5
+
+type SubtitleTranslationInput struct {
+	Text     string   `json:"text"`
+	Context  []string `json:"context"`
+	Glossary string   `json:"glossary"`
 }
 
 type SubtitleTranslationResult struct {
-	Translations []SubtitleTranslationSegment `json:"translations"`
+	Translation string `json:"translation"`
 }
 
-func (s *SubtitleService) TranslateSegments(ctx context.Context, provider, selectedModel string, segments []SubtitleTranslationSegment) (SubtitleTranslationResult, error) {
+func (s *SubtitleService) TranslateText(ctx context.Context, provider, selectedModel string, input SubtitleTranslationInput) (SubtitleTranslationResult, error) {
 	if s == nil || s.apiConfig == nil {
 		return SubtitleTranslationResult{}, errors.New("AI translation configuration unavailable")
 	}
@@ -40,27 +43,20 @@ func (s *SubtitleService) TranslateSegments(ctx context.Context, provider, selec
 	if selectedModel == "" || selectedModel != strings.TrimSpace(resolved.Model) {
 		return SubtitleTranslationResult{}, errors.New("selected cloud translation model does not match the configured model")
 	}
-	validated, err := validateSubtitleTranslationSegments(segments)
-	if err != nil {
-		return SubtitleTranslationResult{}, err
-	}
-	segmentsJSON, err := json.Marshal(map[string]any{"segments": validated})
+	validated, err := validateSubtitleTranslationInput(input)
 	if err != nil {
 		return SubtitleTranslationResult{}, err
 	}
 	payload := map[string]any{
-		"model":           selectedModel,
-		"max_tokens":      4096,
-		"stream":          false,
-		"response_format": map[string]string{"type": "json_object"},
+		"model":       selectedModel,
+		"max_tokens":  1024,
+		"temperature": 0.1,
+		"top_p":       0.9,
+		"stream":      false,
 		"messages": []map[string]string{
 			{
-				"role":    "system",
-				"content": "Translate spoken subtitle dialogue into natural Simplified Chinese (zh-CN). Return strict JSON only with schema {\"translations\":[{\"id\":0,\"text\":\"translated text\"}]}. Keep every input id exactly once and in the same order. Do not add, omit, merge, or split segments. Preserve names, tone, and meaning. Translation text must not be empty.",
-			},
-			{
 				"role":    "user",
-				"content": string(segmentsJSON),
+				"content": subtitleTranslationPrompt(validated),
 			},
 		},
 	}
@@ -95,55 +91,94 @@ func (s *SubtitleService) TranslateSegments(ctx context.Context, provider, selec
 	if err := decoder.Decode(&upstream); err != nil {
 		return SubtitleTranslationResult{}, fmt.Errorf("cloud translation response is invalid: %w", err)
 	}
-	if len(upstream.Choices) == 0 || strings.TrimSpace(upstream.Choices[0].Message.Content) == "" {
-		return SubtitleTranslationResult{}, errors.New("cloud translation returned empty content")
+	if len(upstream.Choices) == 0 {
+		return SubtitleTranslationResult{}, errors.New("cloud translation returned no choices")
 	}
-	var result SubtitleTranslationResult
-	if err := json.Unmarshal([]byte(upstream.Choices[0].Message.Content), &result); err != nil {
-		return SubtitleTranslationResult{}, fmt.Errorf("cloud translation returned invalid JSON: %w", err)
-	}
-	if err := validateSubtitleTranslationResult(validated, result.Translations); err != nil {
+	translation, err := validateSubtitleTranslationOutput(validated.Text, upstream.Choices[0].Message.Content)
+	if err != nil {
 		return SubtitleTranslationResult{}, err
 	}
-	return result, nil
+	return SubtitleTranslationResult{Translation: translation}, nil
 }
 
-func validateSubtitleTranslationSegments(segments []SubtitleTranslationSegment) ([]SubtitleTranslationSegment, error) {
-	if len(segments) == 0 || len(segments) > 25 {
-		return nil, errors.New("translation segments must contain between 1 and 25 items")
+func validateSubtitleTranslationInput(input SubtitleTranslationInput) (SubtitleTranslationInput, error) {
+	input.Text = strings.TrimSpace(input.Text)
+	input.Glossary = strings.TrimSpace(input.Glossary)
+	if input.Text == "" {
+		return SubtitleTranslationInput{}, errors.New("translation target text is required")
 	}
-	totalChars := 0
-	validated := make([]SubtitleTranslationSegment, len(segments))
-	for i, segment := range segments {
-		segment.Text = strings.TrimSpace(segment.Text)
-		if segment.ID < 0 || segment.Text == "" {
-			return nil, errors.New("translation segment contains an invalid id or empty text")
+	if len(input.Context) > subtitleTranslationMaxContext {
+		return SubtitleTranslationInput{}, fmt.Errorf("translation context cannot exceed %d segments", subtitleTranslationMaxContext)
+	}
+	totalChars := len([]rune(input.Text)) + len([]rune(input.Glossary))
+	for i := range input.Context {
+		input.Context[i] = strings.TrimSpace(input.Context[i])
+		if input.Context[i] == "" {
+			return SubtitleTranslationInput{}, errors.New("translation context contains empty text")
 		}
-		totalChars += len([]rune(segment.Text))
-		validated[i] = segment
+		totalChars += len([]rune(input.Context[i]))
 	}
 	if totalChars > 5000 {
-		return nil, errors.New("translation segment text exceeds the request limit")
+		return SubtitleTranslationInput{}, errors.New("translation request exceeds the text limit")
 	}
-	return validated, nil
+	return input, nil
 }
 
-func validateSubtitleTranslationResult(input, translated []SubtitleTranslationSegment) error {
-	if len(input) != len(translated) {
-		return errors.New("cloud translation response is missing translations")
+func validateSubtitleTranslationOutput(source, translated string) (string, error) {
+	translated = strings.TrimSpace(translated)
+	if translated == "" {
+		return "", errors.New("cloud translation returned empty content")
 	}
-	seen := make(map[int]struct{}, len(translated))
-	for i := range translated {
-		translated[i].Text = strings.TrimSpace(translated[i].Text)
-		if translated[i].ID != input[i].ID || translated[i].Text == "" {
-			return errors.New("cloud translation segment IDs do not match the requested batch")
-		}
-		if _, exists := seen[translated[i].ID]; exists {
-			return errors.New("cloud translation returned duplicate segments")
-		}
-		seen[translated[i].ID] = struct{}{}
+	if strings.Contains(translated, "```") || strings.HasPrefix(translated, "{") || strings.HasPrefix(translated, "[") {
+		return "", errors.New("cloud translation returned structured content instead of plain text")
 	}
-	return nil
+	for _, prefix := range []string{"译文：", "翻译：", "翻译结果：", "Translation:"} {
+		if strings.HasPrefix(translated, prefix) {
+			return "", errors.New("cloud translation returned an explanation instead of plain text")
+		}
+	}
+	if strings.EqualFold(strings.Join(strings.Fields(source), ""), strings.Join(strings.Fields(translated), "")) {
+		return "", errors.New("cloud translation returned the untranslated source text")
+	}
+	if containsSubtitleTranslationJapaneseKana(translated) {
+		return "", errors.New("cloud translation still contains Japanese kana")
+	}
+	sourceLength := len([]rune(source))
+	translatedLength := len([]rune(translated))
+	maxLength := sourceLength*4 + 20
+	if maxLength < 80 {
+		maxLength = 80
+	}
+	if translatedLength > maxLength {
+		return "", errors.New("cloud translation length is abnormally large")
+	}
+	if sourceLength >= 20 && translatedLength < sourceLength/10 {
+		return "", errors.New("cloud translation length is abnormally small")
+	}
+	return translated, nil
+}
+
+func containsSubtitleTranslationJapaneseKana(value string) bool {
+	for _, char := range value {
+		if (char >= '\u3040' && char <= '\u30ff') || (char >= '\u31f0' && char <= '\u31ff') {
+			return true
+		}
+	}
+	return false
+}
+
+func subtitleTranslationPrompt(input SubtitleTranslationInput) string {
+	contextText := "（无）"
+	if len(input.Context) > 0 {
+		contextText = strings.Join(input.Context, "\n")
+	}
+	glossaryText := "（无）"
+	if input.Glossary != "" {
+		glossaryText = input.Glossary
+	}
+	return "参考上下文：\n" + contextText +
+		"\n\n术语参考：\n" + glossaryText +
+		"\n\n将下面的日文翻译成自然、准确的简体中文。\n只输出译文，不要解释：\n\n" + input.Text
 }
 
 func aiChatCompletionsEndpoint(baseURL string) string {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -13,20 +14,41 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
-func TestSubtitleTranslationUsesConfiguredEncryptedProvider(t *testing.T) {
+func TestSubtitleTranslationUsesPlainTextWithContextAndGlossary(t *testing.T) {
 	var authorization string
 	var requestedModel string
+	var userPrompt string
+	var responseFormat any
+	var temperature float64
+	var topP float64
+	var maxTokens int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization = r.Header.Get("Authorization")
 		var payload struct {
-			Model string `json:"model"`
+			Model          string  `json:"model"`
+			ResponseFormat any     `json:"response_format"`
+			Temperature    float64 `json:"temperature"`
+			TopP           float64 `json:"top_p"`
+			MaxTokens      int     `json:"max_tokens"`
+			Messages       []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
 		requestedModel = payload.Model
+		responseFormat = payload.ResponseFormat
+		temperature = payload.Temperature
+		topP = payload.TopP
+		maxTokens = payload.MaxTokens
+		if len(payload.Messages) != 1 || payload.Messages[0].Role != "user" {
+			t.Fatalf("messages = %#v", payload.Messages)
+		}
+		userPrompt = payload.Messages[0].Content
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"translations\":[{\"id\":7,\"text\":\"你好\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"今天来晚了。"}}]}`))
 	}))
 	defer server.Close()
 
@@ -45,11 +67,13 @@ func TestSubtitleTranslationUsesConfiguredEncryptedProvider(t *testing.T) {
 	}
 
 	service := NewSubtitleService(zap.NewNop(), repository.New(db)).SetAPIConfig(apiConfig)
-	result, err := service.TranslateSegments(
+	result, err := service.TranslateText(
 		context.Background(),
 		"deepseek",
 		modelID,
-		[]SubtitleTranslationSegment{{ID: 7, Text: "hello"}},
+		SubtitleTranslationInput{
+			Text: "今日は遅かった。", Context: []string{"昨日も遅かった。"}, Glossary: "東京 -> 东京",
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +81,16 @@ func TestSubtitleTranslationUsesConfiguredEncryptedProvider(t *testing.T) {
 	if authorization != "Bearer "+key || requestedModel != modelID {
 		t.Fatalf("authorization=%q model=%q", authorization, requestedModel)
 	}
-	if len(result.Translations) != 1 || result.Translations[0].Text != "你好" {
+	if responseFormat != nil {
+		t.Fatalf("response_format must not be sent: %#v", responseFormat)
+	}
+	if temperature != 0.1 || topP != 0.9 || maxTokens != 1024 {
+		t.Fatalf("parameters temperature=%v top_p=%v max_tokens=%d", temperature, topP, maxTokens)
+	}
+	if !strings.Contains(userPrompt, "昨日も遅かった。") || !strings.Contains(userPrompt, "東京 -> 东京") || !strings.HasSuffix(userPrompt, "今日は遅かった。") {
+		t.Fatalf("prompt does not contain context, glossary, and target: %q", userPrompt)
+	}
+	if result.Translation != "今天来晚了。" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -76,11 +109,22 @@ func TestSubtitleTranslationRejectsUnconfiguredModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewSubtitleService(zap.NewNop(), repository.New(db)).SetAPIConfig(apiConfig)
-	_, err := service.TranslateSegments(
+	_, err := service.TranslateText(
 		t.Context(), "siliconflow", "client-supplied-model",
-		[]SubtitleTranslationSegment{{ID: 0, Text: "hello"}},
+		SubtitleTranslationInput{Text: "こんにちは"},
 	)
 	if err == nil {
 		t.Fatal("expected mismatched model to be rejected")
+	}
+}
+
+func TestSubtitleTranslationRejectsClearlyUntranslatedOutput(t *testing.T) {
+	for _, output := range []string{"こんにちは", "```text\n你好\n```", `{"translation":"你好"}`} {
+		if _, err := validateSubtitleTranslationOutput("こんにちは", output); err == nil {
+			t.Fatalf("expected output to be rejected: %q", output)
+		}
+	}
+	if translated, err := validateSubtitleTranslationOutput("こんにちは", "你好"); err != nil || translated != "你好" {
+		t.Fatalf("valid translation rejected: %q %v", translated, err)
 	}
 }

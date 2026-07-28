@@ -37,9 +37,11 @@ type subtitleASRRequest struct {
 }
 
 type subtitleTranslationRequest struct {
-	Provider string                               `json:"provider"`
-	Model    string                               `json:"model"`
-	Segments []service.SubtitleTranslationSegment `json:"segments"`
+	Provider string   `json:"provider"`
+	Model    string   `json:"model"`
+	Text     string   `json:"text"`
+	Context  []string `json:"context"`
+	Glossary string   `json:"glossary"`
 }
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
@@ -384,8 +386,10 @@ func pipelineTranslateSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		result, err := svc.Subtitle.TranslateSegments(
-			c.Request.Context(), in.Provider, in.Model, in.Segments,
+		result, err := svc.Subtitle.TranslateText(
+			c.Request.Context(), in.Provider, in.Model, service.SubtitleTranslationInput{
+				Text: in.Text, Context: in.Context, Glossary: in.Glossary,
+			},
 		)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
