@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { Ban, Captions, Eye, Languages, LoaderCircle, Pencil, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { Ban, Captions, Eye, Info, Languages, LoaderCircle, Pencil, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 
 import {
   subtitlesAPI,
@@ -65,6 +65,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     () => asrProfiles.find((profile) => asrProfileValue(profile) === asrProfileKey) ?? null,
     [asrProfileKey, asrProfiles],
   )
+  const asrCapabilityHint = Array.from(new Set([asrProfilesError, asrModelsError].filter(Boolean))).join(' · ')
 
   useEffect(() => {
     subtitlesAPI.listASRProfiles()
@@ -392,8 +393,8 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
         </div>
       </div>
 
-      {(asrTask || asrError || asrProfilesError || asrModelsError) && (
-        <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError || asrProfilesError || asrModelsError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
+      {(asrTask || asrError) && (
+        <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
           {asrTask && asrTask.status !== 'failed' && (
             <span>
               {subtitleASRStageLabel(asrTask.stage)}
@@ -403,8 +404,6 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           )}
           {asrTask?.status === 'failed' && <span>{asrTask.error || 'AI 字幕生成失败'}</span>}
           {asrError && <span>{asrTask ? ' · ' : ''}{asrError}</span>}
-          {asrProfilesError && <span>{asrTask || asrError ? ' · ' : ''}{asrProfilesError}</span>}
-          {asrModelsError && <span>{asrTask || asrError || asrProfilesError ? ' · ' : ''}{asrModelsError}</span>}
           {asrTask?.status === 'queued' && (
             <span className="ml-2 inline-flex gap-1 align-middle">
               <button
@@ -442,6 +441,12 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
             </button>
           )}
         </div>
+      )}
+      {asrCapabilityHint && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-sand-500" title={asrCapabilityHint}>
+          <Info size={13} className="shrink-0" />
+          AI 字幕服务当前未就绪，需要使用时再启动本机 ASR。
+        </p>
       )}
 
       {loadError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{loadError}</p>}
