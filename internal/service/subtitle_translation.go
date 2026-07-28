@@ -15,9 +15,10 @@ import (
 const subtitleTranslationMaxContext = 5
 
 type SubtitleTranslationInput struct {
-	Text     string   `json:"text"`
-	Context  []string `json:"context"`
-	Glossary string   `json:"glossary"`
+	Text             string   `json:"text"`
+	Context          []string `json:"context"`
+	Glossary         string   `json:"glossary"`
+	RetryInstruction string   `json:"retry_instruction"`
 }
 
 type SubtitleTranslationResult struct {
@@ -104,13 +105,17 @@ func (s *SubtitleService) TranslateText(ctx context.Context, provider, selectedM
 func validateSubtitleTranslationInput(input SubtitleTranslationInput) (SubtitleTranslationInput, error) {
 	input.Text = strings.TrimSpace(input.Text)
 	input.Glossary = strings.TrimSpace(input.Glossary)
+	input.RetryInstruction = strings.TrimSpace(input.RetryInstruction)
 	if input.Text == "" {
 		return SubtitleTranslationInput{}, errors.New("translation target text is required")
 	}
 	if len(input.Context) > subtitleTranslationMaxContext {
 		return SubtitleTranslationInput{}, fmt.Errorf("translation context cannot exceed %d segments", subtitleTranslationMaxContext)
 	}
-	totalChars := len([]rune(input.Text)) + len([]rune(input.Glossary))
+	if len([]rune(input.RetryInstruction)) > 200 {
+		return SubtitleTranslationInput{}, errors.New("translation retry instruction exceeds the text limit")
+	}
+	totalChars := len([]rune(input.Text)) + len([]rune(input.Glossary)) + len([]rune(input.RetryInstruction))
 	for i := range input.Context {
 		input.Context[i] = strings.TrimSpace(input.Context[i])
 		if input.Context[i] == "" {
@@ -131,6 +136,9 @@ func validateSubtitleTranslationOutput(source, translated string) (string, error
 	}
 	if strings.Contains(translated, "```") || strings.HasPrefix(translated, "{") || strings.HasPrefix(translated, "[") {
 		return "", errors.New("cloud translation returned structured content instead of plain text")
+	}
+	if strings.Contains(strings.ToLower(translated), "<think") || strings.Contains(strings.ToLower(translated), "</think>") {
+		return "", errors.New("cloud translation returned reasoning content instead of plain text")
 	}
 	for _, prefix := range []string{"译文：", "翻译：", "翻译结果：", "Translation:"} {
 		if strings.HasPrefix(translated, prefix) {
@@ -176,8 +184,13 @@ func subtitleTranslationPrompt(input SubtitleTranslationInput) string {
 	if input.Glossary != "" {
 		glossaryText = input.Glossary
 	}
+	retryText := ""
+	if input.RetryInstruction != "" {
+		retryText = "\n\n重试要求：\n" + input.RetryInstruction
+	}
 	return "参考上下文：\n" + contextText +
 		"\n\n术语参考：\n" + glossaryText +
+		retryText +
 		"\n\n将下面的日文翻译成自然、准确的简体中文。\n只输出译文，不要解释：\n\n" + input.Text
 }
 

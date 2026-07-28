@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Captions, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
+import { Ban, Captions, Languages, LoaderCircle, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { subtitlesAPI, type SubtitleASRProfile, type SubtitleASRTask } from '../api/subtitles'
@@ -55,6 +55,53 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
     }
   }
 
+  const updateQueuedTaskModel = async (task: SubtitleASRTask) => {
+    if (!selectedProfile || busyTaskID) return
+    setBusyTaskID(task.id)
+    try {
+      await subtitlesAPI.updateASRModel(task.id, selectedProfile)
+      toast.success('排队任务已改用所选模型')
+      await onChanged()
+    } catch (cause) {
+      toast.error(errorMessage(cause, '字幕任务模型修改失败'))
+    } finally {
+      setBusyTaskID('')
+    }
+  }
+
+  const cancelTask = async (task: SubtitleASRTask) => {
+    if (busyTaskID) return
+    if (!(await confirmAction({
+      title: '撤销排队任务',
+      message: '确定撤销该字幕任务吗？已生成的任务缓存会一并清理。',
+      confirmText: '撤销任务',
+    }))) return
+    setBusyTaskID(task.id)
+    try {
+      await subtitlesAPI.cancelASR(task.id)
+      toast.success('排队任务已撤销')
+      await onChanged()
+    } catch (cause) {
+      toast.error(errorMessage(cause, '字幕任务撤销失败'))
+    } finally {
+      setBusyTaskID('')
+    }
+  }
+
+  const retranslateTask = async (task: SubtitleASRTask) => {
+    if (!selectedProfile || busyTaskID) return
+    setBusyTaskID(task.id)
+    try {
+      await subtitlesAPI.retranslateASR(task.id, selectedProfile)
+      toast.success('已复用音轨和 SenseVoice 结果重新翻译')
+      await onChanged()
+    } catch (cause) {
+      toast.error(errorMessage(cause, '字幕重新翻译失败'))
+    } finally {
+      setBusyTaskID('')
+    }
+  }
+
   const deleteTask = async (task: SubtitleASRTask) => {
     if (busyTaskID) return
     if (!(await confirmAction({
@@ -80,7 +127,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
         <Captions size={18} className="text-brand-500" />
         <h2 className="font-display text-lg font-semibold text-ink-600">AI 字幕生产任务</h2>
         <label className="ml-auto flex min-w-0 items-center gap-2 text-xs text-sand-500">
-          重试模型
+          任务模型
           <select
             value={profileKey}
             disabled={profiles.length === 0}
@@ -102,7 +149,14 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
         <div className="space-y-5">
           <div>
             <h3 className="mb-2 text-sm font-semibold text-ink-500">运行中</h3>
-            <SubtitleASRTaskTable tasks={grouped.active} empty="暂无正在生产的字幕。" busyTaskID={busyTaskID} />
+            <SubtitleASRTaskTable
+              tasks={grouped.active}
+              empty="暂无正在生产的字幕。"
+              busyTaskID={busyTaskID}
+              modelActionsEnabled={Boolean(selectedProfile)}
+              onUpdateModel={(task) => void updateQueuedTaskModel(task)}
+              onCancel={(task) => void cancelTask(task)}
+            />
           </div>
           <div>
             <h3 className="mb-2 text-sm font-semibold text-ink-500">最近完成</h3>
@@ -112,6 +166,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
               busyTaskID={busyTaskID}
               retryEnabled={Boolean(selectedProfile)}
               onRetry={(task) => void retryTask(task)}
+              onRetranslate={(task) => void retranslateTask(task)}
               onDelete={(task) => void deleteTask(task)}
             />
           </div>
@@ -126,14 +181,22 @@ function SubtitleASRTaskTable({
   empty,
   busyTaskID,
   retryEnabled = false,
+  modelActionsEnabled = false,
   onRetry,
+  onUpdateModel,
+  onCancel,
+  onRetranslate,
   onDelete,
 }: {
   tasks: SubtitleASRTask[]
   empty: string
   busyTaskID: string
   retryEnabled?: boolean
+  modelActionsEnabled?: boolean
   onRetry?: (task: SubtitleASRTask) => void
+  onUpdateModel?: (task: SubtitleASRTask) => void
+  onCancel?: (task: SubtitleASRTask) => void
+  onRetranslate?: (task: SubtitleASRTask) => void
   onDelete?: (task: SubtitleASRTask) => void
 }) {
   if (tasks.length === 0) return <p className="text-sand-500">{empty}</p>
@@ -149,7 +212,7 @@ function SubtitleASRTaskTable({
             <th>状态</th>
             <th>结果</th>
             <th>时间</th>
-            {(onRetry || onDelete) && <th className="text-right">操作</th>}
+            {(onRetry || onUpdateModel || onCancel || onRetranslate || onDelete) && <th className="text-right">操作</th>}
           </tr>
         </thead>
         <tbody>
@@ -187,9 +250,33 @@ function SubtitleASRTaskTable({
                 {subtitleASRResultSummary(task)}
               </td>
               <td className="whitespace-nowrap text-ink-100">{subtitleASRTaskTime(task)}</td>
-              {(onRetry || onDelete) && (
+              {(onRetry || onUpdateModel || onCancel || onRetranslate || onDelete) && (
                 <td>
                   <div className="flex justify-end gap-1">
+                    {task.status === 'queued' && onUpdateModel && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateModel(task)}
+                        disabled={!modelActionsEnabled || Boolean(busyTaskID)}
+                        className="btn-outline h-9 w-9 justify-center p-0"
+                        title="改用所选模型"
+                        aria-label="修改排队任务模型"
+                      >
+                        {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <Pencil size={14} />}
+                      </button>
+                    )}
+                    {task.status === 'queued' && onCancel && (
+                      <button
+                        type="button"
+                        onClick={() => onCancel(task)}
+                        disabled={Boolean(busyTaskID)}
+                        className="btn-outline h-9 w-9 justify-center p-0 !border-red-100 !text-red-500"
+                        title="撤销排队任务"
+                        aria-label="撤销排队字幕任务"
+                      >
+                        {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <Ban size={14} />}
+                      </button>
+                    )}
                     {task.status === 'failed' && onRetry && (
                       <button
                         type="button"
@@ -200,6 +287,18 @@ function SubtitleASRTaskTable({
                         aria-label="重试字幕任务"
                       >
                         {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                      </button>
+                    )}
+                    {task.status === 'completed' && task.cached_audio && task.cached_transcript && onRetranslate && (
+                      <button
+                        type="button"
+                        onClick={() => onRetranslate(task)}
+                        disabled={!retryEnabled || Boolean(busyTaskID)}
+                        className="btn-outline h-9 w-9 justify-center p-0"
+                        title="复用缓存并按所选模型重新翻译"
+                        aria-label="使用其他模型重新翻译字幕"
+                      >
+                        {busyTaskID === task.id ? <LoaderCircle size={14} className="animate-spin" /> : <Languages size={14} />}
                       </button>
                     )}
                     {onDelete && (
@@ -231,8 +330,9 @@ function subtitleASRStatusBadge(status: SubtitleASRTask['status']) {
     running: 'border-yellow-400/40 text-yellow-600',
     completed: 'border-emerald-400/40 text-emerald-600',
     failed: 'border-red-400/40 text-red-500',
+    canceled: 'border-gray-300 text-sand-500',
   }
-  const labels = { queued: '排队中', running: '生产中', completed: '已成功', failed: '失败' }
+  const labels = { queued: '排队中', running: '生产中', completed: '已成功', failed: '失败', canceled: '已撤销' }
   return <span className={`rounded-lg border px-1.5 py-0.5 text-xs ${styles[status]}`}>{labels[status]}</span>
 }
 

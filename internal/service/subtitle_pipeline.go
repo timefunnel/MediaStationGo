@@ -104,6 +104,9 @@ type subtitlePipelineClient interface {
 	ListSubtitleASR(context.Context, int) ([]SubtitleASRTask, error)
 	ListSubtitleASRModels(context.Context) ([]string, error)
 	RetrySubtitleASR(context.Context, string, string, string, string) (SubtitleASRTask, error)
+	UpdateSubtitleASRModel(context.Context, string, string, string, string) (SubtitleASRTask, error)
+	CancelSubtitleASR(context.Context, string, string) (SubtitleASRTask, error)
+	RetranslateSubtitleASR(context.Context, string, string, string, string) (SubtitleASRTask, error)
 	DeleteSubtitleASR(context.Context, string, string) error
 }
 
@@ -147,6 +150,31 @@ func (c *resourcePipelineHTTPClient) ListSubtitleASRModels(ctx context.Context) 
 func (c *resourcePipelineHTTPClient) RetrySubtitleASR(ctx context.Context, ownerID, taskID, provider, model string) (SubtitleASRTask, error) {
 	var out SubtitleASRTask
 	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "/retry"
+	err := c.doJSON(ctx, "POST", endpoint, map[string]any{
+		"owner_id": ownerID, "translation_provider": provider, "translation_model": model,
+	}, "", &out)
+	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) UpdateSubtitleASRModel(ctx context.Context, ownerID, taskID, provider, model string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "/model"
+	err := c.doJSON(ctx, "POST", endpoint, map[string]any{
+		"owner_id": ownerID, "translation_provider": provider, "translation_model": model,
+	}, "", &out)
+	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) CancelSubtitleASR(ctx context.Context, ownerID, taskID string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "/cancel"
+	err := c.doJSON(ctx, "POST", endpoint, map[string]any{"owner_id": ownerID}, "", &out)
+	return out, err
+}
+
+func (c *resourcePipelineHTTPClient) RetranslateSubtitleASR(ctx context.Context, ownerID, taskID, provider, model string) (SubtitleASRTask, error) {
+	var out SubtitleASRTask
+	endpoint := "/v1/subtitles/asr/" + url.PathEscape(taskID) + "/retranslate"
 	err := c.doJSON(ctx, "POST", endpoint, map[string]any{
 		"owner_id": ownerID, "translation_provider": provider, "translation_model": model,
 	}, "", &out)
@@ -329,6 +357,39 @@ func (s *SubtitleService) RetryASRTask(ctx context.Context, ownerID, taskID, pro
 		return SubtitleASRTask{}, err
 	}
 	return s.pipeline.RetrySubtitleASR(
+		ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID), profile.Provider, profile.Model,
+	)
+}
+
+func (s *SubtitleService) UpdateQueuedASRTaskModel(ctx context.Context, ownerID, taskID, provider, translationModel string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	profile, err := s.resolveASRProfile(ctx, provider, translationModel)
+	if err != nil {
+		return SubtitleASRTask{}, err
+	}
+	return s.pipeline.UpdateSubtitleASRModel(
+		ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID), profile.Provider, profile.Model,
+	)
+}
+
+func (s *SubtitleService) CancelQueuedASRTask(ctx context.Context, ownerID, taskID string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	return s.pipeline.CancelSubtitleASR(ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID))
+}
+
+func (s *SubtitleService) RetranslateASRTask(ctx context.Context, ownerID, taskID, provider, translationModel string) (SubtitleASRTask, error) {
+	if s == nil || s.pipeline == nil {
+		return SubtitleASRTask{}, errors.New("subtitle pipeline unavailable")
+	}
+	profile, err := s.resolveASRProfile(ctx, provider, translationModel)
+	if err != nil {
+		return SubtitleASRTask{}, err
+	}
+	return s.pipeline.RetranslateSubtitleASR(
 		ctx, strings.TrimSpace(ownerID), strings.TrimSpace(taskID), profile.Provider, profile.Model,
 	)
 }

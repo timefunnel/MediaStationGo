@@ -3,7 +3,7 @@ import type { SubtitleASRTask } from '../api/subtitles'
 export function splitSubtitleASRTasks(tasks: SubtitleASRTask[]) {
   return {
     active: tasks.filter((task) => task.status === 'queued' || task.status === 'running'),
-    recent: tasks.filter((task) => task.status === 'completed' || task.status === 'failed'),
+    recent: tasks.filter((task) => task.status === 'completed' || task.status === 'failed' || task.status === 'canceled'),
   }
 }
 
@@ -20,6 +20,7 @@ export function subtitleASRStageLabel(stage: SubtitleASRTask['stage']): string {
     saving: '正在保存字幕',
     completed: 'AI 字幕已生成',
     failed: 'AI 字幕生成失败',
+    canceled: '任务已撤销',
   }[stage] || stage
 }
 
@@ -57,6 +58,7 @@ export function subtitleASRLanguageLabel(language: SubtitleASRTask['source_langu
 
 export function subtitleASRResultSummary(task: SubtitleASRTask): string {
   if (task.status === 'failed') return task.error || '任务失败但未返回错误原因'
+  if (task.status === 'canceled') return '排队任务已撤销'
   if (task.status !== 'completed') {
     return subtitleASRProgressLabel(task) || '处理中'
   }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { Captions, Eye, LoaderCircle, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { Ban, Captions, Eye, Languages, LoaderCircle, Pencil, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 
 import {
   subtitlesAPI,
@@ -52,6 +52,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   const [asrProfileKey, setAsrProfileKey] = useState('')
   const [asrProfilesError, setAsrProfilesError] = useState('')
   const [asrCreating, setAsrCreating] = useState(false)
+  const [asrUpdating, setAsrUpdating] = useState(false)
   const [asrTask, setAsrTask] = useState<SubtitleASRTask | null>(null)
   const [asrError, setAsrError] = useState('')
   const announcedASRTask = useRef('')
@@ -102,7 +103,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   }, [loadTracks])
 
   useEffect(() => {
-    if (!asrPollingTaskID || !asrPolling) return
+    if (!asrPollingTaskID || !asrPolling || asrUpdating) return
     let stopped = false
     let timer = 0
     const poll = async () => {
@@ -125,7 +126,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
       stopped = true
       window.clearTimeout(timer)
     }
-  }, [asrPolling, asrPollingTaskID, selectedMediaId])
+  }, [asrPolling, asrPollingTaskID, asrUpdating, selectedMediaId])
 
   useEffect(() => {
     if (!asrTask || announcedASRTask.current === asrTask.id) return
@@ -239,6 +240,60 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     }
   }, [asrCreating, asrLanguage, asrTask?.status, selectedASRProfile, selectedMediaId])
 
+  const updateQueuedASRModel = useCallback(async () => {
+    if (asrUpdating || asrTask?.status !== 'queued' || !selectedASRProfile) return
+    setAsrUpdating(true)
+    setAsrError('')
+    try {
+      setAsrTask(await subtitlesAPI.updateASRModel(asrTask.id, selectedASRProfile))
+      toast.success('排队任务已改用所选模型')
+    } catch (error) {
+      const message = errorMessage(error, '字幕任务模型修改失败')
+      setAsrError(message)
+      toast.error(message)
+    } finally {
+      setAsrUpdating(false)
+    }
+  }, [asrTask, asrUpdating, selectedASRProfile])
+
+  const cancelQueuedASR = useCallback(async () => {
+    if (asrUpdating || asrTask?.status !== 'queued') return
+    if (!(await confirmAction({
+      title: '撤销排队任务',
+      message: '确定撤销该字幕任务吗？已生成的任务缓存会一并清理。',
+      confirmText: '撤销任务',
+    }))) return
+    setAsrUpdating(true)
+    setAsrError('')
+    try {
+      setAsrTask(await subtitlesAPI.cancelASR(asrTask.id))
+      toast.success('排队任务已撤销')
+    } catch (error) {
+      const message = errorMessage(error, '字幕任务撤销失败')
+      setAsrError(message)
+      toast.error(message)
+    } finally {
+      setAsrUpdating(false)
+    }
+  }, [asrTask, asrUpdating])
+
+  const retranslateASR = useCallback(async () => {
+    if (asrUpdating || asrTask?.status !== 'completed' || !asrTask.cached_audio || !asrTask.cached_transcript || !selectedASRProfile) return
+    setAsrUpdating(true)
+    setAsrError('')
+    try {
+      announcedASRTask.current = ''
+      setAsrTask(await subtitlesAPI.retranslateASR(asrTask.id, selectedASRProfile))
+      toast.success('已复用音轨和 SenseVoice 结果重新翻译')
+    } catch (error) {
+      const message = errorMessage(error, '字幕重新翻译失败')
+      setAsrError(message)
+      toast.error(message)
+    } finally {
+      setAsrUpdating(false)
+    }
+  }, [asrTask, asrUpdating, selectedASRProfile])
+
   return (
     <section className="space-y-3" aria-label="字幕文件">
       <div className="flex flex-wrap items-center gap-2">
@@ -275,7 +330,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           </button>
           <select
             value={asrProfileKey}
-            disabled={asrCreating || asrProfiles.length === 0 || ['queued', 'running'].includes(asrTask?.status || '')}
+            disabled={asrCreating || asrUpdating || asrProfiles.length === 0 || asrTask?.status === 'running'}
             onChange={(event) => setAsrProfileKey(event.target.value)}
             className="h-9 max-w-72 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
             aria-label="AI 字幕翻译模型"
@@ -288,7 +343,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           </select>
           <select
             value={asrLanguage}
-            disabled={asrCreating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
+            disabled={asrCreating || asrUpdating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
             onChange={(event) => setAsrLanguage(event.target.value as SubtitleASRSourceLanguage)}
             className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
             aria-label="AI 字幕源语言"
@@ -302,7 +357,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           <button
             type="button"
             onClick={() => void createASR()}
-            disabled={asrCreating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
+            disabled={asrCreating || asrUpdating || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
             className="btn-outline h-9 gap-1.5 px-3 text-xs"
           >
             {asrCreating || ['queued', 'running'].includes(asrTask?.status || '')
@@ -325,6 +380,42 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           {asrTask?.status === 'failed' && <span>{asrTask.error || 'AI 字幕生成失败'}</span>}
           {asrError && <span>{asrTask ? ' · ' : ''}{asrError}</span>}
           {asrProfilesError && <span>{asrTask || asrError ? ' · ' : ''}{asrProfilesError}</span>}
+          {asrTask?.status === 'queued' && (
+            <span className="ml-2 inline-flex gap-1 align-middle">
+              <button
+                type="button"
+                onClick={() => void updateQueuedASRModel()}
+                disabled={asrUpdating || !selectedASRProfile}
+                className="btn-outline h-8 w-8 justify-center p-0"
+                title="改用当前选择的模型"
+                aria-label="修改排队任务模型"
+              >
+                {asrUpdating ? <LoaderCircle size={13} className="animate-spin" /> : <Pencil size={13} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void cancelQueuedASR()}
+                disabled={asrUpdating}
+                className="btn-outline h-8 w-8 justify-center p-0 !border-red-100 !text-red-500"
+                title="撤销排队任务"
+                aria-label="撤销排队字幕任务"
+              >
+                {asrUpdating ? <LoaderCircle size={13} className="animate-spin" /> : <Ban size={13} />}
+              </button>
+            </span>
+          )}
+          {asrTask?.status === 'completed' && asrTask.cached_audio && asrTask.cached_transcript && (
+            <button
+              type="button"
+              onClick={() => void retranslateASR()}
+              disabled={asrUpdating || !selectedASRProfile}
+              className="btn-outline ml-2 inline-flex h-8 gap-1.5 px-2 text-xs align-middle"
+              title="复用音轨和 SenseVoice 结果"
+            >
+              {asrUpdating ? <LoaderCircle size={13} className="animate-spin" /> : <Languages size={13} />}
+              用所选模型重新翻译
+            </button>
+          )}
         </div>
       )}
 

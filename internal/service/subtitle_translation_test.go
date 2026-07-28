@@ -73,6 +73,7 @@ func TestSubtitleTranslationUsesPlainTextWithContextAndGlossary(t *testing.T) {
 		modelID,
 		SubtitleTranslationInput{
 			Text: "今日は遅かった。", Context: []string{"昨日も遅かった。"}, Glossary: "東京 -> 东京",
+			RetryInstruction: "上次译文仍含日文假名，请全部翻译。",
 		},
 	)
 	if err != nil {
@@ -87,7 +88,8 @@ func TestSubtitleTranslationUsesPlainTextWithContextAndGlossary(t *testing.T) {
 	if temperature != 0.1 || topP != 0.9 || maxTokens != 1024 {
 		t.Fatalf("parameters temperature=%v top_p=%v max_tokens=%d", temperature, topP, maxTokens)
 	}
-	if !strings.Contains(userPrompt, "昨日も遅かった。") || !strings.Contains(userPrompt, "東京 -> 东京") || !strings.HasSuffix(userPrompt, "今日は遅かった。") {
+	if !strings.Contains(userPrompt, "昨日も遅かった。") || !strings.Contains(userPrompt, "東京 -> 东京") ||
+		!strings.Contains(userPrompt, "上次译文仍含日文假名") || !strings.HasSuffix(userPrompt, "今日は遅かった。") {
 		t.Fatalf("prompt does not contain context, glossary, and target: %q", userPrompt)
 	}
 	if result.Translation != "今天来晚了。" {
@@ -119,7 +121,7 @@ func TestSubtitleTranslationRejectsUnconfiguredModel(t *testing.T) {
 }
 
 func TestSubtitleTranslationRejectsClearlyUntranslatedOutput(t *testing.T) {
-	for _, output := range []string{"こんにちは", "```text\n你好\n```", `{"translation":"你好"}`} {
+	for _, output := range []string{"こんにちは", "```text\n你好\n```", `{"translation":"你好"}`, "<think>分析</think>你好"} {
 		if _, err := validateSubtitleTranslationOutput("こんにちは", output); err == nil {
 			t.Fatalf("expected output to be rejected: %q", output)
 		}

@@ -37,11 +37,12 @@ type subtitleASRRequest struct {
 }
 
 type subtitleTranslationRequest struct {
-	Provider string   `json:"provider"`
-	Model    string   `json:"model"`
-	Text     string   `json:"text"`
-	Context  []string `json:"context"`
-	Glossary string   `json:"glossary"`
+	Provider         string   `json:"provider"`
+	Model            string   `json:"model"`
+	Text             string   `json:"text"`
+	Context          []string `json:"context"`
+	Glossary         string   `json:"glossary"`
+	RetryInstruction string   `json:"retry_instruction"`
 }
 
 func listSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
@@ -263,6 +264,57 @@ func retrySubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func updateSubtitleASRTaskModelHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in subtitleASRRequest
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		task, err := svc.Subtitle.UpdateQueuedASRTaskModel(
+			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
+			in.TranslationProvider, in.TranslationModel,
+		)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, task)
+	}
+}
+
+func cancelSubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		task, err := svc.Subtitle.CancelQueuedASRTask(
+			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
+		)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, task)
+	}
+}
+
+func retranslateSubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var in subtitleASRRequest
+		if err := c.ShouldBindJSON(&in); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		task, err := svc.Subtitle.RetranslateASRTask(
+			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
+			in.TranslationProvider, in.TranslationModel,
+		)
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusAccepted, task)
+	}
+}
+
 func deleteSubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := svc.Subtitle.DeleteASRTask(
@@ -389,6 +441,7 @@ func pipelineTranslateSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
 		result, err := svc.Subtitle.TranslateText(
 			c.Request.Context(), in.Provider, in.Model, service.SubtitleTranslationInput{
 				Text: in.Text, Context: in.Context, Glossary: in.Glossary,
+				RetryInstruction: in.RetryInstruction,
 			},
 		)
 		if err != nil {

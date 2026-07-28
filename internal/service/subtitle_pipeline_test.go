@@ -20,11 +20,11 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 				t.Fatal(err)
 			}
 		}
-		if body != nil && (body["owner_id"] != "admin-id" || body["media_id"] != "media-1") {
-			t.Fatalf("unexpected request body: %#v", body)
-		}
 		switch r.URL.Path {
 		case "/v1/subtitles/search":
+			if body["owner_id"] != "admin-id" || body["media_id"] != "media-1" {
+				t.Fatalf("unexpected request body: %#v", body)
+			}
 			_ = json.NewEncoder(w).Encode(SubtitleSearchResponse{
 				SessionID: "session-1", MediaID: "media-1",
 				Items: []SubtitleSearchCandidate{{CandidateID: "candidate-1", Provider: "subtitlecat"}},
@@ -64,6 +64,24 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 				ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
 				Status: "completed", Stage: "completed",
 				Result: &SubtitleASRResult{Filename: "sensevoice-deepseek-zh-cn.srt", Source: "sensevoice-deepseek"},
+			})
+		case "/v1/subtitles/asr/asr-1/model":
+			if body["owner_id"] != "admin-id" || body["translation_model"] != "qwen-next" {
+				t.Fatalf("unexpected model update body: %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(SubtitleASRTask{ID: "asr-1", Status: "queued", TranslationModel: "qwen-next"})
+		case "/v1/subtitles/asr/asr-1/cancel":
+			if body["owner_id"] != "admin-id" {
+				t.Fatalf("unexpected cancel body: %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(SubtitleASRTask{ID: "asr-1", Status: "canceled", Stage: "canceled"})
+		case "/v1/subtitles/asr/asr-1/retranslate":
+			if body["owner_id"] != "admin-id" || body["translation_model"] != "qwen-next" {
+				t.Fatalf("unexpected retranslate body: %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(SubtitleASRTask{
+				ID: "asr-1", Status: "queued", TranslationModel: "qwen-next",
+				CachedAudio: true, CachedTranscript: true,
 			})
 		default:
 			http.NotFound(w, r)
@@ -109,5 +127,17 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	listed, err := client.ListSubtitleASR(t.Context(), 50)
 	if err != nil || len(listed) != 1 || listed[0].ID != "asr-1" {
 		t.Fatalf("unexpected ASR list response: %#v err=%v", listed, err)
+	}
+	updated, err := client.UpdateSubtitleASRModel(t.Context(), "admin-id", "asr-1", "local", "qwen-next")
+	if err != nil || updated.Status != "queued" || updated.TranslationModel != "qwen-next" {
+		t.Fatalf("unexpected ASR model update response: %#v err=%v", updated, err)
+	}
+	canceled, err := client.CancelSubtitleASR(t.Context(), "admin-id", "asr-1")
+	if err != nil || canceled.Status != "canceled" {
+		t.Fatalf("unexpected ASR cancel response: %#v err=%v", canceled, err)
+	}
+	retranslated, err := client.RetranslateSubtitleASR(t.Context(), "admin-id", "asr-1", "local", "qwen-next")
+	if err != nil || retranslated.Status != "queued" || !retranslated.CachedTranscript {
+		t.Fatalf("unexpected ASR retranslate response: %#v err=%v", retranslated, err)
 	}
 }

@@ -73,8 +73,8 @@ export interface SubtitleASRTask {
   source_language: SubtitleASRSourceLanguage
   translation_provider: string
   translation_model: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  stage: 'queued' | 'starting' | 'extracting_audio' | 'using_cached_audio' | 'uploading_audio' | 'transcribing' | 'using_cached_transcript' | 'translating' | 'saving' | 'completed' | 'failed'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
+  stage: 'queued' | 'starting' | 'extracting_audio' | 'using_cached_audio' | 'uploading_audio' | 'transcribing' | 'using_cached_transcript' | 'translating' | 'saving' | 'completed' | 'failed' | 'canceled'
   progress_current: number
   progress_total: number
   result: SubtitleASRResult | null
@@ -160,6 +160,27 @@ export const subtitlesAPI = {
   retryASR: (taskId: string, profile: SubtitleASRProfile) =>
     api
       .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/retry`, {
+        translation_provider: profile.provider,
+        translation_model: profile.model,
+      })
+      .then((r) => r.data),
+
+  updateASRModel: (taskId: string, profile: SubtitleASRProfile) =>
+    api
+      .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/model`, {
+        translation_provider: profile.provider,
+        translation_model: profile.model,
+      })
+      .then((r) => r.data),
+
+  cancelASR: (taskId: string) =>
+    api
+      .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/cancel`)
+      .then((r) => r.data),
+
+  retranslateASR: (taskId: string, profile: SubtitleASRProfile) =>
+    api
+      .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/retranslate`, {
         translation_provider: profile.provider,
         translation_model: profile.model,
       })
