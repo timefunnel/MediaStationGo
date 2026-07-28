@@ -99,7 +99,6 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	}
 
 	collapseVersions := e.shouldCollapseMediaVersions(ctx, p)
-	collapseAllMultipart := p.ParentID != "" && e.libraryHasMultipartContent(ctx, p.ParentID)
 	if hasEmbyGenreFilter(p) {
 		var rows []model.Media
 		if err := q.Order(order).Find(&rows).Error; err != nil {
@@ -121,34 +120,35 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		}
 		return out, nil
 	}
+	if collapseVersions {
+		// Pagination applies to logical Emby items, not physical media rows.
+		// Every matching row must participate in version grouping so both the
+		// requested page and TotalRecordCount describe the same result set.
+		var rows []model.Media
+		if err := q.Order(order).Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		rows = e.collapseMediaVersionRows(ctx, rows)
+		total := int64(len(rows))
+		rows = pageSlice(rows, p.StartIndex, p.Limit)
+		items, err := e.payloadsForMedia(ctx, rows, p.UserID)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}
+		if e.cache != nil {
+			e.cache.SetJSON(ctx, cacheKey, embyItemsCacheValue{Items: items, TotalRecordCount: total, StartIndex: p.StartIndex}, e.embyMediaCacheTTL())
+		}
+		return out, nil
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	fetchLimit := p.Limit
-	fetchOffset := p.StartIndex
-	if fetchLimit > 0 && collapseVersions {
-		// Duplicates across merged local/cloud libraries collapse into one Emby
-		// item with multiple MediaSources. Fetch a wider window so duplicates do
-		// not consume the whole requested page.
-		fetchOffset = 0
-		if collapseAllMultipart {
-			fetchLimit = embySeriesGroupingLimit
-		} else {
-			fetchLimit = p.StartIndex + maxInt(p.Limit*4, p.Limit)
-		}
-	}
 	var rows []model.Media
-	if err := q.Order(order).Offset(fetchOffset).Limit(fetchLimit).Find(&rows).Error; err != nil {
+	if err := q.Order(order).Offset(p.StartIndex).Limit(p.Limit).Find(&rows).Error; err != nil {
 		return nil, err
-	}
-	if collapseVersions {
-		rows = e.collapseMediaVersionRows(ctx, rows)
-		if collapseAllMultipart {
-			total = int64(len(rows))
-		}
-		rows = pageSlice(rows, p.StartIndex, p.Limit)
 	}
 	items, err := e.payloadsForMedia(ctx, rows, p.UserID)
 	if err != nil {

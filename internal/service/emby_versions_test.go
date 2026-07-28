@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -163,5 +164,75 @@ func TestEmbyLatestItemsCollapsesMovieVersions(t *testing.T) {
 	sources := latest[0]["MediaSources"].([]map[string]any)
 	if len(sources) != 2 {
 		t.Fatalf("collapsed latest item should expose both versions, got %#v", sources)
+	}
+}
+
+func TestEmbyItemsPaginationCountsCollapsedVersions(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "Movies", Path: `/media/movies`, Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+
+	now := time.Now()
+	rows := make([]model.Media, 0, 51)
+	for i := 0; i < 49; i++ {
+		rows = append(rows, model.Media{
+			Base:      model.Base{ID: fmt.Sprintf("movie-%02d", i), CreatedAt: now.Add(time.Duration(i) * time.Minute)},
+			LibraryID: lib.ID,
+			Title:     fmt.Sprintf("Movie %02d", i),
+			TMDbID:    1000 + i,
+			Path:      fmt.Sprintf("/media/movies/movie-%02d.mkv", i),
+		})
+	}
+	for i, width := range []int{1920, 3840} {
+		rows = append(rows, model.Media{
+			Base:      model.Base{ID: fmt.Sprintf("shared-version-%d", i), CreatedAt: now.Add(time.Duration(100+i) * time.Minute)},
+			LibraryID: lib.ID,
+			Title:     "Shared Movie",
+			TMDbID:    9999,
+			Path:      fmt.Sprintf("/media/movies/shared-%d.mkv", i),
+			Width:     width,
+		})
+	}
+	if err := svc.repo.DB.Create(&rows).Error; err != nil {
+		t.Fatalf("create media: %v", err)
+	}
+
+	first, err := svc.Items(t.Context(), ItemsParams{
+		ParentID:         lib.ID,
+		IncludeItemTypes: []string{"Movie"},
+		Recursive:        true,
+		SortBy:           "DateCreated",
+		SortOrder:        "Descending",
+		Limit:            50,
+	})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if got := first["TotalRecordCount"]; got != int64(50) {
+		t.Fatalf("first page total = %#v, want 50 logical items", got)
+	}
+	if got := len(first["Items"].([]map[string]any)); got != 50 {
+		t.Fatalf("first page items = %d, want 50", got)
+	}
+
+	end, err := svc.Items(t.Context(), ItemsParams{
+		ParentID:         lib.ID,
+		IncludeItemTypes: []string{"Movie"},
+		Recursive:        true,
+		SortBy:           "DateCreated",
+		SortOrder:        "Descending",
+		StartIndex:       50,
+		Limit:            50,
+	})
+	if err != nil {
+		t.Fatalf("end page: %v", err)
+	}
+	if got := end["TotalRecordCount"]; got != int64(50) {
+		t.Fatalf("end page total = %#v, want 50 logical items", got)
+	}
+	if got := len(end["Items"].([]map[string]any)); got != 0 {
+		t.Fatalf("end page items = %d, want 0", got)
 	}
 }
