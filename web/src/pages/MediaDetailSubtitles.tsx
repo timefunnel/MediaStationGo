@@ -47,7 +47,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   const [searchResult, setSearchResult] = useState<SubtitleSearchResponse | null>(null)
   const [preview, setPreview] = useState<PreviewState>(null)
   const [applyingCandidateId, setApplyingCandidateId] = useState('')
-  const [asrLanguage, setAsrLanguage] = useState<SubtitleASRSourceLanguage>('auto')
+  const [asrLanguage, setAsrLanguage] = useState<SubtitleASRSourceLanguage>('ja')
   const [asrModels, setAsrModels] = useState<string[]>([])
   const [asrModel, setAsrModel] = useState('')
   const [asrModelsError, setAsrModelsError] = useState('')

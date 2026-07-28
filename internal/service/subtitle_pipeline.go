@@ -287,7 +287,7 @@ func (s *SubtitleService) CreateASRTask(ctx context.Context, ownerID, mediaID, s
 	mediaID = strings.TrimSpace(mediaID)
 	sourceLanguage = strings.ToLower(strings.TrimSpace(sourceLanguage))
 	if sourceLanguage == "" {
-		sourceLanguage = "auto"
+		sourceLanguage = "ja"
 	}
 	if ownerID == "" || mediaID == "" {
 		return SubtitleASRTask{}, errors.New("subtitle owner and media are required")
