@@ -52,6 +52,9 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 				}}})
 				return
 			}
+			if body["asr_model"] != "faster-whisper/large-v3" {
+				t.Fatalf("unexpected ASR model: %#v", body)
+			}
 			_ = json.NewEncoder(w).Encode(SubtitleASRTask{
 				ID: "asr-1", OwnerID: "admin-id", MediaID: "media-1", SourceLanguage: "ja",
 				Status: "queued", Stage: "queued",
@@ -66,10 +69,12 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 				Result: &SubtitleASRResult{Filename: "sensevoice-deepseek-zh-cn.srt", Source: "sensevoice-deepseek"},
 			})
 		case "/v1/subtitles/asr/asr-1/model":
-			if body["owner_id"] != "admin-id" || body["translation_model"] != "qwen-next" {
+			if body["owner_id"] != "admin-id" || body["asr_model"] != "faster-whisper/large-v3" || body["translation_model"] != "qwen-next" {
 				t.Fatalf("unexpected model update body: %#v", body)
 			}
 			_ = json.NewEncoder(w).Encode(SubtitleASRTask{ID: "asr-1", Status: "queued", TranslationModel: "qwen-next"})
+		case "/v1/subtitles/asr/asr-models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []string{"FunAudioLLM/SenseVoiceSmall", "faster-whisper/large-v3"}})
 		case "/v1/subtitles/asr/asr-1/cancel":
 			if body["owner_id"] != "admin-id" {
 				t.Fatalf("unexpected cancel body: %#v", body)
@@ -116,7 +121,7 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	if applied.Status != "success" || applied.Filename != "subtitle.srt" {
 		t.Fatalf("unexpected apply response: %#v", applied)
 	}
-	asr, err := client.CreateSubtitleASR(t.Context(), "admin-id", "media-1", "ja", "local", "qwen-test")
+	asr, err := client.CreateSubtitleASR(t.Context(), "admin-id", "media-1", "ja", "faster-whisper/large-v3", "local", "qwen-test")
 	if err != nil || asr.ID != "asr-1" || asr.SourceLanguage != "ja" {
 		t.Fatalf("unexpected ASR create response: %#v err=%v", asr, err)
 	}
@@ -128,7 +133,11 @@ func TestSubtitlePipelineHTTPClientUsesAuthenticatedCandidateSessions(t *testing
 	if err != nil || len(listed) != 1 || listed[0].ID != "asr-1" {
 		t.Fatalf("unexpected ASR list response: %#v err=%v", listed, err)
 	}
-	updated, err := client.UpdateSubtitleASRModel(t.Context(), "admin-id", "asr-1", "local", "qwen-next")
+	models, err := client.ListSubtitleASREngines(t.Context())
+	if err != nil || len(models) != 2 || models[1] != "faster-whisper/large-v3" {
+		t.Fatalf("unexpected ASR models: %#v err=%v", models, err)
+	}
+	updated, err := client.UpdateSubtitleASRModel(t.Context(), "admin-id", "asr-1", "faster-whisper/large-v3", "local", "qwen-next")
 	if err != nil || updated.Status != "queued" || updated.TranslationModel != "qwen-next" {
 		t.Fatalf("unexpected ASR model update response: %#v err=%v", updated, err)
 	}

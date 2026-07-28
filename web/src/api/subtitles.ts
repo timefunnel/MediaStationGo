@@ -64,6 +64,7 @@ export interface SubtitleASRResult {
   duration: number
   translation_provider?: string
   translation_model?: string
+  asr_model?: string
 }
 
 export interface SubtitleASRTask {
@@ -71,6 +72,7 @@ export interface SubtitleASRTask {
   owner_id: string
   media_id: string
   source_language: SubtitleASRSourceLanguage
+  asr_model: string
   translation_provider: string
   translation_model: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
@@ -131,10 +133,11 @@ export const subtitlesAPI = {
       )
       .then((r) => r.data),
 
-  createASR: (mediaId: string, sourceLanguage: SubtitleASRSourceLanguage, profile: SubtitleASRProfile) =>
+  createASR: (mediaId: string, sourceLanguage: SubtitleASRSourceLanguage, asrModel: string, profile: SubtitleASRProfile) =>
     api
       .post<SubtitleASRTask>(`/media/${encodeURIComponent(mediaId)}/subtitles/asr`, {
         source_language: sourceLanguage,
+        asr_model: asrModel,
         translation_provider: profile.provider,
         translation_model: profile.model,
       })
@@ -157,17 +160,24 @@ export const subtitlesAPI = {
       .get<{ items: SubtitleASRProfile[] | null }>('/subtitles/asr/profiles')
       .then((r) => r.data.items ?? []),
 
-  retryASR: (taskId: string, profile: SubtitleASRProfile) =>
+  listASRModels: () =>
+    api
+      .get<{ items: string[] | null }>('/subtitles/asr/models')
+      .then((r) => r.data.items ?? []),
+
+  retryASR: (taskId: string, asrModel: string, profile: SubtitleASRProfile) =>
     api
       .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/retry`, {
+        asr_model: asrModel,
         translation_provider: profile.provider,
         translation_model: profile.model,
       })
       .then((r) => r.data),
 
-  updateASRModel: (taskId: string, profile: SubtitleASRProfile) =>
+  updateASRModel: (taskId: string, asrModel: string, profile: SubtitleASRProfile) =>
     api
       .post<SubtitleASRTask>(`/subtitles/asr/tasks/${encodeURIComponent(taskId)}/model`, {
+        asr_model: asrModel,
         translation_provider: profile.provider,
         translation_model: profile.model,
       })

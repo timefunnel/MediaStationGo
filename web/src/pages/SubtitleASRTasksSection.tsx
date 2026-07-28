@@ -8,6 +8,7 @@ import { confirmAction } from '../components/confirmAction'
 import {
   splitSubtitleASRTasks,
   subtitleASRLanguageLabel,
+  subtitleASRModelLabel,
   subtitleASRProfileLabel,
   subtitleASRProgressLabel,
   subtitleASRResultSummary,
@@ -25,6 +26,9 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
   const [profiles, setProfiles] = useState<SubtitleASRProfile[]>([])
   const [profileKey, setProfileKey] = useState('')
   const [profileError, setProfileError] = useState('')
+  const [asrModels, setAsrModels] = useState<string[]>([])
+  const [asrModel, setAsrModel] = useState('')
+  const [asrModelError, setAsrModelError] = useState('')
   const [busyTaskID, setBusyTaskID] = useState('')
   const selectedProfile = useMemo(
     () => profiles.find((profile) => asrProfileKey(profile) === profileKey) ?? null,
@@ -41,11 +45,21 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
       .catch((cause) => setProfileError(errorMessage(cause, '翻译模型加载失败')))
   }, [])
 
+  useEffect(() => {
+    subtitlesAPI.listASRModels()
+      .then((items) => {
+        setAsrModels(items)
+        setAsrModel((current) => current || items[0] || '')
+        setAsrModelError(items.length > 0 ? '' : '没有可用的 ASR 识别模型')
+      })
+      .catch((cause) => setAsrModelError(errorMessage(cause, 'ASR 识别模型加载失败')))
+  }, [])
+
   const retryTask = async (task: SubtitleASRTask) => {
-    if (!selectedProfile || busyTaskID) return
+    if (!asrModel || !selectedProfile || busyTaskID) return
     setBusyTaskID(task.id)
     try {
-      await subtitlesAPI.retryASR(task.id, selectedProfile)
+      await subtitlesAPI.retryASR(task.id, asrModel, selectedProfile)
       toast.success('字幕任务已按所选模型重新排队')
       await onChanged()
     } catch (cause) {
@@ -56,10 +70,10 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
   }
 
   const updateQueuedTaskModel = async (task: SubtitleASRTask) => {
-    if (!selectedProfile || busyTaskID) return
+    if (!asrModel || !selectedProfile || busyTaskID) return
     setBusyTaskID(task.id)
     try {
-      await subtitlesAPI.updateASRModel(task.id, selectedProfile)
+      await subtitlesAPI.updateASRModel(task.id, asrModel, selectedProfile)
       toast.success('排队任务已改用所选模型')
       await onChanged()
     } catch (cause) {
@@ -93,7 +107,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
     setBusyTaskID(task.id)
     try {
       await subtitlesAPI.retranslateASR(task.id, selectedProfile)
-      toast.success('已复用音轨和 SenseVoice 结果重新翻译')
+      toast.success('已复用音轨和 ASR 结果重新翻译')
       await onChanged()
     } catch (cause) {
       toast.error(errorMessage(cause, '字幕重新翻译失败'))
@@ -127,7 +141,20 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
         <Captions size={18} className="text-brand-500" />
         <h2 className="font-display text-lg font-semibold text-ink-600">AI 字幕生产任务</h2>
         <label className="ml-auto flex min-w-0 items-center gap-2 text-xs text-sand-500">
-          任务模型
+          识别模型
+          <select
+            value={asrModel}
+            disabled={asrModels.length === 0}
+            onChange={(event) => setAsrModel(event.target.value)}
+            className="h-9 max-w-60 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+          >
+            {asrModels.map((model) => (
+              <option key={model} value={model}>{subtitleASRModelLabel(model)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-w-0 items-center gap-2 text-xs text-sand-500">
+          翻译模型
           <select
             value={profileKey}
             disabled={profiles.length === 0}
@@ -142,6 +169,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
           </select>
         </label>
       </div>
+      {asrModelError && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{asrModelError}</p>}
       {profileError && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{profileError}</p>}
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       {!error && tasks === null && <p className="text-sand-500">正在加载字幕任务…</p>}
@@ -153,7 +181,7 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
               tasks={grouped.active}
               empty="暂无正在生产的字幕。"
               busyTaskID={busyTaskID}
-              modelActionsEnabled={Boolean(selectedProfile)}
+              modelActionsEnabled={Boolean(asrModel && selectedProfile)}
               onUpdateModel={(task) => void updateQueuedTaskModel(task)}
               onCancel={(task) => void cancelTask(task)}
             />
@@ -164,7 +192,8 @@ export function SubtitleASRTasksSection({ tasks, error, onChanged }: SubtitleASR
               tasks={grouped.recent}
               empty="暂无已结束的字幕任务。"
               busyTaskID={busyTaskID}
-              retryEnabled={Boolean(selectedProfile)}
+              retryEnabled={Boolean(asrModel && selectedProfile)}
+              retranslateEnabled={Boolean(selectedProfile)}
               onRetry={(task) => void retryTask(task)}
               onRetranslate={(task) => void retranslateTask(task)}
               onDelete={(task) => void deleteTask(task)}
@@ -181,6 +210,7 @@ function SubtitleASRTaskTable({
   empty,
   busyTaskID,
   retryEnabled = false,
+  retranslateEnabled = false,
   modelActionsEnabled = false,
   onRetry,
   onUpdateModel,
@@ -192,6 +222,7 @@ function SubtitleASRTaskTable({
   empty: string
   busyTaskID: string
   retryEnabled?: boolean
+  retranslateEnabled?: boolean
   modelActionsEnabled?: boolean
   onRetry?: (task: SubtitleASRTask) => void
   onUpdateModel?: (task: SubtitleASRTask) => void
@@ -293,7 +324,7 @@ function SubtitleASRTaskTable({
                       <button
                         type="button"
                         onClick={() => onRetranslate(task)}
-                        disabled={!retryEnabled || Boolean(busyTaskID)}
+                        disabled={!retranslateEnabled || Boolean(busyTaskID)}
                         className="btn-outline h-9 w-9 justify-center p-0"
                         title="复用缓存并按所选模型重新翻译"
                         aria-label="使用其他模型重新翻译字幕"

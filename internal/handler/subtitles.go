@@ -32,6 +32,7 @@ type subtitleCandidateRequest struct {
 
 type subtitleASRRequest struct {
 	SourceLanguage      string `json:"source_language"`
+	ASRModel            string `json:"asr_model"`
 	TranslationProvider string `json:"translation_provider"`
 	TranslationModel    string `json:"translation_model"`
 }
@@ -224,7 +225,7 @@ func createSubtitleASRHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		task, err := svc.Subtitle.CreateASRTask(
 			c.Request.Context(), middleware.GetUserID(c), media.ID, in.SourceLanguage,
-			in.TranslationProvider, in.TranslationModel,
+			in.ASRModel, in.TranslationProvider, in.TranslationModel,
 		)
 		if err != nil {
 			writeSubtitlePipelineError(c, err)
@@ -245,6 +246,17 @@ func listSubtitleASRProfilesHandler(svc *service.Container) gin.HandlerFunc {
 	}
 }
 
+func listSubtitleASRModelsHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		models, err := svc.Subtitle.ListASRModels(c.Request.Context())
+		if err != nil {
+			writeSubtitlePipelineError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": models})
+	}
+}
+
 func retrySubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var in subtitleASRRequest
@@ -254,7 +266,7 @@ func retrySubtitleASRTaskHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		task, err := svc.Subtitle.RetryASRTask(
 			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
-			in.TranslationProvider, in.TranslationModel,
+			in.ASRModel, in.TranslationProvider, in.TranslationModel,
 		)
 		if err != nil {
 			writeSubtitlePipelineError(c, err)
@@ -273,7 +285,7 @@ func updateSubtitleASRTaskModelHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		task, err := svc.Subtitle.UpdateQueuedASRTaskModel(
 			c.Request.Context(), middleware.GetUserID(c), c.Param("task_id"),
-			in.TranslationProvider, in.TranslationModel,
+			in.ASRModel, in.TranslationProvider, in.TranslationModel,
 		)
 		if err != nil {
 			writeSubtitlePipelineError(c, err)

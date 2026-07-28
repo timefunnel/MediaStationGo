@@ -14,8 +14,8 @@ export function subtitleASRStageLabel(stage: SubtitleASRTask['stage']): string {
     extracting_audio: '正在抽取音轨',
     using_cached_audio: '复用已抽取音轨',
     uploading_audio: '正在上传音轨',
-    transcribing: 'SenseVoice 正在识别',
-    using_cached_transcript: '复用 SenseVoice 识别结果',
+    transcribing: 'ASR 正在识别',
+    using_cached_transcript: '复用 ASR 识别结果',
     translating: '正在翻译为简体中文',
     saving: '正在保存字幕',
     completed: 'AI 字幕已生成',
@@ -43,7 +43,15 @@ export function subtitleASRProfileLabel(task: SubtitleASRTask): string {
     deepseek: 'DeepSeek',
     siliconflow: '硅基流动',
   }[task.translation_provider] || task.translation_provider || '未记录'
-  return task.translation_model ? `${provider} · ${task.translation_model}` : provider
+  const translation = task.translation_model ? `${provider} · ${task.translation_model}` : provider
+  return `识别：${subtitleASRModelLabel(task.asr_model)} · 翻译：${translation}`
+}
+
+export function subtitleASRModelLabel(model: string): string {
+  return {
+    'FunAudioLLM/SenseVoiceSmall': 'SenseVoice Small',
+    'faster-whisper/large-v3': 'Whisper large-v3',
+  }[model] || model || '未记录'
 }
 
 export function subtitleASRLanguageLabel(language: SubtitleASRTask['source_language']): string {
