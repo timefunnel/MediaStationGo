@@ -33,6 +33,7 @@ type cloudResolveCall struct {
 const (
 	cloudResolveHotHitThreshold      = 3
 	cloudResolveBackgroundRefreshMax = 30 * time.Second
+	cloudResolveColdMaxDuration      = 1400 * time.Millisecond
 	cloudResolveRefreshMinInterval   = 30 * time.Second
 	cloudResolveRetryAttempts        = 2
 	cloudResolveRetryDelay           = 300 * time.Millisecond
@@ -58,7 +59,7 @@ func (s *StorageConfigService) CloudResolve(ctx context.Context, typ, fileRef, c
 	}
 	call, owner := s.beginResolve(cacheKey, typ)
 	if owner {
-		s.runResolve(cacheKey, typ, fileRef, clientUA, call)
+		s.runResolve(cacheKey, typ, fileRef, clientUA, call, cloudResolveColdMaxDuration)
 	}
 	select {
 	case <-call.done:
@@ -133,9 +134,9 @@ func (s *StorageConfigService) beginResolve(key, typ string) (*cloudResolveCall,
 	return call, true
 }
 
-func (s *StorageConfigService) runResolve(key, typ, fileRef, clientUA string, call *cloudResolveCall) {
+func (s *StorageConfigService) runResolve(key, typ, fileRef, clientUA string, call *cloudResolveCall, maxDuration time.Duration) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), cloudResolveBackgroundRefreshMax)
+		ctx, cancel := context.WithTimeout(context.Background(), maxDuration)
 		defer cancel()
 		p, err := s.cloudProviderWithUA(ctx, typ, clientUA)
 		if err != nil {
@@ -183,7 +184,7 @@ func (s *StorageConfigService) refreshResolveInBackground(key, typ, fileRef, cli
 	if !owner {
 		return
 	}
-	s.runResolve(key, typ, fileRef, clientUA, call)
+	s.runResolve(key, typ, fileRef, clientUA, call, cloudResolveBackgroundRefreshMax)
 }
 
 func (s *StorageConfigService) storeResolvedLinkLocked(key string, link *cloud.DirectLink, ttl, staleTTL time.Duration) {

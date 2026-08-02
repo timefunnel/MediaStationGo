@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -27,6 +28,8 @@ type cloudPlaybackRequest struct {
 	resolveStart time.Time
 	resolveDur   time.Duration
 }
+
+const cloudPlaybackResolveMaxDuration = 1500 * time.Millisecond
 
 // cloudPlayHandler resolves a cloud file to its direct link and either issues a
 // 302 redirect (true offload — host does not stream the bytes) or, when the
@@ -61,7 +64,9 @@ func serveCloudResolvedLink(svc *service.Container, c *gin.Context, typ, ref str
 		return
 	}
 	resolveStart := time.Now()
-	link, err := svc.StorageCfg.CloudResolve(c.Request.Context(), typ, ref, c.Request.UserAgent())
+	resolveCtx, cancel := context.WithTimeout(c.Request.Context(), cloudPlaybackResolveMaxDuration)
+	defer cancel()
+	link, err := svc.StorageCfg.CloudResolve(resolveCtx, typ, ref, c.Request.UserAgent())
 	resolveDur := time.Since(resolveStart)
 	if err != nil {
 		logCloudPlayback(svc, "cloud playback resolve failed",

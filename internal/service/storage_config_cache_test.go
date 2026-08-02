@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,12 @@ import (
 
 	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 )
+
+type cloudResolveTestRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f cloudResolveTestRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
 	var resolves atomic.Int32
@@ -216,6 +223,66 @@ func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
 	}
 	if link.URL == "" {
 		t.Fatal("empty resolved link")
+	}
+}
+
+func TestCloudResolveColdMissUsesBoundedWorkerDeadline(t *testing.T) {
+	started := make(chan struct{})
+	_, storage := newStorageUploadTestService(t)
+	storage.client = &http.Client{
+		Transport: cloudResolveTestRoundTripper(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/api/fs/list":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"code":200,"data":{"content":[],"total":0}}`)),
+					Request:    r,
+				}, nil
+			case "/api/fs/get":
+				select {
+				case <-started:
+				default:
+					close(started)
+				}
+				<-r.Context().Done()
+				return nil, r.Context().Err()
+			default:
+				return nil, fmt.Errorf("unexpected path %s", r.URL.Path)
+			}
+		}),
+	}
+
+	if _, err := storage.Save(t.Context(), StorageInput{
+		Type: "openlist",
+		Config: map[string]any{
+			"server": "http://openlist.test",
+			"token":  "token",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cold resolve error = %v, want context deadline exceeded", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("OpenList get request did not start")
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("cold resolve took %s, want less than 2s", elapsed)
+	}
+	key := storage.resolveCacheKey("openlist", "/Movies/f1.mkv", "Player/1")
+	storage.resolveMu.Lock()
+	_, inFlight := storage.resolveFlight[key]
+	storage.resolveMu.Unlock()
+	if inFlight {
+		t.Fatal("cold resolve left a single-flight request behind")
 	}
 }
 
