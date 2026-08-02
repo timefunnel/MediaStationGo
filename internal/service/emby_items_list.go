@@ -110,7 +110,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		}
 		total := int64(len(rows))
 		rows = pageSlice(rows, p.StartIndex, p.Limit)
-		items, err := e.payloadsForMedia(ctx, rows, p.UserID)
+		items, err := e.payloadsForMedia(ctx, rows, p.UserID, !p.OmitMediaSources)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +131,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		rows = e.collapseMediaVersionRows(ctx, rows)
 		total := int64(len(rows))
 		rows = pageSlice(rows, p.StartIndex, p.Limit)
-		items, err := e.payloadsForMedia(ctx, rows, p.UserID)
+		items, err := e.payloadsForMedia(ctx, rows, p.UserID, !p.OmitMediaSources)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +150,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	if err := q.Order(order).Offset(p.StartIndex).Limit(p.Limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	items, err := e.payloadsForMedia(ctx, rows, p.UserID)
+	items, err := e.payloadsForMedia(ctx, rows, p.UserID, !p.OmitMediaSources)
 	if err != nil {
 		return nil, err
 	}
@@ -183,15 +183,21 @@ func (e *EmbyService) episodeItems(ctx context.Context, rows []model.Media, p It
 		return rows[i].CreatedAt.Before(rows[j].CreatedAt)
 	})
 	total := len(rows)
-	items, err := e.payloadsForMedia(ctx, pageSlice(rows, p.StartIndex, p.Limit), p.UserID)
+	items, err := e.payloadsForMedia(ctx, pageSlice(rows, p.StartIndex, p.Limit), p.UserID, !p.OmitMediaSources)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}, nil
 }
 
-func (e *EmbyService) payloadsForMedia(ctx context.Context, rows []model.Media, userID string) ([]map[string]any, error) {
-	rows = e.collapseMediaVersionRows(ctx, rows)
+func (e *EmbyService) payloadsForMedia(ctx context.Context, rows []model.Media, userID string, includeMediaSources bool) ([]map[string]any, error) {
+	return e.payloadsForMediaRows(ctx, rows, userID, includeMediaSources, true)
+}
+
+func (e *EmbyService) payloadsForMediaRows(ctx context.Context, rows []model.Media, userID string, includeMediaSources, collapseVersions bool) ([]map[string]any, error) {
+	if collapseVersions {
+		rows = e.collapseMediaVersionRows(ctx, rows)
+	}
 	userFavs := map[string]bool{}
 	userPos := map[string]int64{}
 	userWatchedAt := map[string]time.Time{}
@@ -225,7 +231,7 @@ func (e *EmbyService) payloadsForMedia(ctx context.Context, rows []model.Media, 
 
 	items := make([]map[string]any, 0, len(rows))
 	for _, m := range rows {
-		items = append(items, e.itemPayload(ctx, &m, userFavs[m.ID], userPos[m.ID], userWatchedAt[m.ID]))
+		items = append(items, e.itemPayloadWithOptions(ctx, &m, userFavs[m.ID], userPos[m.ID], includeMediaSources, userWatchedAt[m.ID]))
 	}
 	return items, nil
 }

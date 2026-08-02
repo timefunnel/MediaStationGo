@@ -83,6 +83,15 @@ func TestInvalidateUserVisibilityChangesEmbyReadCacheKeys(t *testing.T) {
 	}
 }
 
+func TestEmbyItemsCacheKeySeparatesMediaSourcePayloads(t *testing.T) {
+	svc := NewEmbyService(&config.Config{}, zap.NewNop(), nil)
+	full := svc.embyItemsCacheKey("items", ItemsParams{Limit: 20})
+	light := svc.embyItemsCacheKey("items", ItemsParams{Limit: 20, OmitMediaSources: true})
+	if full == light {
+		t.Fatal("full and lightweight item payloads must not share a cache key")
+	}
+}
+
 func TestEmbyLatestItemsCacheReturnsIndependentPayload(t *testing.T) {
 	svc := newTestEmbyService(t)
 	svc.SetRuntimeCache(NewRuntimeCacheService(&config.Config{}, zap.NewNop()))

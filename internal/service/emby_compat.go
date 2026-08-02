@@ -141,6 +141,10 @@ type ItemsParams struct {
 	SortOrder        string
 	Limit            int
 	StartIndex       int
+	// OmitMediaSources is set only when an Emby client explicitly supplied
+	// Fields without requesting MediaSources. An omitted Fields parameter keeps
+	// the historical, complete list payload for older clients.
+	OmitMediaSources bool
 }
 
 const (
@@ -195,6 +199,9 @@ func (e *EmbyService) Items(ctx context.Context, p ItemsParams) (map[string]any,
 				return nil, err
 			}
 			if item != nil {
+				if p.OmitMediaSources {
+					delete(item, "MediaSources")
+				}
 				items = append(items, item)
 			}
 		}

@@ -139,7 +139,7 @@ func (e *EmbyService) LatestItems(ctx context.Context, userID, parentID string, 
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out, err := e.payloadsForMedia(ctx, rows, userID)
+	out, err := e.payloadsForMedia(ctx, rows, userID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +237,10 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string) (map[strin
 }
 
 func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool, posMs int64, watchedAtValues ...time.Time) map[string]any {
+	return e.itemPayloadWithOptions(ctx, m, fav, posMs, true, watchedAtValues...)
+}
+
+func (e *EmbyService) itemPayloadWithOptions(ctx context.Context, m *model.Media, fav bool, posMs int64, includeMediaSources bool, watchedAtValues ...time.Time) map[string]any {
 	itemType := "Movie"
 	name := m.Title
 	parentID := m.LibraryID
@@ -335,8 +339,10 @@ func (e *EmbyService) itemPayload(ctx context.Context, m *model.Media, fav bool,
 			"Tmdb":    intToStr(m.TMDbID),
 			"Bangumi": intToStr(m.BangumiID),
 		},
-		"UserData":     userData,
-		"MediaSources": e.mediaSourcesForItem(ctx, m, true, false),
+		"UserData": userData,
+	}
+	if includeMediaSources {
+		item["MediaSources"] = e.mediaSourcesForItem(ctx, m, true, false)
 	}
 	if itemType == "Movie" && partCount > 1 {
 		item["PartCount"] = partCount

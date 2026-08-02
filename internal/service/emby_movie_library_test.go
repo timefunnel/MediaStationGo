@@ -406,3 +406,70 @@ func TestEmbyMovieLibraryMultipartBrowseHonorsDateCreatedSort(t *testing.T) {
 		t.Fatalf("DateCreated descending sort was ignored: %#v", items)
 	}
 }
+
+func TestEmbyMovieLibraryPagesLogicalEntriesBeforeBuildingMoviePayloads(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "Movies", Path: "/media/movies", Type: "movie", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(-24 * time.Hour)
+	rows := []model.Media{
+		{Base: model.Base{ID: "older", CreatedAt: base.Add(time.Minute)}, LibraryID: lib.ID, Title: "Older", Path: "/media/movies/older.mkv"},
+		{Base: model.Base{ID: "version-low", CreatedAt: base.Add(2 * time.Minute)}, LibraryID: lib.ID, Title: "Versioned", Path: "/media/movies/version-low.mkv", TMDbID: 1001, Width: 1920},
+		{Base: model.Base{ID: "version-high", CreatedAt: base.Add(3 * time.Minute)}, LibraryID: lib.ID, Title: "Versioned", Path: "/media/movies/version-high.mkv", TMDbID: 1001, Width: 3840},
+		{Base: model.Base{ID: "part-1", CreatedAt: base.Add(4 * time.Minute)}, LibraryID: lib.ID, Title: "Multipart Work Part 1", Path: "/media/movies/multipart/part-1.mkv", PartGroupKey: "multipart-work", PartGroupTitle: "Multipart Work", PartIndex: 1},
+		{Base: model.Base{ID: "part-2", CreatedAt: base.Add(5 * time.Minute)}, LibraryID: lib.ID, Title: "Multipart Work Part 2", Path: "/media/movies/multipart/part-2.mkv", PartGroupKey: "multipart-work", PartGroupTitle: "Multipart Work", PartIndex: 2},
+		{Base: model.Base{ID: "newer", CreatedAt: base.Add(6 * time.Minute)}, LibraryID: lib.ID, Title: "Newer", Path: "/media/movies/newer.mkv"},
+	}
+	if err := svc.repo.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	params := ItemsParams{
+		ParentID:         lib.ID,
+		Recursive:        true,
+		IncludeItemTypes: []string{"Movie"},
+		SortBy:           "DateCreated,SortName",
+		SortOrder:        "Descending",
+		Limit:            2,
+		OmitMediaSources: true,
+	}
+	first, err := svc.Items(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["TotalRecordCount"] != 4 {
+		t.Fatalf("logical total = %#v, want 4", first["TotalRecordCount"])
+	}
+	firstItems := first["Items"].([]map[string]any)
+	if len(firstItems) != 2 || firstItems[0]["Id"] != "newer" || firstItems[1]["Type"] != "Series" {
+		t.Fatalf("first logical page = %#v", firstItems)
+	}
+	for _, item := range firstItems {
+		if _, ok := item["MediaSources"]; ok {
+			t.Fatalf("lightweight list item unexpectedly contains MediaSources: %#v", item)
+		}
+	}
+
+	params.StartIndex = 2
+	second, err := svc.Items(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondItems := second["Items"].([]map[string]any)
+	if len(secondItems) != 2 || secondItems[0]["Id"] != "version-high" || secondItems[1]["Id"] != "older" {
+		t.Fatalf("second logical page = %#v", secondItems)
+	}
+
+	params.OmitMediaSources = false
+	full, err := svc.Items(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullItems := full["Items"].([]map[string]any)
+	sources, ok := fullItems[0]["MediaSources"].([]map[string]any)
+	if !ok || len(sources) != 2 {
+		t.Fatalf("full versioned list item should retain both MediaSources: %#v", fullItems[0])
+	}
+}

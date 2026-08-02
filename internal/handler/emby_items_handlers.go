@@ -31,6 +31,9 @@ func parseEmbyItemsParams(c *gin.Context) service.ItemsParams {
 		}
 		return out
 	}
+	fieldsRaw, fieldsSpecified := embyQueryValueWithPresence(c, "Fields", "fields")
+	fields := splitEmbyItemsFields(fieldsRaw)
+	omitMediaSources := fieldsSpecified && !embyFieldContains(fields, "MediaSources")
 	return service.ItemsParams{
 		UserID:           uid,
 		ParentID:         firstQueryValue(c, "ParentId", "parentId", "parentid"),
@@ -47,7 +50,51 @@ func parseEmbyItemsParams(c *gin.Context) service.ItemsParams {
 		SortOrder:        firstQueryValue(c, "SortOrder", "sortOrder", "sortorder"),
 		Limit:            limit,
 		StartIndex:       offset,
+		OmitMediaSources: omitMediaSources,
 	}
+}
+
+func embyQueryValueWithPresence(c *gin.Context, keys ...string) (string, bool) {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "", false
+	}
+	query := c.Request.URL.Query()
+	for _, key := range keys {
+		values, ok := query[key]
+		if !ok {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return value, true
+			}
+		}
+		return "", true
+	}
+	return "", false
+}
+
+func splitEmbyItemsFields(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func embyFieldContains(fields []string, want string) bool {
+	for _, field := range fields {
+		if strings.EqualFold(strings.TrimSpace(field), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func embyFirstNonEmptyString(values ...string) string {

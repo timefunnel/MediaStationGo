@@ -55,6 +55,7 @@ func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
 		p.SortOrder,
 		strconv.Itoa(p.StartIndex),
 		strconv.Itoa(p.Limit),
+		strconv.FormatBool(p.OmitMediaSources),
 	}, "|")))
 	return "media:emby:" + hex.EncodeToString(sum[:])
 }

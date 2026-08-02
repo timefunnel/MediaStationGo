@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -44,6 +45,25 @@ func (e *EmbyService) libraryHasMultipartContent(ctx context.Context, libraryID 
 // 与 mediaItems 的区别: 后者会把剧集结构行当散装 Episode 漏出;这里改为聚合成
 // Series,从根本上消除「电影库里整部剧被拆成单集」的现象。
 func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
+	cacheKey := e.embyItemsCacheKey("movie-library", p)
+	var cached embyItemsCacheValue
+	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
+		return map[string]any{"Items": cached.Items, "TotalRecordCount": int(cached.TotalRecordCount), "StartIndex": cached.StartIndex}, nil
+	}
+	if e.cache != nil {
+		call, owner := e.beginEmbyReadCacheFill(cacheKey)
+		if !owner {
+			if err := waitEmbyReadCacheFill(ctx, call); err != nil {
+				return nil, err
+			}
+			if e.cache.GetJSON(ctx, cacheKey, &cached) {
+				return map[string]any{"Items": cached.Items, "TotalRecordCount": int(cached.TotalRecordCount), "StartIndex": cached.StartIndex}, nil
+			}
+		} else {
+			defer e.finishEmbyReadCacheFill(cacheKey, call)
+		}
+	}
+
 	libIDs := e.mergedLibraryIDs(ctx, p.ParentID)
 	hasMultipart := e.libraryHasMultipartContent(ctx, p.ParentID)
 	queryOrder := embyMovieLibraryOrderSQL(p)
@@ -108,31 +128,16 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		}
 		movieRows = e.filterMediaRowsByEmbyGenres(movieRows, p)
 	}
-	movieItems, err := e.payloadsForMedia(ctx, movieRows, p.UserID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 合并 Series 卡片与 Movie 项，并遵守客户端请求的主排序字段。
-	type entry struct {
-		sortAt  time.Time
-		payload map[string]any
-	}
-	entries := make([]entry, 0, len(seriesGroups)+len(movieItems))
-	for _, g := range seriesGroups {
-		entries = append(entries, entry{sortAt: embySeriesReleaseSortTime(g), payload: e.seriesPayload(g)})
-	}
-	for _, item := range movieItems {
-		entries = append(entries, entry{sortAt: embyPayloadReleaseSortTime(item), payload: item})
-	}
+	movieRows = e.collapseMediaVersionRows(ctx, movieRows)
+	entries := e.movieLibraryEntries(ctx, seriesGroups, movieRows)
 	descending := !strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending")
 	switch primarySupportedEmbySort(p.SortBy, false) {
 	case "datecreated":
 		sort.SliceStable(entries, func(i, j int) bool {
-			left := embyPayloadCreatedAt(entries[i].payload)
-			right := embyPayloadCreatedAt(entries[j].payload)
+			left := entries[i].createdAt
+			right := entries[j].createdAt
 			if left.Equal(right) {
-				return embyPayloadName(entries[i].payload) < embyPayloadName(entries[j].payload)
+				return entries[i].name < entries[j].name
 			}
 			if descending {
 				return left.After(right)
@@ -141,8 +146,8 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		})
 	case "sortname", "name":
 		sort.SliceStable(entries, func(i, j int) bool {
-			left := embyPayloadName(entries[i].payload)
-			right := embyPayloadName(entries[j].payload)
+			left := entries[i].name
+			right := entries[j].name
 			if descending {
 				return left > right
 			}
@@ -158,11 +163,91 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	}
 	total := len(entries)
 	paged := pageSlice(entries, p.StartIndex, p.Limit)
-	items := make([]map[string]any, 0, len(paged))
-	for _, en := range paged {
-		items = append(items, en.payload)
+	items, err := e.movieLibraryPayloads(ctx, p, paged)
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}, nil
+	out := map[string]any{"Items": items, "TotalRecordCount": total, "StartIndex": p.StartIndex}
+	if e.cache != nil {
+		e.cache.SetJSON(ctx, cacheKey, embyItemsCacheValue{Items: items, TotalRecordCount: int64(total), StartIndex: p.StartIndex}, e.embyMediaCacheTTL())
+	}
+	return out, nil
+}
+
+type embyMovieLibraryEntry struct {
+	sortAt    time.Time
+	createdAt time.Time
+	name      string
+	series    *embySeriesGroup
+	media     *model.Media
+}
+
+func (e *EmbyService) movieLibraryEntries(ctx context.Context, seriesGroups []embySeriesGroup, movieRows []model.Media) []embyMovieLibraryEntry {
+	entries := make([]embyMovieLibraryEntry, 0, len(seriesGroups)+len(movieRows))
+	for index := range seriesGroups {
+		group := &seriesGroups[index]
+		entries = append(entries, embyMovieLibraryEntry{
+			sortAt:    embySeriesReleaseSortTime(*group),
+			createdAt: group.CreatedAt,
+			name:      strings.ToLower(strings.TrimSpace(group.Name)),
+			series:    group,
+		})
+	}
+
+	adultLibraries := map[string]bool{}
+	knownAdultLibraries := map[string]bool{}
+	for index := range movieRows {
+		media := &movieRows[index]
+		adult := media.NSFW
+		libraryID := strings.TrimSpace(media.LibraryID)
+		if !adult && libraryID != "" {
+			if knownAdultLibraries[libraryID] {
+				adult = adultLibraries[libraryID]
+			} else if e != nil && e.repo != nil && e.repo.Library != nil {
+				library, err := e.repo.Library.FindByID(ctx, libraryID)
+				adult = err == nil && library != nil && LibraryIsAdult(*library)
+				knownAdultLibraries[libraryID] = true
+				adultLibraries[libraryID] = adult
+			}
+		}
+		entries = append(entries, embyMovieLibraryEntry{
+			sortAt:    embyMoviePayloadReleaseSortTime(*media),
+			createdAt: media.CreatedAt,
+			name:      strings.ToLower(strings.TrimSpace(adultDisplayNameForMedia(media, media.Title, adult))),
+			media:     media,
+		})
+	}
+	return entries
+}
+
+func (e *EmbyService) movieLibraryPayloads(ctx context.Context, p ItemsParams, entries []embyMovieLibraryEntry) ([]map[string]any, error) {
+	movieRows := make([]model.Media, 0, len(entries))
+	for _, entry := range entries {
+		if entry.media != nil {
+			movieRows = append(movieRows, *entry.media)
+		}
+	}
+	movieItems, err := e.payloadsForMediaRows(ctx, movieRows, p.UserID, !p.OmitMediaSources, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(movieItems) != len(movieRows) {
+		return nil, fmt.Errorf("movie library payload count mismatch: got %d, want %d", len(movieItems), len(movieRows))
+	}
+
+	items := make([]map[string]any, 0, len(entries))
+	movieIndex := 0
+	for _, entry := range entries {
+		if entry.series != nil {
+			items = append(items, e.seriesPayload(*entry.series))
+			continue
+		}
+		if entry.media != nil {
+			items = append(items, movieItems[movieIndex])
+			movieIndex++
+		}
+	}
+	return items, nil
 }
 
 func embyMovieLibraryOrderSQL(p ItemsParams) string {
@@ -183,36 +268,14 @@ func embyMovieLibraryOrderSQL(p ItemsParams) string {
 	}
 }
 
-// embyPayloadCreatedAt 从 item payload 里取 DateCreated(time.Time),用于合并排序。
-func embyPayloadCreatedAt(item map[string]any) time.Time {
-	if item == nil {
-		return time.Time{}
+func embyMoviePayloadReleaseSortTime(media model.Media) time.Time {
+	if premiered, ok := embyPremiereDate(media.ReleaseDate); ok {
+		return premiered
 	}
-	if v, ok := item["DateCreated"].(time.Time); ok {
-		return v
+	if media.Year > 0 {
+		return time.Date(media.Year, time.December, 31, 0, 0, 0, 0, time.UTC)
 	}
-	return time.Time{}
-}
-
-func embyPayloadName(item map[string]any) string {
-	if item == nil {
-		return ""
-	}
-	name, _ := item["Name"].(string)
-	return strings.ToLower(strings.TrimSpace(name))
-}
-
-func embyPayloadReleaseSortTime(item map[string]any) time.Time {
-	if item == nil {
-		return time.Time{}
-	}
-	if v, ok := item["PremiereDate"].(time.Time); ok {
-		return v
-	}
-	if year, ok := item["ProductionYear"].(int); ok && year > 0 {
-		return time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC)
-	}
-	return embyPayloadCreatedAt(item)
+	return media.CreatedAt
 }
 
 func (e *EmbyService) libraryIsEpisodic(ctx context.Context, libraryID string) (bool, error) {
