@@ -273,13 +273,16 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fs/get":
-			if listCalls == 0 {
-				t.Fatal("api get started before target parent prewarm")
-			}
 			getCalls++
 			if getCalls == 1 {
+				if listCalls != 0 {
+					t.Fatal("target parent was warmed before the cache miss")
+				}
 				_, _ = w.Write([]byte(`{"code":500,"message":"failed to get obj: code: 430004, message: file not found"}`))
 				return
+			}
+			if listCalls != 1 {
+				t.Fatal("target parent was not warmed after the cache miss")
 			}
 			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		case "/api/fs/list":
@@ -311,7 +314,7 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 	}
 }
 
-func TestOpenListResolveContinuesWhenParentPrewarmFailsButGetSucceeds(t *testing.T) {
+func TestOpenListResolveDoesNotWarmParentWhenGetSucceeds(t *testing.T) {
 	var getCalls, listCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -336,12 +339,12 @@ func TestOpenListResolveContinuesWhenParentPrewarmFailsButGetSucceeds(t *testing
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if link.URL != "https://cdn.example.test/movie.mkv?sign=1" || listCalls != 1 || getCalls != 1 {
-		t.Fatalf("link=%#v listCalls=%d getCalls=%d", link, listCalls, getCalls)
+	if link.URL != "https://cdn.example.test/movie.mkv?sign=1" || listCalls != 0 || getCalls != 1 {
+		t.Fatalf("link=%#v listCalls=%d getCalls=%d, want direct get without parent warmup", link, listCalls, getCalls)
 	}
 }
 
-func TestOpenListResolvePrewarmsParentBeforeOtherAPIErrors(t *testing.T) {
+func TestOpenListResolveDoesNotWarmParentBeforeOtherAPIErrors(t *testing.T) {
 	var listCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -357,8 +360,8 @@ func TestOpenListResolvePrewarmsParentBeforeOtherAPIErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = p.Resolve(context.Background(), "/115/电影/Movie/Movie.mkv")
-	if err == nil || listCalls != 1 {
-		t.Fatalf("err=%v listCalls=%d, want one targeted parent prewarm", err, listCalls)
+	if err == nil || listCalls != 0 {
+		t.Fatalf("err=%v listCalls=%d, want no parent warmup", err, listCalls)
 	}
 }
 
