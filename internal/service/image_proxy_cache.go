@@ -344,6 +344,16 @@ func pruneImageVariantCacheDir(root string, cutoff time.Time, maxBytes int64) (i
 		total -= entry.size
 	}
 	for i := len(dirs) - 1; i >= 0; i-- {
+		children, err := os.ReadDir(dirs[i])
+		if err != nil {
+			if !os.IsNotExist(err) {
+				setErr(err)
+			}
+			continue
+		}
+		if len(children) != 0 {
+			continue
+		}
 		if err := os.Remove(dirs[i]); err != nil && !os.IsNotExist(err) {
 			setErr(err)
 		}

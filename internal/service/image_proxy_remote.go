@@ -246,14 +246,15 @@ func (p *ImageProxy) writeImageVariantCache(cachePath string, data []byte) {
 	if len(data) == 0 || len(data) > imageVariantCacheFileMaxBytes {
 		return
 	}
+	p.variantCacheMu.Lock()
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o750); err != nil {
+		p.variantCacheMu.Unlock()
 		if p.log != nil {
 			p.log.Warn("imageproxy: variant cache mkdir failed", zap.String("dir", filepath.Dir(cachePath)), zap.Error(err))
 		}
 		return
 	}
 
-	p.variantCacheMu.Lock()
 	currentSize := int64(0)
 	if stat, err := os.Stat(cachePath); err == nil && stat.Mode().IsRegular() {
 		currentSize = stat.Size()

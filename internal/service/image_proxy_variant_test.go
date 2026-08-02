@@ -302,6 +302,31 @@ func TestPruneImageVariantCacheDirRemovesExpiredAndOldestEntries(t *testing.T) {
 	}
 }
 
+func TestImageProxyStartupPruneKeepsFreshNestedEntries(t *testing.T) {
+	cacheRoot := t.TempDir()
+	root := filepath.Join(cacheRoot, "images", "variants")
+	now := time.Now().Truncate(time.Second)
+	variantPath := filepath.Join(root, "source", "version", "variant")
+	if err := os.MkdirAll(filepath.Dir(variantPath), 0o750); err != nil {
+		t.Fatalf("create variant directory: %v", err)
+	}
+	const data = "variant"
+	if err := os.WriteFile(variantPath, []byte(data), 0o600); err != nil {
+		t.Fatalf("write variant: %v", err)
+	}
+	if err := os.Chtimes(variantPath, now, now); err != nil {
+		t.Fatalf("set variant mtime: %v", err)
+	}
+
+	proxy := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: cacheRoot}}, zap.NewNop())
+	if proxy.variantCacheBytes != int64(len(data)) {
+		t.Fatalf("cache size after startup prune = %d, want %d", proxy.variantCacheBytes, len(data))
+	}
+	if _, err := os.Stat(variantPath); err != nil {
+		t.Fatalf("expected fresh variant to remain: %v", err)
+	}
+}
+
 func TestImageProxyRemoveCachedRemovesImageVariants(t *testing.T) {
 	proxy := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: t.TempDir()}}, zap.NewNop())
 	const raw = "https://image.tmdb.org/t/p/w500/poster.jpg"
