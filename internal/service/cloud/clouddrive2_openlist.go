@@ -135,24 +135,17 @@ func (p *cloudDrive2Provider) listOpenListAPIWithRefresh(ctx context.Context, di
 func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, fileRef string) (*DirectLink, error) {
 	target := normalizeCloudDAVPath(fileRef)
 	parent := path.Dir(target)
-	var warmErr error
-	if parent != "." && parent != "/" {
-		warmCtx, cancel := context.WithTimeout(ctx, openListParentWarmupMaxDuration)
-		warmErr = p.warmOpenListParent(warmCtx, parent)
-		cancel()
-	}
-
 	link, err := p.resolveOpenListAPIDirectOnce(ctx, target)
 	if err == nil || !isOpenListObjectCacheMiss(err) {
-		if err != nil && warmErr != nil {
-			return nil, fmt.Errorf("%s: list parent %s before api get failed: %v (api get: %w)", p.name, parent, warmErr, err)
-		}
 		return link, err
 	}
 
 	if parent == "." || parent == "/" {
 		return nil, err
 	}
+	warmCtx, cancel := context.WithTimeout(ctx, openListParentWarmupMaxDuration)
+	warmErr := p.warmOpenListParent(warmCtx, parent)
+	cancel()
 	if warmErr != nil {
 		return nil, fmt.Errorf("%s: list parent %s after api get cache miss failed: %w (initial get: %v)", p.name, parent, warmErr, err)
 	}
