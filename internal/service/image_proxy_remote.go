@@ -24,7 +24,7 @@ func (p *ImageProxy) RemoveCached(raw string) error {
 	if !isHTTPish(raw) {
 		return nil
 	}
-	_, cachePath, failPath, err := p.remoteImageCachePaths(raw)
+	key, cachePath, failPath, err := p.remoteImageCachePaths(raw)
 	if err != nil {
 		return nil
 	}
@@ -34,7 +34,7 @@ func (p *ImageProxy) RemoveCached(raw string) error {
 	if err := os.Remove(failPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return nil
+	return p.removeImageVariantCache(key)
 }
 
 func (p *ImageProxy) RemoveFailed(raw string) error {
@@ -67,7 +67,7 @@ func (p *ImageProxy) serveLocalImage(w http.ResponseWriter, r *http.Request, raw
 		servePlaceholder(w)
 		return nil
 	}
-	if !p.serveImageFile(w, r, filepath.Base(abs), abs, imageBrowserCacheControl) {
+	if !p.serveImageFile(w, r, "local:"+abs, abs, imageBrowserCacheControl) {
 		servePlaceholder(w)
 	}
 	return nil
@@ -219,22 +219,56 @@ func (p *ImageProxy) fetchLocalImage(raw string) ([]byte, string, error) {
 	return data, ctype, nil
 }
 
-func (p *ImageProxy) writeImageCache(cachePath, failPath, pattern string, data []byte) {
+func (p *ImageProxy) writeImageCache(cachePath, failPath, pattern string, data []byte) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	tmp, tmpErr := os.CreateTemp(p.cacheDir, pattern)
 	if tmpErr != nil {
-		return
+		return false
 	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmp.Name())
-		return
+		return false
 	}
 	_ = tmp.Close()
 	if err := os.Rename(tmp.Name(), cachePath); err != nil {
 		_ = os.Remove(tmp.Name())
+		return false
+	}
+	if strings.TrimSpace(failPath) != "" {
+		_ = os.Remove(failPath)
+	}
+	return true
+}
+
+func (p *ImageProxy) writeImageVariantCache(cachePath string, data []byte) {
+	if len(data) == 0 || len(data) > imageVariantCacheFileMaxBytes {
 		return
 	}
-	_ = os.Remove(failPath)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o750); err != nil {
+		if p.log != nil {
+			p.log.Warn("imageproxy: variant cache mkdir failed", zap.String("dir", filepath.Dir(cachePath)), zap.Error(err))
+		}
+		return
+	}
+
+	p.variantCacheMu.Lock()
+	currentSize := int64(0)
+	if stat, err := os.Stat(cachePath); err == nil && stat.Mode().IsRegular() {
+		currentSize = stat.Size()
+	}
+	if p.variantCacheBytes-currentSize+int64(len(data)) > imageVariantCacheMaxBytes {
+		p.variantCacheMu.Unlock()
+		p.scheduleImageVariantCachePrune(true)
+		return
+	}
+	written := p.writeImageCache(cachePath, "", "img-variant-*.tmp", data)
+	if written {
+		p.variantCacheBytes += int64(len(data)) - currentSize
+	}
+	p.variantCacheMu.Unlock()
+	if written {
+		p.scheduleImageVariantCachePrune(false)
+	}
 }

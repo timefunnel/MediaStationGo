@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -135,6 +137,213 @@ func TestImageProxyServeRejectsMalformedJPEGWhenFallbackFails(t *testing.T) {
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)
 	}
+}
+
+func TestImageProxyCachesImageVariantsBySourceVersionAndOptions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "broken.jpg")
+	writeTestJPEG(t, path, 200, 300)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read jpeg: %v", err)
+	}
+	broken := append(append([]byte(nil), original[:len(original)/2]...), make([]byte, 4096)...)
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatalf("write broken jpeg: %v", err)
+	}
+
+	proxy := NewImageProxy(&config.Config{
+		App:   config.AppConfig{DataDir: root},
+		Cache: config.CacheConfig{CacheDir: t.TempDir()},
+	}, zap.NewNop())
+	var fallbackCalls atomic.Int32
+	proxy.variantFallback = func(_ context.Context, _ []byte, variant imageVariantOptions) ([]byte, string, error) {
+		fallbackCalls.Add(1)
+		width := variant.maxWidth
+		if width == 0 {
+			width = 50
+		}
+		return testJPEGBytes(t, width, width*3/2), "image/jpeg", nil
+	}
+
+	serve := func(method, target, ifNoneMatch string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		rec := httptest.NewRecorder()
+		if err := proxy.Serve(context.Background(), rec, req, path); err != nil {
+			t.Fatalf("serve image: %v", err)
+		}
+		return rec
+	}
+
+	const primaryTarget = "/Items/media-1/Images/Primary?maxWidth=50&quality=70"
+	first := serve(http.MethodGet, primaryTarget, "")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body=%q", first.Code, first.Body.String())
+	}
+	firstETag := first.Header().Get("ETag")
+	if firstETag == "" {
+		t.Fatal("first response has no ETag")
+	}
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("fallback calls after first GET = %d, want 1", got)
+	}
+
+	second := serve(http.MethodGet, primaryTarget, "")
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status = %d, body=%q", second.Code, second.Body.String())
+	}
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("fallback calls after cached GET = %d, want 1", got)
+	}
+	if got := second.Header().Get("ETag"); got != firstETag {
+		t.Fatalf("cached ETag = %q, want %q", got, firstETag)
+	}
+
+	conditional := serve(http.MethodGet, primaryTarget, firstETag)
+	if conditional.Code != http.StatusNotModified {
+		t.Fatalf("conditional status = %d, want %d", conditional.Code, http.StatusNotModified)
+	}
+	if conditional.Body.Len() != 0 {
+		t.Fatalf("conditional body length = %d, want 0", conditional.Body.Len())
+	}
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("fallback calls after conditional GET = %d, want 1", got)
+	}
+
+	head := serve(http.MethodHead, primaryTarget, "")
+	if head.Code != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want %d", head.Code, http.StatusOK)
+	}
+	if head.Body.Len() != 0 {
+		t.Fatalf("HEAD body length = %d, want 0", head.Body.Len())
+	}
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("fallback calls after HEAD = %d, want 1", got)
+	}
+
+	defaultQuality := serve(http.MethodGet, "/Items/media-1/Images/Primary?maxWidth=50", "")
+	if defaultQuality.Code != http.StatusOK {
+		t.Fatalf("default-quality status = %d, body=%q", defaultQuality.Code, defaultQuality.Body.String())
+	}
+	if got := fallbackCalls.Load(); got != 2 {
+		t.Fatalf("fallback calls after implicit quality = %d, want 2", got)
+	}
+
+	explicitDefaultQuality := serve(http.MethodGet, "/Items/media-1/Images/Primary?maxWidth=50&quality=82", "")
+	if explicitDefaultQuality.Code != http.StatusOK {
+		t.Fatalf("explicit-default-quality status = %d, body=%q", explicitDefaultQuality.Code, explicitDefaultQuality.Body.String())
+	}
+	if got := fallbackCalls.Load(); got != 3 {
+		t.Fatalf("fallback calls after explicit default quality = %d, want 3", got)
+	}
+
+	differentSize := serve(http.MethodGet, "/Items/media-1/Images/Primary?maxWidth=60&quality=70", "")
+	if differentSize.Code != http.StatusOK {
+		t.Fatalf("different-size status = %d, body=%q", differentSize.Code, differentSize.Body.String())
+	}
+	if got := fallbackCalls.Load(); got != 4 {
+		t.Fatalf("fallback calls after different width = %d, want 4", got)
+	}
+
+	updated := append(append([]byte(nil), broken...), 0)
+	if err := os.WriteFile(path, updated, 0o600); err != nil {
+		t.Fatalf("update broken jpeg: %v", err)
+	}
+	updatedSource := serve(http.MethodGet, primaryTarget, "")
+	if updatedSource.Code != http.StatusOK {
+		t.Fatalf("updated-source status = %d, body=%q", updatedSource.Code, updatedSource.Body.String())
+	}
+	if got := fallbackCalls.Load(); got != 5 {
+		t.Fatalf("fallback calls after source update = %d, want 5", got)
+	}
+
+	entries := imageVariantCacheFiles(t, proxy.imageVariantCacheDir())
+	if len(entries) != 5 {
+		t.Fatalf("variant cache entries = %d, want 5: %v", len(entries), entries)
+	}
+}
+
+func TestPruneImageVariantCacheDirRemovesExpiredAndOldestEntries(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	write := func(name string, size int, modTime time.Time) string {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(strings.Repeat("x", size)), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set mtime for %s: %v", name, err)
+		}
+		return path
+	}
+
+	expired := write("expired", 3, now.Add(-31*24*time.Hour))
+	oldest := write("oldest", 4, now.Add(-2*time.Hour))
+	newest := write("newest", 4, now.Add(-time.Hour))
+	total, err := pruneImageVariantCacheDir(root, now.Add(-30*24*time.Hour), 4)
+	if err != nil {
+		t.Fatalf("prune variant cache: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("cache size after prune = %d, want 4", total)
+	}
+	for _, path := range []string{expired, oldest} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, stat err=%v", path, err)
+		}
+	}
+	if _, err := os.Stat(newest); err != nil {
+		t.Fatalf("expected newest entry to remain: %v", err)
+	}
+}
+
+func TestImageProxyRemoveCachedRemovesImageVariants(t *testing.T) {
+	proxy := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: t.TempDir()}}, zap.NewNop())
+	const raw = "https://image.tmdb.org/t/p/w500/poster.jpg"
+	key, _, _, err := proxy.remoteImageCachePaths(raw)
+	if err != nil {
+		t.Fatalf("remote cache paths: %v", err)
+	}
+	_, variantPath := proxy.imageVariantCachePaths(key, time.Now(), 123, imageVariantOptions{maxWidth: 185, quality: 70, hasQuality: true})
+	if err := os.MkdirAll(filepath.Dir(variantPath), 0o750); err != nil {
+		t.Fatalf("create variant directory: %v", err)
+	}
+	if err := os.WriteFile(variantPath, []byte("variant"), 0o600); err != nil {
+		t.Fatalf("write variant: %v", err)
+	}
+	proxy.variantCacheBytes = int64(len("variant"))
+
+	if err := proxy.RemoveCached(raw); err != nil {
+		t.Fatalf("remove cached image: %v", err)
+	}
+	if _, err := os.Stat(variantPath); !os.IsNotExist(err) {
+		t.Fatalf("variant remains after cache removal, stat err=%v", err)
+	}
+	if proxy.variantCacheBytes != 0 {
+		t.Fatalf("variant cache bytes = %d, want 0", proxy.variantCacheBytes)
+	}
+}
+
+func imageVariantCacheFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info != nil && info.Mode().IsRegular() {
+			files = append(files, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk variant cache: %v", err)
+	}
+	return files
 }
 
 func TestImageVariantFFmpegScaleFilter(t *testing.T) {

@@ -25,12 +25,16 @@ import (
 
 // ImageProxy fetches and caches remote images on behalf of the browser.
 type ImageProxy struct {
-	cfg             *config.Config
-	log             *zap.Logger
-	client          *http.Client
-	cacheDir        string
-	mu              sync.Mutex
-	variantFallback imageVariantFallbackFunc
+	cfg                    *config.Config
+	log                    *zap.Logger
+	client                 *http.Client
+	cacheDir               string
+	mu                     sync.Mutex
+	variantCacheMu         sync.Mutex
+	variantCacheBytes      int64
+	variantCachePruning    bool
+	variantCacheLastPruned time.Time
+	variantFallback        imageVariantFallbackFunc
 
 	// libraryRootsFn returns the configured media library roots so that
 	// sidecar poster/artwork files stored alongside media (under arbitrary
@@ -61,6 +65,7 @@ func NewImageProxy(cfg *config.Config, log *zap.Logger) *ImageProxy {
 		client:   &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
 	proxy.variantFallback = proxy.transcodeImageVariantWithFFmpeg
+	proxy.initializeImageVariantCache()
 	return proxy
 }
 

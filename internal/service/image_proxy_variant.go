@@ -3,8 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -90,7 +88,12 @@ func parsePositiveImageVariantInt(raw string) (int, bool) {
 	return n, err == nil && n > 0
 }
 
-func (p *ImageProxy) serveImageVariant(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, data []byte, contentType, cacheControl string, variant imageVariantOptions) error {
+func (p *ImageProxy) serveImageVariant(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, sourceSize int64, data []byte, contentType, cacheControl string, variant imageVariantOptions) error {
+	variantKey, variantCachePath := p.imageVariantCachePaths(key, modTime, sourceSize, variant)
+	if p.serveCachedImageVariantFile(w, r, variantKey, variantCachePath, cacheControl) {
+		return nil
+	}
+
 	out, outType, err := buildImageVariant(data, contentType, variant)
 	if err != nil && p != nil && p.variantFallback != nil {
 		out, outType, err = p.variantFallback(r.Context(), data, variant)
@@ -98,11 +101,12 @@ func (p *ImageProxy) serveImageVariant(w http.ResponseWriter, r *http.Request, k
 	if err != nil {
 		return err
 	}
+	p.writeImageVariantCache(variantCachePath, out)
 	w.Header().Del("Content-Length")
 	w.Header().Set("Content-Type", outType)
 	w.Header().Set("Cache-Control", cacheControl)
-	w.Header().Set("ETag", imageVariantETag(key, variant, out))
-	http.ServeContent(w, r, key+".variant", modTime, bytes.NewReader(out))
+	w.Header().Set("ETag", imageVariantCacheETag(variantKey))
+	http.ServeContent(w, r, variantKey, modTime, bytes.NewReader(out))
 	return nil
 }
 
@@ -257,25 +261,6 @@ func clampImageQuality(value int) int {
 		return 95
 	}
 	return value
-}
-
-func imageVariantETag(key string, variant imageVariantOptions, data []byte) string {
-	quality := variant.quality
-	if quality <= 0 {
-		quality = defaultImageVariantQuality
-	}
-	h := sha256.New()
-	_, _ = h.Write([]byte(strings.TrimSpace(key)))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(strconv.Itoa(variant.maxWidth)))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(strconv.Itoa(variant.maxHeight)))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(strconv.Itoa(clampImageQuality(quality))))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(data)
-	sum := h.Sum(nil)
-	return `"imgv-` + hex.EncodeToString(sum[:12]) + `"`
 }
 
 const defaultImageVariantQuality = 82
