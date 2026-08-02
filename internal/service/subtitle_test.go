@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,70 @@ func TestSubtitleDiscoverMergesLocalCacheTracks(t *testing.T) {
 	}
 	if !strings.HasPrefix(vtt.String(), "WEBVTT") || !strings.Contains(vtt.String(), "hello") {
 		t.Fatalf("unexpected vtt body: %q", vtt.String())
+	}
+}
+
+func TestSubtitleDiscoverCloudMediaUsesOnlyLocalCache(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:subtitle-cloud-local-only?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Library{}, &model.Media{}); err != nil {
+		t.Fatal(err)
+	}
+
+	media := model.Media{
+		Base:  model.Base{ID: "media-cloud-cached"},
+		Title: "Cloud Cached Subtitle",
+		Path:  "cloud://openlist/115/Movies/Cloud Cached Subtitle.mkv",
+	}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	mediaCacheDir := filepath.Join(cacheDir, media.ID)
+	if err := os.MkdirAll(mediaCacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mediaCacheDir, "cached.srt"), []byte("cached subtitle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mediaCacheDir, "tracks.json"), []byte(`{
+  "media_id": "media-cloud-cached",
+  "tracks": [
+    {
+      "media_id": "media-cloud-cached",
+      "filename": "cached.srt",
+      "lang": "zh-Hans",
+      "label": "简体中文",
+      "source": "cache"
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cloudLoads := 0
+	svc := NewSubtitleService(zap.NewNop(), repository.New(db))
+	svc.SetLocalCacheDir(cacheDir)
+	svc.cloudCache.load = func(context.Context, *SubtitleService, model.Media) ([]SubtitleTrack, error) {
+		cloudLoads++
+		return []SubtitleTrack{{Path: "cloud://openlist/should-not-be-returned.srt"}}, nil
+	}
+
+	tracks, err := svc.Discover(t.Context(), media.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cloudLoads != 0 {
+		t.Fatalf("cloud subtitle loads = %d, want 0", cloudLoads)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("len(tracks) = %d, want 1: %#v", len(tracks), tracks)
+	}
+	if tracks[0].Path != "local-subtitle://media-cloud-cached/cached.srt" || tracks[0].Source != "cache" {
+		t.Fatalf("unexpected cached cloud-media track: %#v", tracks[0])
 	}
 }
 

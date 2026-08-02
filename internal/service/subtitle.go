@@ -147,21 +147,11 @@ func (s *SubtitleService) discover(ctx context.Context, mediaID string, strict b
 	if err != nil {
 		return nil, err
 	}
+	// Cloud media subtitles are downloaded into the server-side cache by the
+	// subtitle pipeline. Playback discovery must not list the remote media
+	// directory: a slow or unavailable cloud provider must never delay playback.
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		cloudTracks, err := s.discoverCloudSubtitlesCached(ctx, *m)
-		if err != nil {
-			if strict {
-				return nil, err
-			}
-			if s.log != nil {
-				s.log.Warn("discover cloud subtitles failed",
-					zap.String("media_id", m.ID),
-					zap.String("path", m.Path),
-					zap.Error(err))
-			}
-			return mergeSubtitleTracks(cloudTracks, localTracks), nil
-		}
-		return mergeSubtitleTracks(cloudTracks, localTracks), nil
+		return localTracks, nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))
