@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
