@@ -29,7 +29,7 @@ type cloudPlaybackRequest struct {
 	resolveDur   time.Duration
 }
 
-const cloudPlaybackResolveMaxDuration = 1500 * time.Millisecond
+const cloudPlaybackResolveMaxDuration = 2200 * time.Millisecond
 
 // cloudPlayHandler resolves a cloud file to its direct link and either issues a
 // 302 redirect (true offload — host does not stream the bytes) or, when the

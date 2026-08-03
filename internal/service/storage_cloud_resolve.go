@@ -33,7 +33,7 @@ type cloudResolveCall struct {
 const (
 	cloudResolveHotHitThreshold      = 3
 	cloudResolveBackgroundRefreshMax = 30 * time.Second
-	cloudResolveColdMaxDuration      = 1400 * time.Millisecond
+	cloudResolveColdMaxDuration      = 2 * time.Second
 	cloudResolveRefreshMinInterval   = 30 * time.Second
 	cloudResolveRetryAttempts        = 2
 	cloudResolveRetryDelay           = 300 * time.Millisecond
