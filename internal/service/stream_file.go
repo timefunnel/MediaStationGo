@@ -38,6 +38,9 @@ func (s *StreamService) ServeFileWithCloudMode(w http.ResponseWriter, r *http.Re
 		target = withAuthTokenForInternalRedirect(target, r, PublicServerURL(r.Context(), s.repo, s.cfg))
 		setCloudRedirectNoStore(w)
 		http.Redirect(w, r, absoluteInternalRedirect(target, r), http.StatusFound)
+		// 预热云盘直链解析：客户端 follow 到 /api/cloud/play 时若已有解析
+		// 结果则毫秒级返回 302，否则冷解析要 1-4.5s 才能起播。
+		s.prewarmCloudPlay(r, strmURL)
 		return nil
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {

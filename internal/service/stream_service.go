@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -54,6 +55,23 @@ func NewStreamService(cfg *config.Config, log *zap.Logger, repo *repository.Cont
 		repo:       repo,
 		transcoder: transcoder,
 	}
+}
+
+// prewarmCloudPlay 在响应 302 后，用请求自身的 UA 后台预热云盘直链解析，
+// 使客户端 follow /api/cloud/play 时命中缓存，避免首次播放冷解析的等待。
+func (s *StreamService) prewarmCloudPlay(r *http.Request, raw string) {
+	if s == nil || s.storage == nil || r == nil {
+		return
+	}
+	typ, ref, ok := parseCloudMediaPlaybackURL(raw)
+	if !ok {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cloudResolveColdMaxDuration)
+		defer cancel()
+		_, _ = s.storage.CloudResolve(ctx, typ, ref, r.UserAgent())
+	}()
 }
 
 func (s *StreamService) SetCloudProbe(storage cloudPlaybackResolver) {
