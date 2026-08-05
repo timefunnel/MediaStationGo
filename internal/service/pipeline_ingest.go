@@ -25,6 +25,7 @@ type PipelineIngestService struct {
 	repos       *repository.Container
 	scanner     *ScannerService
 	maintenance *PipelineMaintenanceService
+	subtitle    *SubtitleService
 	tasks       *TaskTrackerService
 
 	mu        sync.Mutex
@@ -32,6 +33,12 @@ type PipelineIngestService struct {
 	recent    []string
 	executing map[string]bool
 	now       func() time.Time
+}
+
+func (s *PipelineIngestService) SetSubtitleService(subtitle *SubtitleService) {
+	if s != nil {
+		s.subtitle = subtitle
+	}
 }
 
 func NewPipelineIngestService(log *zap.Logger, repos *repository.Container, scanner *ScannerService, maintenance *PipelineMaintenanceService, tasks *TaskTrackerService) *PipelineIngestService {
@@ -77,6 +84,7 @@ type PipelineIngestResult struct {
 	DeletedMediaPrune *PipelineDeletedMediaPruneResult `json:"deleted_media_prune,omitempty"`
 	Scan              *PipelineIngestScanResult        `json:"scan,omitempty"`
 	Media             *PipelineIngestMediaResult       `json:"media,omitempty"`
+	CloudSubtitles    *CloudSubtitleMaterializeResult  `json:"cloud_subtitles,omitempty"`
 	MovieExtras       *PipelineRepairResult            `json:"movie_extras,omitempty"`
 	EpisodeVisibility *PipelineRepairResult            `json:"episode_visibility,omitempty"`
 }
@@ -301,6 +309,23 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 	}); err != nil {
 		return err
 	}
+	if s.subtitle != nil {
+		if err := s.updateJob(id, "cache_cloud_subtitles", "caching cloud subtitles", nil); err != nil {
+			return err
+		}
+		if task != nil {
+			task.Update(TaskUpdate{Stage: "cache_cloud_subtitles", Message: "caching cloud subtitles"})
+		}
+		result, cacheErr := s.subtitle.EnsureCloudSubtitles(ctx, media.ID)
+		if err := s.updateJobResult(id, func(resultOut *PipelineIngestResult) {
+			resultOut.CloudSubtitles = &result
+		}); err != nil {
+			return err
+		}
+		if cacheErr != nil {
+			return cacheErr
+		}
+	}
 
 	if req.RepairMovieExtras {
 		if err := s.updateJob(id, "repair_movie_extras", "repairing movie extras", nil); err != nil {
@@ -453,6 +478,10 @@ func clonePipelineIngestJob(job PipelineIngestJob) PipelineIngestJob {
 	if job.Result.Media != nil {
 		cloned := *job.Result.Media
 		job.Result.Media = &cloned
+	}
+	if job.Result.CloudSubtitles != nil {
+		cloned := *job.Result.CloudSubtitles
+		job.Result.CloudSubtitles = &cloned
 	}
 	if job.Result.MovieExtras != nil {
 		cloned := *job.Result.MovieExtras

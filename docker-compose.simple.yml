@@ -73,6 +73,7 @@ services:
       MEDIASTATION_DATABASE_TYPE: sqlite
       MEDIASTATION_DATABASE_DB_PATH: /data/mediastation.db
       MEDIASTATION_CACHE_CACHE_DIR: /cache
+      MEDIASTATION_CLOUD_SUBTITLE_CACHE_DIR: /cache/cloud-subtitles
 
       # 路径映射保持容器内统一，网页和下载器里优先使用 /media、/downloads。
       MEDIASTATION_MEDIA_DIR: /media

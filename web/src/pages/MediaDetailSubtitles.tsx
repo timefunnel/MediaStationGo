@@ -14,6 +14,7 @@ import {
   type SubtitleTrack,
 } from '../api/subtitles'
 import { confirmAction } from '../components/confirmAction'
+import { useAuthStore } from '../stores/auth'
 import type { MediaVersion } from '../types'
 import { mediaFilename } from '../utils/mediaFilename'
 import { subtitleASRModelLabel, subtitleASRProgressLabel, subtitleASRStageLabel } from './subtitleASRTaskModel'
@@ -32,15 +33,18 @@ type PreviewState = {
 } | null
 
 export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: MediaDetailSubtitlesProps) {
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
   const defaultMediaId = useMemo(
     () => versions.find((version) => version.is_current)?.id || mediaId,
     [mediaId, versions],
   )
   const [selectedMediaId, setSelectedMediaId] = useState(defaultMediaId)
+  const selectedMediaIdRef = useRef(selectedMediaId)
   const [tracks, setTracks] = useState<SubtitleTrack[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [deletingPath, setDeletingPath] = useState('')
+  const [syncingCloud, setSyncingCloud] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
@@ -65,7 +69,16 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
     () => asrProfiles.find((profile) => asrProfileValue(profile) === asrProfileKey) ?? null,
     [asrProfileKey, asrProfiles],
   )
+  const selectedVersion = useMemo(
+    () => versions.find((version) => version.id === selectedMediaId),
+    [selectedMediaId, versions],
+  )
+  const canSyncCloudSubtitles = isAdmin && Boolean(selectedVersion?.path?.toLowerCase().startsWith('cloud://'))
   const asrCapabilityHint = Array.from(new Set([asrProfilesError, asrModelsError].filter(Boolean))).join(' · ')
+
+  useEffect(() => {
+    selectedMediaIdRef.current = selectedMediaId
+  }, [selectedMediaId])
 
   useEffect(() => {
     subtitlesAPI.listASRProfiles()
@@ -183,6 +196,23 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
       setDeletingPath('')
     }
   }, [deletingPath, loadTracks, selectedMediaId])
+
+  const syncCloudSubtitles = useCallback(async () => {
+    if (syncingCloud || !canSyncCloudSubtitles) return
+    const targetMediaId = selectedMediaId
+    setSyncingCloud(true)
+    try {
+      const result = await subtitlesAPI.refreshCloud(targetMediaId)
+      toast.success(result.cached > 0 ? `已同步 ${result.cached} 条云盘字幕` : '云盘中未发现匹配字幕')
+      if (selectedMediaIdRef.current === targetMediaId) {
+        await loadTracks()
+      }
+    } catch (error) {
+      toast.error(errorMessage(error, '云盘字幕同步失败'))
+    } finally {
+      setSyncingCloud(false)
+    }
+  }, [canSyncCloudSubtitles, loadTracks, selectedMediaId, syncingCloud])
 
   const searchCandidates = useCallback(async () => {
     setSearching(true)
@@ -327,6 +357,17 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
                 <option key={version.id} value={version.id}>{versionOptionLabel(version)}</option>
               ))}
             </select>
+          )}
+          {canSyncCloudSubtitles && (
+            <button
+              type="button"
+              onClick={() => void syncCloudSubtitles()}
+              disabled={syncingCloud}
+              className="btn-outline h-9 gap-1.5 px-3 text-xs"
+            >
+              <RefreshCw size={14} className={syncingCloud ? 'animate-spin' : ''} />
+              同步云盘字幕
+            </button>
           )}
           <button
             type="button"
@@ -474,16 +515,18 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
               >
                 <Eye size={14} />
               </button>
-              <button
-                type="button"
-                onClick={() => void deleteTrack(track)}
-                disabled={Boolean(deletingPath)}
-                className="btn-outline h-9 w-9 justify-center p-0 !border-red-100 !text-red-500 hover:!border-red-200 hover:!bg-red-50"
-                title="删除字幕"
-                aria-label={`删除字幕 ${track.name || track.label}`}
-              >
-                {deletingPath === track.path ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
-              </button>
+              {track.source?.toLowerCase() !== 'cloud-media' && (
+                <button
+                  type="button"
+                  onClick={() => void deleteTrack(track)}
+                  disabled={Boolean(deletingPath)}
+                  className="btn-outline h-9 w-9 justify-center p-0 !border-red-100 !text-red-500 hover:!border-red-200 hover:!bg-red-50"
+                  title="删除字幕"
+                  aria-label={`删除字幕 ${track.name || track.label}`}
+                >
+                  {deletingPath === track.path ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -636,6 +679,7 @@ function subtitleSourceLabel(source: string): string {
     assrt: 'Assrt',
     opensubtitles: 'OpenSubtitles',
     openlist: 'OpenList',
+    'cloud-media': '云盘本地字幕',
     '115': '115 网盘',
     'sensevoice-deepseek': 'SenseVoice + DeepSeek',
   }[source?.toLowerCase()] || source || '未知来源'

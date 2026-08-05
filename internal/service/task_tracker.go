@@ -21,6 +21,7 @@ const (
 	TaskKindArtwork      = "artwork"
 	TaskKindTitleCleanup = "title_cleanup"
 	TaskKindProbe        = "probe"
+	TaskKindSubtitle     = "subtitle"
 )
 
 // BackgroundTask is the compact, operator-facing shape shown on the live tasks

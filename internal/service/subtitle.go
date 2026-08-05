@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -31,13 +32,15 @@ import (
 
 // SubtitleService is the discovery + conversion entry point.
 type SubtitleService struct {
-	log           *zap.Logger
-	repo          *repository.Container
-	storage       *StorageConfigService
-	pipeline      subtitlePipelineClient
-	apiConfig     *APIConfigService
-	localCacheDir string
-	cloudCache    *cloudSubtitleDiscoveryCache
+	log                  *zap.Logger
+	repo                 *repository.Container
+	storage              *StorageConfigService
+	pipeline             subtitlePipelineClient
+	apiConfig            *APIConfigService
+	localCacheDir        string
+	materializedCacheDir string
+	cloudCache           *cloudSubtitleDiscoveryCache
+	materializeMu        sync.Mutex
 }
 
 func (s *SubtitleService) SetAPIConfig(apiConfig *APIConfigService) *SubtitleService {
@@ -50,10 +53,11 @@ func (s *SubtitleService) SetAPIConfig(apiConfig *APIConfigService) *SubtitleSer
 // NewSubtitleService is the constructor.
 func NewSubtitleService(log *zap.Logger, repo *repository.Container, storage ...*StorageConfigService) *SubtitleService {
 	s := &SubtitleService{
-		log:           log,
-		repo:          repo,
-		localCacheDir: subtitleCacheDirFromEnv(),
-		cloudCache:    newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
+		log:                  log,
+		repo:                 repo,
+		localCacheDir:        subtitleCacheDirFromEnv(),
+		materializedCacheDir: cloudSubtitleMaterializedDirFromEnv(),
+		cloudCache:           newCloudSubtitleDiscoveryCache(cloudSubtitleDiscoveryTTLFromEnv(log)),
 	}
 	if len(storage) > 0 {
 		s.storage = storage[0]
@@ -147,11 +151,14 @@ func (s *SubtitleService) discover(ctx context.Context, mediaID string, strict b
 	if err != nil {
 		return nil, err
 	}
-	// Cloud media subtitles are downloaded into the server-side cache by the
-	// subtitle pipeline. Playback discovery must not list the remote media
-	// directory: a slow or unavailable cloud provider must never delay playback.
+	// Cloud media discovery is strictly local. Remote listing and downloads only
+	// run during ingest, explicit refresh, or an administrator backfill task.
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Path)), "cloud://") {
-		return localTracks, nil
+		materializedTracks, materializedErr := discoverMaterializedCloudSubtitles(s, *m, strict)
+		if materializedErr != nil {
+			return nil, materializedErr
+		}
+		return mergeSubtitleTracks(localTracks, materializedTracks), nil
 	}
 	dir := filepath.Dir(m.Path)
 	base := strings.TrimSuffix(filepath.Base(m.Path), filepath.Ext(m.Path))
@@ -250,6 +257,9 @@ func (s *SubtitleService) ServeAs(ctx context.Context, mediaID, sub, format stri
 	}
 	if localMediaID, filename, ok := parseLocalSubtitlePath(sub); ok {
 		return serveLocalCachedSubtitle(s, mediaID, localMediaID, filename, format, w)
+	}
+	if localMediaID, filename, ok := parseMaterializedSubtitlePath(sub); ok {
+		return serveMaterializedCloudSubtitle(s, mediaID, localMediaID, filename, format, w)
 	}
 	if typ, ref, name, ok := parseCloudSubtitlePath(sub); ok {
 		return serveCloudSubtitle(ctx, s, *m, typ, ref, name, format, w)

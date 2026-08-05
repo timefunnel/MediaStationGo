@@ -41,6 +41,12 @@ func (s *SubtitleService) Delete(ctx context.Context, mediaID, subtitlePath stri
 		return errors.New("subtitle does not belong to this media")
 	}
 
+	if localMediaID, _, ok := parseMaterializedSubtitlePath(subtitlePath); ok {
+		if localMediaID != mediaID {
+			return errors.New("subtitle media mismatch")
+		}
+		return errors.New("cloud media subtitles are managed by cloud subtitle refresh")
+	}
 	if localMediaID, filename, ok := parseLocalSubtitlePath(subtitlePath); ok {
 		if localMediaID != mediaID {
 			return errors.New("subtitle media mismatch")

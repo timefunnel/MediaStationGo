@@ -91,6 +91,7 @@ services:
       # Redis 只做热缓存，源数据仍在 PostgreSQL；Redis 丢失可自动重建。
       MEDIASTATION_CACHE_REDIS_URL: redis://redis:6379/0
       MEDIASTATION_CACHE_CACHE_DIR: /cache
+      MEDIASTATION_CLOUD_SUBTITLE_CACHE_DIR: /cache/cloud-subtitles
 
       MEDIASTATION_UPDATE_IMAGE: ghcr.io/shukebta/mediastation-go:latest
 

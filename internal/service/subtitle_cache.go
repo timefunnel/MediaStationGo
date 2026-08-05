@@ -128,8 +128,12 @@ func discoverLocalCachedSubtitles(s *SubtitleService, mediaID string, strict boo
 }
 
 func localSubtitleURI(mediaID, filename string) string {
+	return cachedSubtitleURI(localSubtitleScheme, mediaID, filename)
+}
+
+func cachedSubtitleURI(scheme, mediaID, filename string) string {
 	u := url.URL{
-		Scheme: localSubtitleScheme,
+		Scheme: strings.TrimSpace(scheme),
 		Host:   strings.TrimSpace(mediaID),
 		Path:   "/" + strings.TrimSpace(filename),
 	}
@@ -137,8 +141,12 @@ func localSubtitleURI(mediaID, filename string) string {
 }
 
 func parseLocalSubtitlePath(raw string) (mediaID, filename string, ok bool) {
+	return parseSubtitleURI(raw, localSubtitleScheme)
+}
+
+func parseSubtitleURI(raw, scheme string) (mediaID, filename string, ok bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || strings.ToLower(u.Scheme) != localSubtitleScheme {
+	if err != nil || !strings.EqualFold(u.Scheme, strings.TrimSpace(scheme)) {
 		return "", "", false
 	}
 	mediaID = strings.TrimSpace(u.Host)
@@ -156,10 +164,14 @@ func serveLocalCachedSubtitle(s *SubtitleService, mediaID, localMediaID, filenam
 	if s == nil {
 		return errors.New("subtitle service unavailable")
 	}
+	return serveCachedSubtitleFromRoot(s.localCacheDir, mediaID, localMediaID, filename, format, w)
+}
+
+func serveCachedSubtitleFromRoot(root, mediaID, localMediaID, filename, format string, w io.Writer) error {
 	if strings.TrimSpace(mediaID) != strings.TrimSpace(localMediaID) {
 		return errors.New("subtitle media mismatch")
 	}
-	mediaDir, ok := localSubtitleMediaDir(s.localCacheDir, mediaID)
+	mediaDir, ok := localSubtitleMediaDir(root, mediaID)
 	if !ok {
 		return errors.New("subtitle cache unavailable")
 	}

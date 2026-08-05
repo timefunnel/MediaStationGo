@@ -117,6 +117,42 @@ func TestCloudResolveCacheUses115DirectLinkExpiry(t *testing.T) {
 	}
 }
 
+func TestCloudResolveCachePrunesLeastRecentlyUsedEntries(t *testing.T) {
+	storage := &StorageConfigService{resolveCache: make(map[string]cloudResolveCacheEntry)}
+	now := time.Now()
+	for i := 0; i < cloudResolveCacheMaxEntries; i++ {
+		key := fmt.Sprintf("openlist\x00/file-%04d\x00Player", i)
+		storage.resolveCache[key] = cloudResolveCacheEntry{
+			link:      &cloud.DirectLink{URL: fmt.Sprintf("https://cdn.example/%d", i)},
+			expiresAt: now.Add(time.Minute), staleUntil: now.Add(time.Minute), lastHit: now.Add(time.Duration(i) * time.Millisecond),
+		}
+	}
+	oldest := "openlist\x00/file-0000\x00Player"
+	storage.storeResolvedLinkLocked("openlist\x00/new-file\x00Player", &cloud.DirectLink{URL: "https://cdn.example/new"}, time.Minute, time.Minute)
+	if len(storage.resolveCache) != cloudResolveCacheMaxEntries {
+		t.Fatalf("cache size=%d, want %d", len(storage.resolveCache), cloudResolveCacheMaxEntries)
+	}
+	if _, ok := storage.resolveCache[oldest]; ok {
+		t.Fatal("least recently used cache entry was not pruned")
+	}
+}
+
+func TestCloudResolveCacheRefreshAtCapacityDoesNotEvict(t *testing.T) {
+	storage := &StorageConfigService{resolveCache: make(map[string]cloudResolveCacheEntry)}
+	now := time.Now()
+	for i := 0; i < cloudResolveCacheMaxEntries; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		storage.resolveCache[key] = cloudResolveCacheEntry{
+			link:      &cloud.DirectLink{URL: fmt.Sprintf("https://cdn.example/%d", i)},
+			expiresAt: now.Add(time.Minute), staleUntil: now.Add(time.Minute), lastHit: now,
+		}
+	}
+	storage.storeResolvedLinkLocked("key-0000", &cloud.DirectLink{URL: "https://cdn.example/refreshed"}, time.Minute, time.Minute)
+	if len(storage.resolveCache) != cloudResolveCacheMaxEntries || storage.resolveCache["key-0000"].link.URL != "https://cdn.example/refreshed" {
+		t.Fatalf("cache refresh changed capacity or missed replacement")
+	}
+}
+
 func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
 	var resolves atomic.Int32
 	expiry := time.Now().Add(time.Hour).Unix()

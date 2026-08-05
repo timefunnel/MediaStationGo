@@ -14,6 +14,10 @@ import (
 )
 
 func loadCloudSubtitles(ctx context.Context, s *SubtitleService, m model.Media) ([]SubtitleTrack, error) {
+	return loadCloudSubtitlesForMaterialization(ctx, s, m, false)
+}
+
+func loadCloudSubtitlesForMaterialization(ctx context.Context, s *SubtitleService, m model.Media, force bool) ([]SubtitleTrack, error) {
 	if s == nil || s.storage == nil {
 		return nil, errors.New("cloud storage service unavailable")
 	}
@@ -26,27 +30,34 @@ func loadCloudSubtitles(ctx context.Context, s *SubtitleService, m model.Media) 
 		return []SubtitleTrack{}, nil
 	}
 	base := strings.TrimSuffix(mediaName, filepath.Ext(mediaName))
-	entries, err := s.storage.CloudList(ctx, typ, dirRef)
+	entries, err := listCloudSubtitleDirectory(ctx, s.storage, typ, dirRef, force)
 	if err != nil {
 		return nil, fmt.Errorf("list cloud subtitle directory %q: %w", dirRef, err)
 	}
-	tracks := cloudSubtitleTracks(typ, entries, base, false)
+	tracks := cloudSubtitleTracks(typ, entries, base, true)
+	sharedMediaDirectory := cloudVideoFileCount(entries) > 1
 	for _, entry := range entries {
 		if !entry.IsDir || !isSubtitleDirectory(entry.Name) || strings.TrimSpace(entry.ID) == "" {
 			continue
 		}
-		subEntries, err := s.storage.CloudList(ctx, typ, entry.ID)
+		subEntries, err := listCloudSubtitleDirectory(ctx, s.storage, typ, entry.ID, force)
 		if err != nil {
 			return tracks, fmt.Errorf("list cloud subtitle subdirectory %q: %w", entry.Name, err)
 		}
-		tracks = append(tracks, cloudSubtitleTracks(typ, subEntries, base, true)...)
+		tracks = append(tracks, cloudSubtitleTracks(typ, subEntries, base, sharedMediaDirectory)...)
 	}
 	return tracks, nil
 }
 
-func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, subdir bool) []SubtitleTrack {
+func listCloudSubtitleDirectory(ctx context.Context, storage *StorageConfigService, typ, dirRef string, force bool) ([]cloud.FileEntry, error) {
+	if force {
+		return storage.CloudListRefresh(ctx, typ, dirRef)
+	}
+	return storage.CloudList(ctx, typ, dirRef)
+}
+
+func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, requireBaseMatch bool) []SubtitleTrack {
 	tracks := make([]SubtitleTrack, 0)
-	baseLower := strings.ToLower(base)
 	for _, entry := range entries {
 		if entry.IsDir {
 			continue
@@ -57,7 +68,7 @@ func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, sub
 			continue
 		}
 		fullName := strings.TrimSuffix(entry.Name, ext)
-		if !subdir && !strings.HasPrefix(strings.ToLower(fullName), baseLower) {
+		if requireBaseMatch && !cloudSubtitleBaseMatches(fullName, base) {
 			continue
 		}
 		ref := cloudEntryRef(typ, entry.ID, entry.PickCode)
@@ -75,6 +86,36 @@ func cloudSubtitleTracks(typ string, entries []cloud.FileEntry, base string, sub
 		})
 	}
 	return tracks
+}
+
+func cloudSubtitleBaseMatches(name, base string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	base = strings.ToLower(strings.TrimSpace(base))
+	if name == "" || base == "" || !strings.HasPrefix(name, base) {
+		return false
+	}
+	if len(name) == len(base) {
+		return true
+	}
+	switch name[len(base)] {
+	case '.', '-', '_', ' ', '[', '(':
+		return true
+	default:
+		return false
+	}
+}
+
+func cloudVideoFileCount(entries []cloud.FileEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir {
+			continue
+		}
+		if _, ok := videoExtensions[strings.ToLower(filepath.Ext(entry.Name))]; ok {
+			count++
+		}
+	}
+	return count
 }
 
 func cloudSubtitleMediaRef(m model.Media) (typ, ref string, ok bool) {

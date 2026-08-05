@@ -3,6 +3,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -19,6 +20,10 @@ import (
 type invalidateCloudSubtitleCacheRequest struct {
 	MediaID  string `json:"media_id"`
 	Provider string `json:"provider"`
+}
+
+type backfillCloudSubtitleCacheRequest struct {
+	LibraryID string `json:"library_id"`
 }
 
 type subtitleSearchRequest struct {
@@ -107,6 +112,78 @@ func invalidateCloudSubtitleCacheHandler(svc *service.Container) gin.HandlerFunc
 			"media_id":    mediaID,
 			"provider":    provider,
 		})
+	}
+}
+
+func refreshCloudSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.Subtitle == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "subtitle service unavailable"})
+			return
+		}
+		result, err := svc.Subtitle.RefreshCloudSubtitles(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "result": result})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func backfillCloudSubtitlesHandler(svc *service.Container) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || svc.Subtitle == nil || svc.Tasks == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cloud subtitle backfill service unavailable"})
+			return
+		}
+		var in backfillCloudSubtitleCacheRequest
+		if c.Request.ContentLength != 0 {
+			if err := c.ShouldBindJSON(&in); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		in.LibraryID = strings.TrimSpace(in.LibraryID)
+		task, started := svc.Tasks.StartUnique(service.TaskKindSubtitle, "回填云盘字幕", service.TaskUpdate{
+			Stage:      "queued",
+			SourcePath: in.LibraryID,
+			Message:    "云盘字幕回填任务已排队",
+		})
+		if !started {
+			c.JSON(http.StatusAccepted, gin.H{"queued": false, "already_running": true})
+			return
+		}
+
+		go func() {
+			result, err := svc.Subtitle.BackfillCloudSubtitles(svc.Context(), in.LibraryID, func(progress service.CloudSubtitleBackfillResult) {
+				task.Update(service.TaskUpdate{
+					Stage:   "materializing",
+					Message: fmt.Sprintf("正在回填云盘字幕：%d/%d", progress.Processed, progress.Total),
+					Metrics: cloudSubtitleBackfillTaskMetrics(progress),
+					Details: progress.Errors,
+				})
+			})
+			stage := "completed"
+			message := fmt.Sprintf("云盘字幕回填完成：缓存 %d，空结果 %d", result.Cached, result.Empty)
+			if err != nil {
+				stage = "failed"
+				message = fmt.Sprintf("云盘字幕回填失败：缓存 %d，空结果 %d，失败 %d", result.Cached, result.Empty, result.Failed)
+			}
+			finishHTTPTask(task, err, stage, message, cloudSubtitleBackfillTaskMetrics(result), result.Errors)
+		}()
+
+		c.JSON(http.StatusAccepted, gin.H{"queued": true, "task_id": task.ID(), "library_id": in.LibraryID})
+	}
+}
+
+func cloudSubtitleBackfillTaskMetrics(result service.CloudSubtitleBackfillResult) map[string]int64 {
+	return map[string]int64{
+		"total":     int64(result.Total),
+		"processed": int64(result.Processed),
+		"cached":    int64(result.Cached),
+		"empty":     int64(result.Empty),
+		"skipped":   int64(result.Skipped),
+		"failed":    int64(result.Failed),
 	}
 }
 

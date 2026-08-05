@@ -95,6 +95,7 @@ services:
 
       MEDIASTATION_CACHE_REDIS_URL: redis://redis:6379/0
       MEDIASTATION_CACHE_CACHE_DIR: /cache
+      MEDIASTATION_CLOUD_SUBTITLE_CACHE_DIR: /cache/cloud-subtitles
 
       # OpenSearch 只做搜索索引，主数据仍以 PostgreSQL 为准。
       MEDIASTATION_SEARCH_BACKEND: opensearch

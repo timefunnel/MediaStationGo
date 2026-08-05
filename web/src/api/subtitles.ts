@@ -11,6 +11,17 @@ export interface SubtitleTrack {
   source: string
 }
 
+export interface CloudSubtitleMaterializeResult {
+  status: 'success' | 'skipped' | 'failed'
+  media_id: string
+  provider?: string
+  discovered: number
+  cached: number
+  removed: number
+  reason?: string
+  error?: string
+}
+
 export interface SubtitleSearchCandidate {
   candidate_id: string
   provider: string
@@ -110,6 +121,11 @@ export const subtitlesAPI = {
   delete: (mediaId: string, path: string) =>
     api
       .delete<{ deleted: boolean }>(`/media/${encodeURIComponent(mediaId)}/subtitles`, { params: { path } })
+      .then((r) => r.data),
+
+  refreshCloud: (mediaId: string) =>
+    api
+      .post<CloudSubtitleMaterializeResult>(`/media/${encodeURIComponent(mediaId)}/subtitles/cloud-refresh`)
       .then((r) => r.data),
 
   search: (mediaId: string, limit = 20) =>

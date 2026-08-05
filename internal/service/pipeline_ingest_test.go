@@ -379,6 +379,73 @@ func TestPipelineIngestRunsMovieExtrasRepair(t *testing.T) {
 	}
 }
 
+func TestPipelineIngestMaterializesCloudSubtitles(t *testing.T) {
+	fixture := newCloudSubtitleOpenListFixture(t, false)
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.StorageConfig{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	lib, root := createPipelineMaintenanceRoot(t, db, "movie", "/115/movie")
+	media := model.Media{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Movie", Path: "cloud://openlist/115/movie/Movie/Movie.mkv", SizeBytes: 5000}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": fixture.server.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	subtitle := NewSubtitleService(log, repos, storage)
+	subtitle.SetMaterializedCacheDir(t.TempDir())
+	svc := NewPipelineIngestService(log, repos, nil, NewPipelineMaintenanceService(log, repos), nil)
+	svc.SetSubtitleService(subtitle)
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "movie", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/movie"},
+		Title:                     "Movie", TargetOpenListPaths: []string{"/115/movie/Movie"}, RequireTargetPath: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusCompleted || job.Result.CloudSubtitles == nil || job.Result.CloudSubtitles.Cached != 2 {
+		t.Fatalf("job status=%s error=%s subtitles=%#v", job.Status, job.Error, job.Result.CloudSubtitles)
+	}
+}
+
+func TestPipelineIngestFailsWhenCloudSubtitleDownloadFails(t *testing.T) {
+	fixture := newCloudSubtitleOpenListFixture(t, true)
+	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.StorageConfig{}, &model.PipelineIngestJobRecord{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	lib, root := createPipelineMaintenanceRoot(t, db, "movie", "/115/movie")
+	media := model.Media{LibraryID: lib.ID, LibraryRootID: root.ID, Title: "Movie", Path: "cloud://openlist/115/movie/Movie/Movie.mkv", SizeBytes: 5000}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": fixture.server.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	subtitle := NewSubtitleService(log, repos, storage)
+	subtitle.SetMaterializedCacheDir(t.TempDir())
+	svc := NewPipelineIngestService(log, repos, nil, NewPipelineMaintenanceService(log, repos), nil)
+	svc.SetSubtitleService(subtitle)
+
+	job, err := svc.Start(t.Context(), PipelineIngestRequest{
+		PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "movie", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/movie"},
+		Title:                     "Movie", TargetOpenListPaths: []string{"/115/movie/Movie"}, RequireTargetPath: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job = waitPipelineIngestJob(t, svc, job.ID)
+	if job.Status != PipelineIngestStatusFailed || job.Result.CloudSubtitles == nil || job.Result.CloudSubtitles.Status != "failed" {
+		t.Fatalf("job status=%s error=%s subtitles=%#v", job.Status, job.Error, job.Result.CloudSubtitles)
+	}
+	if !strings.Contains(job.Error, "http 502") || !strings.Contains(job.Result.CloudSubtitles.Error, "http 502") {
+		t.Fatalf("job error=%q subtitles=%#v", job.Error, job.Result.CloudSubtitles)
+	}
+}
+
 func TestPipelineIngestPersistsAndReusesIdempotentJob(t *testing.T) {
 	db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.PipelineIngestJobRecord{})
 	repos := repository.New(db)
