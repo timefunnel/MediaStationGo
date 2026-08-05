@@ -38,6 +38,7 @@ type StreamService struct {
 	repo             *repository.Container
 	transcoder       *TranscoderService
 	storage          cloudPlaybackResolver
+	playback         *PlaybackService
 	cache            *RuntimeCacheService
 	generatedArtwork *GeneratedArtworkService
 }
@@ -80,6 +81,12 @@ func (s *StreamService) SetCloudProbe(storage cloudPlaybackResolver) {
 	}
 }
 
+func (s *StreamService) SetPlaybackService(playback *PlaybackService) {
+	if s != nil {
+		s.playback = playback
+	}
+}
+
 func (s *StreamService) SetRuntimeCache(cache *RuntimeCacheService) {
 	if s != nil {
 		s.cache = cache
@@ -99,6 +106,8 @@ var ErrMediaNotFound = errors.New("media not found")
 // 构造可用的播放重定向（通常是 STRMURL 缺失，需要重新扫描媒体库）。
 // 调用方应把它与「媒体不存在」区分开，避免把配置类故障当成 404 返回给播放器。
 var ErrCloudPlaybackUnavailable = errors.New("cloud media playback unavailable: media missing play url; re-scan the library")
+
+var ErrCloudPlaybackResolveFailed = errors.New("cloud media playback resolve failed")
 
 var ErrCloudPlaybackDisabled = errors.New("cloud media playback disabled by admin settings")
 

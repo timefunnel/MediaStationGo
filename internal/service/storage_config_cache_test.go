@@ -274,8 +274,8 @@ func TestCloudResolveColdMissUsesBoundedWorkerDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("OpenList get request did not start")
 	}
-	if elapsed >= 2500*time.Millisecond {
-		t.Fatalf("cold resolve took %s, want less than 2.5s", elapsed)
+	if elapsed >= cloudResolveColdMaxDuration+500*time.Millisecond {
+		t.Fatalf("cold resolve took %s, want less than %s", elapsed, cloudResolveColdMaxDuration+500*time.Millisecond)
 	}
 	key := storage.resolveCacheKey("openlist", "/Movies/f1.mkv", "Player/1")
 	storage.resolveMu.Lock()

@@ -193,7 +193,7 @@ func embyVideoStreamHandler(svc *service.Container, cloudMode string) gin.Handle
 		// 此前这里把所有错误一律吞成 404：云盘 Cookie 过期、直链解析失败、
 		// STRM 播放被关闭……在第三方播放器上全部表现为「404 不存在」，
 		// 无法排查。现在区分：行不存在→404；云盘播放不可用/上游故障→502+原因。
-		err = svc.Stream.ServeFileWithCloudMode(c.Writer, c.Request, c.Param("id"), cloudMode)
+		err = svc.Stream.ServeFileWithCloudModeForUser(c.Writer, c.Request, c.Param("id"), uid, cloudMode)
 		switch {
 		case err == nil:
 		case errors.Is(err, service.ErrMediaNotFound):

@@ -179,6 +179,7 @@ func (b *serviceContainerBuilder) initContentServices() {
 	b.c.PipelineScrape = NewPipelineScrapeService(b.repos, b.c.Scraper)
 	b.c.Stream = NewStreamService(b.cfg, b.log, b.repos, b.c.Transcoder)
 	b.c.Playback = NewPlaybackService(b.log, b.repos)
+	b.c.Stream.SetPlaybackService(b.c.Playback)
 	b.c.Emby.SetPlaybackService(b.c.Playback)
 	b.c.Subtitle = NewSubtitleService(b.log, b.repos).SetAPIConfig(b.c.APIConfig)
 	b.c.Stats = NewStatsService(b.log, b.repos).SetRuntimeCache(b.c.Cache)

@@ -353,7 +353,7 @@ func streamHandler(svc *service.Container) gin.HandlerFunc {
 		if !enforceScopedPlaybackToken(c, m.ID) {
 			return
 		}
-		err = svc.Stream.ServeFile(c.Writer, c.Request, c.Param("id"))
+		err = svc.Stream.ServeFileForUser(c.Writer, c.Request, c.Param("id"), currentUserID(c))
 		if errors.Is(err, service.ErrMediaNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
@@ -362,7 +362,8 @@ func streamHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, service.ErrCloudPlaybackUnavailable) {
+		if errors.Is(err, service.ErrCloudPlaybackUnavailable) ||
+			errors.Is(err, service.ErrCloudPlaybackResolveFailed) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}

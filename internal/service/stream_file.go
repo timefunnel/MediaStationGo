@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
@@ -18,10 +20,22 @@ import (
 // instead of opening a local file. This lets WebDAV / Alist / S3 / HTTP
 // direct links flow through the rest of the player UI unchanged.
 func (s *StreamService) ServeFile(w http.ResponseWriter, r *http.Request, mediaID string) error {
-	return s.ServeFileWithCloudMode(w, r, mediaID, "")
+	return s.ServeFileForUser(w, r, mediaID, "")
 }
 
 func (s *StreamService) ServeFileWithCloudMode(w http.ResponseWriter, r *http.Request, mediaID, cloudMode string) error {
+	return s.ServeFileWithCloudModeForUser(w, r, mediaID, "", cloudMode)
+}
+
+func (s *StreamService) ServeFileForUser(w http.ResponseWriter, r *http.Request, mediaID, userID string) error {
+	return s.serveFileWithCloudMode(w, r, mediaID, userID, "")
+}
+
+func (s *StreamService) ServeFileWithCloudModeForUser(w http.ResponseWriter, r *http.Request, mediaID, userID, cloudMode string) error {
+	return s.serveFileWithCloudMode(w, r, mediaID, userID, cloudMode)
+}
+
+func (s *StreamService) serveFileWithCloudMode(w http.ResponseWriter, r *http.Request, mediaID, userID, cloudMode string) error {
 	m, err := s.repo.Media.FindByID(r.Context(), mediaID)
 	if err != nil {
 		return err
@@ -34,6 +48,17 @@ func (s *StreamService) ServeFileWithCloudMode(w http.ResponseWriter, r *http.Re
 			return ErrCloudPlaybackDisabled
 		}
 		// 云盘播放 URL 先规范化为相对路径，免疫扫描时固化的旧 host。
+		if shouldResolveCloudPlaybackAtStreamEntry(r.Context(), s.repo, cloudMode) {
+			if typ, ref, ok := parseCloudMediaPlaybackURL(strmURL); ok {
+				redirected, err := s.redirectResolvedCloudPlayback(w, r, mediaID, userID, typ, ref)
+				if err != nil {
+					return err
+				}
+				if redirected {
+					return nil
+				}
+			}
+		}
 		target := normalizeCloudPlayTarget(strmURL)
 		target = withAuthTokenForInternalRedirect(target, r, PublicServerURL(r.Context(), s.repo, s.cfg))
 		setCloudRedirectNoStore(w)
@@ -63,6 +88,48 @@ func (s *StreamService) ServeFileWithCloudMode(w http.ResponseWriter, r *http.Re
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
 	return nil
+}
+
+func shouldResolveCloudPlaybackAtStreamEntry(ctx context.Context, repo *repository.Container, cloudMode string) bool {
+	switch normalizeCloudPlaybackMode(cloudMode) {
+	case CloudPlaybackModeSTRM:
+		return true
+	case CloudPlaybackModeRedirectProxy:
+		return false
+	default:
+		return CloudPlaybackMode(ctx, repo) == CloudPlaybackModeSTRM
+	}
+}
+
+func (s *StreamService) redirectResolvedCloudPlayback(
+	w http.ResponseWriter,
+	r *http.Request,
+	mediaID string,
+	userID string,
+	typ string,
+	ref string,
+) (bool, error) {
+	if s == nil || s.storage == nil {
+		return false, fmt.Errorf("%w: cloud storage service unavailable", ErrCloudPlaybackResolveFailed)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 9*time.Second)
+	defer cancel()
+	link, err := s.storage.CloudResolve(ctx, typ, ref, r.UserAgent())
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrCloudPlaybackResolveFailed, err)
+	}
+	if link == nil || strings.TrimSpace(link.URL) == "" {
+		return false, fmt.Errorf("%w: empty direct link", ErrCloudPlaybackResolveFailed)
+	}
+	if link.Proxy {
+		return false, nil
+	}
+	if s.playback != nil {
+		s.playback.AuthorizeResolvedCloudPlayback(userID, mediaID)
+	}
+	setCloudRedirectNoStore(w)
+	http.Redirect(w, r, link.URL, http.StatusFound)
+	return true, nil
 }
 
 func setCloudRedirectNoStore(w http.ResponseWriter) {
