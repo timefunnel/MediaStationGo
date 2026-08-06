@@ -23,16 +23,18 @@ import (
 
 // StorageConfigService encrypts + persists external storage configs.
 type StorageConfigService struct {
-	log           *zap.Logger
-	repo          *repository.Container
-	crypto        *CryptoService
-	client        *http.Client
-	resolveMu     sync.Mutex
-	resolveCache  map[string]cloudResolveCacheEntry
-	resolveFlight map[string]*cloudResolveCall
-	resolveGen    map[string]uint64
-	changeMu      sync.RWMutex
-	onChange      func(string)
+	log            *zap.Logger
+	repo           *repository.Container
+	crypto         *CryptoService
+	client         *http.Client
+	resolveMu      sync.Mutex
+	resolveCache   map[string]cloudResolveCacheEntry
+	resolveErrors  map[string]cloudResolveFailureEntry
+	resolveFlight  map[string]*cloudResolveCall
+	resolveCircuit map[string]cloudResolveCircuitState
+	resolveGen     map[string]uint64
+	changeMu       sync.RWMutex
+	onChange       func(string)
 }
 
 func (s *StorageConfigService) SetChangeHandler(handler func(string)) {
@@ -59,13 +61,15 @@ func (s *StorageConfigService) notifyChanged(typ string) {
 // NewStorageConfigService is the constructor.
 func NewStorageConfigService(log *zap.Logger, repo *repository.Container, crypto *CryptoService) *StorageConfigService {
 	return &StorageConfigService{
-		log:           log,
-		repo:          repo,
-		crypto:        crypto,
-		client:        &http.Client{Timeout: 120 * time.Second},
-		resolveCache:  make(map[string]cloudResolveCacheEntry),
-		resolveFlight: make(map[string]*cloudResolveCall),
-		resolveGen:    make(map[string]uint64),
+		log:            log,
+		repo:           repo,
+		crypto:         crypto,
+		client:         &http.Client{Timeout: 120 * time.Second},
+		resolveCache:   make(map[string]cloudResolveCacheEntry),
+		resolveErrors:  make(map[string]cloudResolveFailureEntry),
+		resolveFlight:  make(map[string]*cloudResolveCall),
+		resolveCircuit: make(map[string]cloudResolveCircuitState),
+		resolveGen:     make(map[string]uint64),
 	}
 }
 

@@ -218,9 +218,8 @@ func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
 	}
 }
 
-func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
+func TestCloudResolveReturnsStaleLinkWithoutRefreshWhileCircuitOpen(t *testing.T) {
 	var resolves atomic.Int32
-	expiry := time.Now().Add(time.Hour).Unix()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/fs/list" {
 			writeOpenListCacheList(w)
@@ -229,13 +228,53 @@ func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		n := resolves.Add(1)
+		resolves.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		if n == 1 {
-			_, _ = fmt.Fprint(w, `{"code":500,"message":"failed get link"}`)
+		_, _ = fmt.Fprint(w, `{"code":200,"data":{"raw_url":"http://cdn.local/movie.mkv"}}`)
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := storage.resolveCacheKey("openlist", "/Movies/f1.mkv", "Player/1")
+	storage.resolveMu.Lock()
+	entry := storage.resolveCache[key]
+	entry.expiresAt = time.Now().Add(-time.Second)
+	entry.staleUntil = time.Now().Add(time.Minute)
+	entry.refreshAfter = time.Time{}
+	storage.resolveCache[key] = entry
+	storage.resolveCircuit[cloud.TypeOpenList] = cloudResolveCircuitState{openUntil: time.Now().Add(time.Minute)}
+	storage.resolveMu.Unlock()
+
+	stale, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	if err != nil || stale == nil || stale.URL != link.URL {
+		t.Fatalf("stale link=%#v err=%v", stale, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if resolves.Load() != 1 {
+		t.Fatalf("resolves = %d, want no background refresh while circuit is open", resolves.Load())
+	}
+}
+
+func TestCloudResolveCachesFastFailedGetLinkWithoutRetry(t *testing.T) {
+	var resolves atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
 			return
 		}
-		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"https://cdnfhnfile.115cdn.net/hash/movie.mp4?t=%d&%s"}}`, expiry, url.Values{"k": []string{"secret"}}.Encode())
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		resolves.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"code":500,"message":"failed get link"}`)
 	}))
 	defer upstream.Close()
 
@@ -250,15 +289,162 @@ func TestCloudResolveRetriesFastFailedGetLink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
-	if err != nil {
+	if _, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1"); err == nil {
+		t.Fatal("first resolve unexpectedly succeeded")
+	}
+	if _, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1"); err == nil {
+		t.Fatal("cached failure unexpectedly succeeded")
+	}
+	if resolves.Load() != 1 {
+		t.Fatalf("resolves = %d, want one call without retry", resolves.Load())
+	}
+}
+
+func TestCloudResolveOpensCircuitAfterConsecutiveTransportFailures(t *testing.T) {
+	var resolves atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		resolves.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"code":500,"message":"Post https://proapi.115.com/open/ufile/downurl: net/http: TLS handshake timeout; failed get link"}`)
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
 		t.Fatal(err)
 	}
-	if resolves.Load() != 2 {
-		t.Fatalf("resolves = %d, want retry once", resolves.Load())
+	for _, ref := range []string{"/Movies/f1.mkv", "/Movies/f2.mkv"} {
+		if _, err := storage.CloudResolve(t.Context(), "openlist", ref, "Player/1"); err == nil {
+			t.Fatalf("resolve %s unexpectedly succeeded", ref)
+		}
 	}
-	if link.URL == "" {
-		t.Fatal("empty resolved link")
+	_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f3.mkv", "Player/1")
+	var circuitErr *cloudResolveCircuitOpenError
+	if !errors.As(err, &circuitErr) {
+		t.Fatalf("third resolve error = %v, want open circuit", err)
+	}
+	if resolves.Load() != 2 {
+		t.Fatalf("resolves = %d, want two upstream calls before circuit opened", resolves.Load())
+	}
+}
+
+func TestCloudResolveRateLimitOpensCircuitImmediately(t *testing.T) {
+	var resolves atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		resolves.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"code":500,"message":"40140117: refresh too frequently"}`)
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1"); err == nil || !strings.Contains(err.Error(), "40140117") {
+		t.Fatalf("first resolve error = %v, want provider rate limit", err)
+	}
+	_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f2.mkv", "Player/1")
+	var circuitErr *cloudResolveCircuitOpenError
+	if !errors.As(err, &circuitErr) {
+		t.Fatalf("second resolve error = %v, want open circuit", err)
+	}
+	if resolves.Load() != 1 {
+		t.Fatalf("resolves = %d, want one upstream call before rate-limit cooldown", resolves.Load())
+	}
+}
+
+func TestCloudResolveCircuitAllowsSingleHalfOpenProbe(t *testing.T) {
+	var resolves atomic.Int32
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{}, 1)
+	defer func() {
+		select {
+		case releaseProbe <- struct{}{}:
+		default:
+		}
+	}()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/fs/list" {
+			writeOpenListCacheList(w)
+			return
+		}
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		call := resolves.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call <= 2 {
+			_, _ = fmt.Fprint(w, `{"code":500,"message":"net/http: TLS handshake timeout; failed get link"}`)
+			return
+		}
+		if call == 3 {
+			close(probeStarted)
+			<-releaseProbe
+		}
+		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"/Movies/f1.mkv", "/Movies/f2.mkv"} {
+		if _, err := storage.CloudResolve(t.Context(), "openlist", ref, "Player/1"); err == nil {
+			t.Fatalf("resolve %s unexpectedly succeeded", ref)
+		}
+	}
+	storage.resolveMu.Lock()
+	state := storage.resolveCircuit[cloud.TypeOpenList]
+	state.openUntil = time.Now().Add(-time.Second)
+	storage.resolveCircuit[cloud.TypeOpenList] = state
+	storage.resolveMu.Unlock()
+
+	probeLink := make(chan *cloud.DirectLink, 1)
+	probeErr := make(chan error, 1)
+	go func() {
+		link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f3.mkv", "Player/1")
+		probeLink <- link
+		probeErr <- err
+	}()
+	select {
+	case <-probeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("half-open probe did not start")
+	}
+	_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f4.mkv", "Player/1")
+	var circuitErr *cloudResolveCircuitOpenError
+	if !errors.As(err, &circuitErr) {
+		t.Fatalf("parallel half-open resolve error = %v, want open circuit", err)
+	}
+	if resolves.Load() != 3 {
+		t.Fatalf("resolves = %d, want only one half-open probe", resolves.Load())
+	}
+	releaseProbe <- struct{}{}
+	if err := <-probeErr; err != nil {
+		t.Fatal(err)
+	}
+	if link := <-probeLink; link == nil || link.URL != "http://cdn.local/3.mkv" {
+		t.Fatalf("half-open probe link = %#v", link)
+	}
+	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f5.mkv", "Player/1")
+	if err != nil || link == nil || link.URL != "http://cdn.local/4.mkv" {
+		t.Fatalf("resolve after successful probe link=%#v err=%v", link, err)
 	}
 }
 
