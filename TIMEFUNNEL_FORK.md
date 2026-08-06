@@ -60,6 +60,44 @@ Priority 2 fixes:
 - maintenance branch pending release: Emby media payloads now include image
   owner fields (`PrimaryImageItemId`, `PrimaryImageTag`, and backdrop owner
   ids), removing another subtitle-proxy JSON patch.
+- maintenance branch pending release: OpenList cold playback signing keeps
+  same-file requests serialized across different client User-Agents and allows
+  at most two different files to resolve concurrently. Additional requests wait
+  for a signing slot; CDN video transfer remains client-direct and is not
+  limited by this gate.
+
+## OpenList Cold Signing Controls
+
+The OpenList playback resolver uses the following fixed safety boundaries:
+
+- Existing cache and singleflight behavior remains keyed by provider, file,
+  and client User-Agent because 115 CDN links are User-Agent-bound.
+- Different User-Agents resolving the same file are serialized to one active
+  signing request.
+- Different files may use at most two active OpenList signing requests. Later
+  requests wait for a slot without an artificial delay between requests.
+- Queue wait is included in the existing 8-second cold-resolve deadline. The
+  stream entry point allows 9 seconds in total, so raising only one timeout is
+  not a valid latency fix.
+- A queued request checks the provider circuit after admission. A detected
+  `40140117` rate limit therefore prevents later queued work from continuing to
+  call OpenList during the circuit cooldown.
+- The gate applies only to OpenList direct-link resolution. It does not limit
+  non-OpenList providers or client-to-`115cdn.net` video traffic.
+
+Keep application logging at `info` while validating this behavior. Relevant
+fields and messages are:
+
+- `cloud resolve signing queue wait`, with `queue_ms` for time spent waiting on
+  the file and global signing gates.
+- `cloud playback direct redirect`, with `resolve_ms` and `target_host` for a
+  successful direct redirect.
+- `cloud playback direct resolve failed`, with `resolve_ms` and the surfaced
+  error for failed startup attempts.
+
+Do not increase the global concurrency above two solely to hide queue latency.
+First compare `queue_ms`, `resolve_ms`, and `40140117` frequency under real
+playback traffic.
 
 ## Baseline Validation
 

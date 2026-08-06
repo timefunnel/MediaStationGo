@@ -627,6 +627,225 @@ func TestCloudResolveKeepsDifferentUserAgentsIndependent(t *testing.T) {
 	}
 }
 
+func TestCloudResolveSerializesDifferentUserAgentsForSameFile(t *testing.T) {
+	var resolves atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			call := resolves.Add(1)
+			current := active.Add(1)
+			for {
+				previous := maxActive.Load()
+				if current <= previous || maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			defer active.Add(-1)
+			if call == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		link *cloud.DirectLink
+		err  error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+		firstResult <- result{link: link, err: err}
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first resolve did not start")
+	}
+
+	secondResult := make(chan result, 1)
+	go func() {
+		link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/2")
+		secondResult <- result{link: link, err: err}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if resolves.Load() != 1 || maxActive.Load() != 1 {
+		t.Fatalf("resolves=%d max_active=%d, want one in-flight resolve", resolves.Load(), maxActive.Load())
+	}
+	close(releaseFirst)
+
+	first := <-firstResult
+	second := <-secondResult
+	if first.err != nil || second.err != nil || first.link == nil || second.link == nil {
+		t.Fatalf("first=%#v second=%#v, want two successful links", first, second)
+	}
+	if first.link.URL == second.link.URL || resolves.Load() != 2 || maxActive.Load() != 1 {
+		t.Fatalf("first=%q second=%q resolves=%d max_active=%d, want serialized UA-specific links", first.link.URL, second.link.URL, resolves.Load(), maxActive.Load())
+	}
+	storage.resolveMu.Lock()
+	defer storage.resolveMu.Unlock()
+	if len(storage.resolveFileGate) != 0 {
+		t.Fatalf("resolve file gates leaked: %d", len(storage.resolveFileGate))
+	}
+}
+
+func TestCloudResolveLimitsColdMissesAcrossFilesToTwo(t *testing.T) {
+	var resolves atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	started := make(chan struct{}, 2)
+	releaseFirstTwo := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			call := resolves.Add(1)
+			current := active.Add(1)
+			for {
+				previous := maxActive.Load()
+				if current <= previous || maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			defer active.Add(-1)
+			if call <= 2 {
+				started <- struct{}{}
+				<-releaseFirstTwo
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := storage.repo.DB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	type result struct {
+		link *cloud.DirectLink
+		err  error
+	}
+	results := make(chan result, 3)
+	for i := 1; i <= 3; i++ {
+		i := i
+		go func() {
+			link, err := storage.CloudResolve(t.Context(), "openlist", fmt.Sprintf("/Movies/f%d.mkv", i), fmt.Sprintf("Player/%d", i))
+			results <- result{link: link, err: err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(releaseFirstTwo)
+			t.Fatalf("two concurrent resolves did not start: resolves=%d max_active=%d", resolves.Load(), maxActive.Load())
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if resolves.Load() != 2 || maxActive.Load() != 2 {
+		t.Fatalf("resolves=%d max_active=%d, want two in-flight resolves and one queued", resolves.Load(), maxActive.Load())
+	}
+	close(releaseFirstTwo)
+
+	for i := 0; i < 3; i++ {
+		got := <-results
+		if got.err != nil || got.link == nil {
+			t.Fatalf("result=%#v, want three successful links", got)
+		}
+	}
+	if resolves.Load() != 3 || maxActive.Load() != 2 {
+		t.Fatalf("resolves=%d max_active=%d, want at most two concurrent cold resolves", resolves.Load(), maxActive.Load())
+	}
+}
+
+func TestCloudResolveQueuedUserAgentStopsAfterRateLimit(t *testing.T) {
+	var resolves atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/fs/list":
+			writeOpenListCacheList(w)
+		case "/api/fs/get":
+			call := resolves.Add(1)
+			if call == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"code":500,"message":"40140117: refresh too frequently"}`)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	_, storage := newStorageUploadTestService(t)
+	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		err error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+		firstResult <- result{err: err}
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first resolve did not start")
+	}
+	secondResult := make(chan result, 1)
+	go func() {
+		_, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/2")
+		secondResult <- result{err: err}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if resolves.Load() != 1 {
+		t.Fatalf("resolves=%d before first completes, want one queued request", resolves.Load())
+	}
+	close(releaseFirst)
+
+	first := <-firstResult
+	second := <-secondResult
+	if first.err == nil || !strings.Contains(first.err.Error(), "40140117") {
+		t.Fatalf("first error=%v, want provider rate limit", first.err)
+	}
+	var circuitErr *cloudResolveCircuitOpenError
+	if !errors.As(second.err, &circuitErr) {
+		t.Fatalf("second error=%v, want local circuit-open error", second.err)
+	}
+	if resolves.Load() != 1 {
+		t.Fatalf("resolves=%d, want no upstream retry after rate limit", resolves.Load())
+	}
+}
+
 func TestCloudResolveConfigChangePreventsOldFlightCacheWrite(t *testing.T) {
 	var resolves atomic.Int32
 	firstStarted := make(chan struct{})

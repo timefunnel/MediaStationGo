@@ -31,6 +31,15 @@ type cloudResolveCall struct {
 	err          error
 }
 
+type cloudResolveFileGate struct {
+	semaphore chan struct{}
+	users     int
+}
+
+type cloudResolveSigningGate struct {
+	semaphore chan struct{}
+}
+
 type cloudResolveFailureEntry struct {
 	err       error
 	expiresAt time.Time
@@ -63,6 +72,7 @@ const (
 	cloudResolveCircuitFailureWindow = 30 * time.Second
 	cloudResolveCircuitCooldown      = 60 * time.Second
 	cloudResolveCircuitThreshold     = 2
+	cloudResolveSigningConcurrency   = 2
 )
 
 // CloudResolve resolves a cloud file reference to a direct link.
@@ -87,11 +97,7 @@ func (s *StorageConfigService) CloudResolve(ctx context.Context, typ, fileRef, c
 	}
 	call, owner := s.beginResolve(cacheKey, typ)
 	if owner {
-		if err := s.prepareResolveCircuit(typ, call); err != nil {
-			s.completeResolve(cacheKey, typ, call, nil, err)
-		} else {
-			s.runResolve(cacheKey, typ, fileRef, clientUA, call, cloudResolveColdMaxDuration)
-		}
+		s.runResolve(cacheKey, typ, fileRef, clientUA, call, cloudResolveColdMaxDuration)
 	}
 	select {
 	case <-call.done:
@@ -184,6 +190,29 @@ func (s *StorageConfigService) runResolve(key, typ, fileRef, clientUA string, ca
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), maxDuration)
 		defer cancel()
+		waitStarted := time.Now()
+		release, err := s.acquireResolveFileGate(ctx, typ, fileRef)
+		if err != nil {
+			s.completeResolve(key, typ, call, nil, err)
+			return
+		}
+		releaseSigning, err := s.acquireResolveSigningGate(ctx, typ)
+		if err != nil {
+			release()
+			s.completeResolve(key, typ, call, nil, err)
+			return
+		}
+		defer releaseSigning()
+		defer release()
+		if waited := time.Since(waitStarted); waited >= time.Millisecond && s.log != nil {
+			s.log.Info("cloud resolve signing queue wait",
+				zap.String("provider", strings.TrimSpace(typ)),
+				zap.Int64("queue_ms", waited.Milliseconds()))
+		}
+		if err := s.prepareResolveCircuit(typ, call); err != nil {
+			s.completeResolve(key, typ, call, nil, err)
+			return
+		}
 		p, err := s.cloudProviderWithUA(ctx, typ, clientUA)
 		if err != nil {
 			s.completeResolve(key, typ, call, nil, err)
@@ -192,6 +221,68 @@ func (s *StorageConfigService) runResolve(key, typ, fileRef, clientUA string, ca
 		link, err := p.Resolve(ctx, fileRef)
 		s.completeResolve(key, typ, call, link, err)
 	}()
+}
+
+func (s *StorageConfigService) acquireResolveFileGate(ctx context.Context, typ, fileRef string) (func(), error) {
+	if strings.TrimSpace(typ) != cloud.TypeOpenList {
+		return func() {}, nil
+	}
+	gateKey := strings.TrimSpace(typ) + "\x00" + strings.TrimSpace(fileRef)
+	s.resolveMu.Lock()
+	if s.resolveFileGate == nil {
+		s.resolveFileGate = make(map[string]*cloudResolveFileGate)
+	}
+	gate := s.resolveFileGate[gateKey]
+	if gate == nil {
+		gate = &cloudResolveFileGate{semaphore: make(chan struct{}, 1)}
+		s.resolveFileGate[gateKey] = gate
+	}
+	gate.users++
+	s.resolveMu.Unlock()
+
+	select {
+	case gate.semaphore <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-gate.semaphore
+			s.releaseResolveFileGateUser(gateKey, gate)
+			return nil, err
+		}
+		return func() {
+			<-gate.semaphore
+			s.releaseResolveFileGateUser(gateKey, gate)
+		}, nil
+	case <-ctx.Done():
+		s.releaseResolveFileGateUser(gateKey, gate)
+		return nil, ctx.Err()
+	}
+}
+
+func (s *StorageConfigService) releaseResolveFileGateUser(key string, gate *cloudResolveFileGate) {
+	s.resolveMu.Lock()
+	defer s.resolveMu.Unlock()
+	gate.users--
+	if gate.users == 0 && s.resolveFileGate[key] == gate {
+		delete(s.resolveFileGate, key)
+	}
+}
+
+func (s *StorageConfigService) acquireResolveSigningGate(ctx context.Context, typ string) (func(), error) {
+	if strings.TrimSpace(typ) != cloud.TypeOpenList {
+		return func() {}, nil
+	}
+	s.resolveMu.Lock()
+	if s.resolveSigningGate == nil {
+		s.resolveSigningGate = &cloudResolveSigningGate{semaphore: make(chan struct{}, cloudResolveSigningConcurrency)}
+	}
+	gate := s.resolveSigningGate
+	s.resolveMu.Unlock()
+
+	select {
+	case gate.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return func() { <-gate.semaphore }, nil
 }
 
 func (s *StorageConfigService) completeResolve(key, typ string, call *cloudResolveCall, link *cloud.DirectLink, resolveErr error) {
@@ -413,10 +504,6 @@ func (s *StorageConfigService) refreshResolveInBackground(key, typ, fileRef, cli
 	}
 	call, owner := s.beginResolve(key, typ)
 	if !owner {
-		return
-	}
-	if err := s.prepareResolveCircuit(typ, call); err != nil {
-		s.completeResolve(key, typ, call, nil, err)
 		return
 	}
 	s.runResolve(key, typ, fileRef, clientUA, call, cloudResolveBackgroundRefreshMax)

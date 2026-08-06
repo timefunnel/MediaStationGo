@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
@@ -114,15 +116,47 @@ func (s *StreamService) redirectResolvedCloudPlayback(
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 9*time.Second)
 	defer cancel()
+	resolveStart := time.Now()
 	link, err := s.storage.CloudResolve(ctx, typ, ref, r.UserAgent())
+	resolveDur := time.Since(resolveStart)
 	if err != nil {
+		if s.log != nil {
+			s.log.Warn("cloud playback direct resolve failed",
+				zap.String("provider", strings.TrimSpace(typ)),
+				zap.String("media_id", strings.TrimSpace(mediaID)),
+				zap.Int64("resolve_ms", resolveDur.Milliseconds()),
+				zap.Error(err),
+			)
+		}
 		return false, fmt.Errorf("%w: %v", ErrCloudPlaybackResolveFailed, err)
 	}
 	if link == nil || strings.TrimSpace(link.URL) == "" {
+		if s.log != nil {
+			s.log.Warn("cloud playback direct resolve returned empty link",
+				zap.String("provider", strings.TrimSpace(typ)),
+				zap.String("media_id", strings.TrimSpace(mediaID)),
+				zap.Int64("resolve_ms", resolveDur.Milliseconds()),
+			)
+		}
 		return false, fmt.Errorf("%w: empty direct link", ErrCloudPlaybackResolveFailed)
 	}
 	if link.Proxy {
+		if s.log != nil {
+			s.log.Info("cloud playback direct resolve selected proxy",
+				zap.String("provider", strings.TrimSpace(typ)),
+				zap.String("media_id", strings.TrimSpace(mediaID)),
+				zap.Int64("resolve_ms", resolveDur.Milliseconds()),
+			)
+		}
 		return false, nil
+	}
+	if s.log != nil {
+		s.log.Info("cloud playback direct redirect",
+			zap.String("provider", strings.TrimSpace(typ)),
+			zap.String("media_id", strings.TrimSpace(mediaID)),
+			zap.Int64("resolve_ms", resolveDur.Milliseconds()),
+			zap.String("target_host", cloudPlaybackTargetHost(link.URL)),
+		)
 	}
 	if s.playback != nil {
 		s.playback.AuthorizeResolvedCloudPlayback(userID, mediaID)
@@ -130,6 +164,14 @@ func (s *StreamService) redirectResolvedCloudPlayback(
 	setCloudRedirectNoStore(w)
 	http.Redirect(w, r, link.URL, http.StatusFound)
 	return true, nil
+}
+
+func cloudPlaybackTargetHost(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Host
 }
 
 func setCloudRedirectNoStore(w http.ResponseWriter) {
