@@ -233,6 +233,9 @@ func (e *EmbyService) ResumeItems(ctx context.Context, userID string) (map[strin
 		h := histByID[id]
 		items = append(items, e.itemPayload(ctx, byID[id], false, h.PositionMs, h.WatchedAt))
 	}
+	if err := e.attachResumeSeriesArtwork(ctx, userID, items); err != nil {
+		return nil, err
+	}
 	return map[string]any{"Items": items, "TotalRecordCount": len(items), "StartIndex": 0}, nil
 }
 
