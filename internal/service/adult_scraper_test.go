@@ -198,6 +198,48 @@ func TestAdultProviderFallsBackToFlareSolverrForCloudflare403(t *testing.T) {
 	}
 }
 
+func TestAdultProviderRefreshesJavDBClearanceAfterEmptyRanking(t *testing.T) {
+	var directCalls atomic.Int32
+	var flareCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		directCalls.Add(1)
+		_, _ = w.Write([]byte(`<html><title>JavDB</title><p>empty ranking response</p></html>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flareCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status":    200,
+				"userAgent": "fresh-browser",
+				"response":  `<a href="/v/ssis001" title="SSIS-001 refreshed"><strong>SSIS-001</strong></a>`,
+				"cookies":   []map[string]string{{"name": "cf_clearance", "value": "fresh"}},
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	items, err := provider.DiscoverJavDBPopular(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].OriginalName != "SSIS-001" {
+		t.Fatalf("items = %#v", items)
+	}
+	if got := directCalls.Load(); got != 1 {
+		t.Fatalf("direct calls = %d, want 1", got)
+	}
+	if got := flareCalls.Load(); got != 1 {
+		t.Fatalf("FlareSolverr calls = %d, want 1", got)
+	}
+}
+
 func TestAdultProviderReusesJavDBClearanceIdentity(t *testing.T) {
 	var directCalls atomic.Int32
 	var flareCalls atomic.Int32

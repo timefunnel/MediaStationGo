@@ -78,13 +78,13 @@ type adultJavDBBrowserFlight struct {
 
 func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvider {
 	return &AdultProvider{
-		log:              log,
-		apiConfig:        apiConfig,
-		client:           NewExternalHTTPClient(12 * time.Second),
-		fd2ppv:           newFD2PPVClient(),
+		log:                    log,
+		apiConfig:              apiConfig,
+		client:                 NewExternalHTTPClient(12 * time.Second),
+		fd2ppv:                 newFD2PPVClient(),
 		javDBBrowserIdentities: make(map[string]adultJavDBBrowserIdentity),
 		javDBBrowserFlights:    make(map[string]*adultJavDBBrowserFlight),
-		flareSolverrGate: make(chan struct{}, adultFlareSolverrConcurrency),
+		flareSolverrGate:       make(chan struct{}, adultFlareSolverrConcurrency),
 	}
 }
 
@@ -111,7 +111,10 @@ func (p *AdultProvider) CheckJavDBSession(ctx context.Context) error {
 	if p == nil || strings.TrimSpace(p.flareSolverrURL) == "" {
 		return nil
 	}
-	_, err := p.DiscoverJavDBPopular(ctx)
+	items, err := p.DiscoverJavDBPopular(ctx)
+	if err == nil && p.log != nil {
+		p.log.Info("javdb session check succeeded", zap.Int("items", len(items)))
+	}
 	return err
 }
 
@@ -377,12 +380,25 @@ func (p *AdultProvider) fetchText(ctx context.Context, targetURL, referer string
 	}
 	if p.shouldRetryAdultFetchWithFlareSolverr(status, body) {
 		if isJavDB {
-			return p.fetchJavDBTextWithFlareSolverr(ctx, targetURL, referer, host)
+			if p.log != nil {
+				p.log.Warn("javdb response requires Cloudflare refresh",
+					zap.String("host", host),
+					zap.Int("status", status),
+					zap.Bool("challenge", helper.IsCloudflareChallenge(body)))
+			}
+			return p.refreshJavDBTextWithFlareSolverr(ctx, targetURL, referer, host)
 		}
 		return p.fetchTextWithFlareSolverr(ctx, targetURL)
 	}
 	if status >= 400 {
 		return "", fmt.Errorf("adult source %s returned %d", targetURL, status)
+	}
+	if isJavDB && isJavDBPopularRankingURL(targetURL) && !strings.Contains(body, "/v/") {
+		if p.log != nil {
+			p.log.Warn("javdb ranking response has no discovery links; refreshing Cloudflare clearance",
+				zap.String("host", host), zap.Int("status", status))
+		}
+		return p.refreshJavDBTextWithFlareSolverr(ctx, targetURL, referer, host)
 	}
 	return body, nil
 }
@@ -436,7 +452,17 @@ func (p *AdultProvider) fetchTextWithFlareSolverr(ctx context.Context, targetURL
 	return solution.Response, nil
 }
 
-func (p *AdultProvider) fetchJavDBTextWithFlareSolverr(ctx context.Context, targetURL, referer, host string) (string, error) {
+func (p *AdultProvider) refreshJavDBTextWithFlareSolverr(ctx context.Context, targetURL, referer, host string) (string, error) {
+	p.clearJavDBBrowserIdentity(host)
+	return p.fetchJavDBTextWithFlareSolverr(ctx, targetURL, referer, host)
+}
+
+func (p *AdultProvider) fetchJavDBTextWithFlareSolverr(
+	ctx context.Context,
+	targetURL string,
+	referer string,
+	host string,
+) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		flight, leader := p.beginJavDBBrowserFlight(host)
 		if !leader {
@@ -456,13 +482,15 @@ func (p *AdultProvider) fetchJavDBTextWithFlareSolverr(ctx context.Context, targ
 				return "", nil
 			}
 			if status < 400 && !p.shouldRetryAdultFetchWithFlareSolverr(status, body) {
+				if isJavDBPopularRankingURL(targetURL) && !strings.Contains(body, "/v/") {
+					continue
+				}
 				return body, nil
 			}
 			continue
 		}
 
-		identity := p.javDBBrowserIdentity(host)
-		solution, err := p.fetchWithFlareSolverrResultContext(ctx, targetURL, identity.cookies)
+		solution, err := p.fetchWithFlareSolverrResultContext(ctx, targetURL, nil)
 		if err == nil && solution == nil {
 			err = errors.New("FlareSolverr returned no solution")
 		}
@@ -492,6 +520,17 @@ func (p *AdultProvider) javDBBrowserIdentity(host string) adultJavDBBrowserIdent
 	identity := p.javDBBrowserIdentities[host]
 	identity.cookies = cloneFD2PPVCookies(identity.cookies)
 	return identity
+}
+
+func (p *AdultProvider) clearJavDBBrowserIdentity(host string) {
+	p.javDBBrowserMu.Lock()
+	defer p.javDBBrowserMu.Unlock()
+	delete(p.javDBBrowserIdentities, host)
+}
+
+func isJavDBPopularRankingURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && strings.Contains(strings.ToLower(u.Path), "/rankings/movies")
 }
 
 func (p *AdultProvider) rememberJavDBBrowserIdentity(host string, solution *helper.FlareSolverrSolution) {
