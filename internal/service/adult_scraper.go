@@ -9,9 +9,12 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/ShukeBta/MediaStationGo/internal/helper"
 )
 
 var (
@@ -36,6 +39,8 @@ var adultExcludedPrefixes = map[string]struct{}{
 	"WEB": {}, "X264": {}, "X265": {},
 }
 
+const adultFlareSolverrConcurrency = 2
+
 var defaultAdultBases = []string{
 	"https://javdb.com",
 	"https://onejav.com",
@@ -52,16 +57,34 @@ type AdultProvider struct {
 	apiConfig              *APIConfigService
 	flareSolverrURL        string
 	flareSolverrTimeout    int
+	flareSolverrGateMu     sync.Mutex
+	flareSolverrGate       chan struct{}
 	javDBPerformerSections adultJavDBPerformerSectionCache
+	javDBBrowserMu         sync.Mutex
+	javDBBrowserIdentities map[string]adultJavDBBrowserIdentity
+	javDBBrowserFlights    map[string]*adultJavDBBrowserFlight
 	fd2ppv                 *fd2PPVClient
+}
+
+type adultJavDBBrowserIdentity struct {
+	userAgent string
+	cookies   []helper.FlareSolverrCookie
+}
+
+type adultJavDBBrowserFlight struct {
+	done chan struct{}
+	err  error
 }
 
 func NewAdultProvider(log *zap.Logger, apiConfig *APIConfigService) *AdultProvider {
 	return &AdultProvider{
-		log:       log,
-		apiConfig: apiConfig,
-		client:    NewExternalHTTPClient(12 * time.Second),
-		fd2ppv:    newFD2PPVClient(),
+		log:              log,
+		apiConfig:        apiConfig,
+		client:           NewExternalHTTPClient(12 * time.Second),
+		fd2ppv:           newFD2PPVClient(),
+		javDBBrowserIdentities: make(map[string]adultJavDBBrowserIdentity),
+		javDBBrowserFlights:    make(map[string]*adultJavDBBrowserFlight),
+		flareSolverrGate: make(chan struct{}, adultFlareSolverrConcurrency),
 	}
 }
 
@@ -71,10 +94,25 @@ func (p *AdultProvider) SetFlareSolverr(rawURL string, timeout int) {
 	}
 	p.flareSolverrURL = strings.TrimSpace(rawURL)
 	p.flareSolverrTimeout = timeout
+	p.flareSolverrGateMu.Lock()
+	if p.flareSolverrGate == nil {
+		p.flareSolverrGate = make(chan struct{}, adultFlareSolverrConcurrency)
+	}
+	p.flareSolverrGateMu.Unlock()
 }
 
 func (p *AdultProvider) Enabled() bool {
 	return p != nil
+}
+
+// CheckJavDBSession keeps the shared Cloudflare browser identity warm without
+// forcing a new solve while the current cookie and user agent still work.
+func (p *AdultProvider) CheckJavDBSession(ctx context.Context) error {
+	if p == nil || strings.TrimSpace(p.flareSolverrURL) == "" {
+		return nil
+	}
+	_, err := p.DiscoverJavDBPopular(ctx)
+	return err
 }
 
 func (p *AdultProvider) Search(ctx context.Context, code string) (*Match, error) {
@@ -325,27 +363,203 @@ func (p *AdultProvider) scrapeOneJav(ctx context.Context, base, code string) (*M
 }
 
 func (p *AdultProvider) fetchText(ctx context.Context, targetURL, referer string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	host, isJavDB := adultJavDBRequestHost(targetURL)
+	var identity adultJavDBBrowserIdentity
+	if isJavDB {
+		identity = p.javDBBrowserIdentity(host)
+	}
+	body, status, err := p.fetchTextDirect(ctx, targetURL, referer, identity)
 	if err != nil {
 		return "", err
 	}
-	applyAdultHeaders(req, referer)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return "", nil
 	}
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("adult source %s returned %d", targetURL, resp.StatusCode)
+	if p.shouldRetryAdultFetchWithFlareSolverr(status, body) {
+		if isJavDB {
+			return p.fetchJavDBTextWithFlareSolverr(ctx, targetURL, referer, host)
+		}
+		return p.fetchTextWithFlareSolverr(ctx, targetURL)
 	}
+	if status >= 400 {
+		return "", fmt.Errorf("adult source %s returned %d", targetURL, status)
+	}
+	return body, nil
+}
+
+func (p *AdultProvider) fetchTextDirect(
+	ctx context.Context,
+	targetURL string,
+	referer string,
+	identity adultJavDBBrowserIdentity,
+) (string, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	applyAdultHeaders(req, referer)
+	applyAdultBrowserIdentity(req, identity)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return "", resp.StatusCode, err
+	}
+	return string(body), resp.StatusCode, nil
+}
+
+func (p *AdultProvider) shouldRetryAdultFetchWithFlareSolverr(status int, body string) bool {
+	if p == nil || strings.TrimSpace(p.flareSolverrURL) == "" {
+		return false
+	}
+	return status == http.StatusForbidden || helper.IsCloudflareChallenge(body)
+}
+
+func (p *AdultProvider) fetchTextWithFlareSolverr(ctx context.Context, targetURL string) (string, error) {
+	solution, err := p.fetchWithFlareSolverrResultContext(
+		ctx,
+		targetURL,
+		nil,
+	)
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+	if solution == nil {
+		return "", errors.New("FlareSolverr returned no solution")
+	}
+	if helper.IsCloudflareChallenge(solution.Response) {
+		return "", errors.New("adult source returned Cloudflare challenge")
+	}
+	return solution.Response, nil
+}
+
+func (p *AdultProvider) fetchJavDBTextWithFlareSolverr(ctx context.Context, targetURL, referer, host string) (string, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		flight, leader := p.beginJavDBBrowserFlight(host)
+		if !leader {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-flight.done:
+			}
+			if flight.err != nil {
+				return "", flight.err
+			}
+			body, status, err := p.fetchTextDirect(ctx, targetURL, referer, p.javDBBrowserIdentity(host))
+			if err != nil {
+				return "", err
+			}
+			if status == http.StatusNotFound {
+				return "", nil
+			}
+			if status < 400 && !p.shouldRetryAdultFetchWithFlareSolverr(status, body) {
+				return body, nil
+			}
+			continue
+		}
+
+		identity := p.javDBBrowserIdentity(host)
+		solution, err := p.fetchWithFlareSolverrResultContext(ctx, targetURL, identity.cookies)
+		if err == nil && solution == nil {
+			err = errors.New("FlareSolverr returned no solution")
+		}
+		if err == nil && helper.IsCloudflareChallenge(solution.Response) {
+			err = errors.New("adult source returned Cloudflare challenge")
+		}
+		if err == nil {
+			p.rememberJavDBBrowserIdentity(host, solution)
+		}
+		p.finishJavDBBrowserFlight(host, flight, err)
+		if err != nil {
+			return "", err
+		}
+		return solution.Response, nil
+	}
+	return "", errors.New("JavDB Cloudflare identity was not reusable")
+}
+
+func adultJavDBRequestHost(targetURL string) (string, bool) {
+	host := adultSourceHost(targetURL)
+	return host, host != "" && adultSourceKind(targetURL) == "javdb"
+}
+
+func (p *AdultProvider) javDBBrowserIdentity(host string) adultJavDBBrowserIdentity {
+	p.javDBBrowserMu.Lock()
+	defer p.javDBBrowserMu.Unlock()
+	identity := p.javDBBrowserIdentities[host]
+	identity.cookies = cloneFD2PPVCookies(identity.cookies)
+	return identity
+}
+
+func (p *AdultProvider) rememberJavDBBrowserIdentity(host string, solution *helper.FlareSolverrSolution) {
+	if solution == nil {
+		return
+	}
+	p.javDBBrowserMu.Lock()
+	defer p.javDBBrowserMu.Unlock()
+	if p.javDBBrowserIdentities == nil {
+		p.javDBBrowserIdentities = make(map[string]adultJavDBBrowserIdentity)
+	}
+	current := p.javDBBrowserIdentities[host]
+	current.cookies = mergeFD2PPVCookies(current.cookies, solution.Cookies)
+	if strings.TrimSpace(solution.UserAgent) != "" {
+		current.userAgent = strings.TrimSpace(solution.UserAgent)
+	}
+	p.javDBBrowserIdentities[host] = current
+}
+
+func (p *AdultProvider) beginJavDBBrowserFlight(host string) (*adultJavDBBrowserFlight, bool) {
+	p.javDBBrowserMu.Lock()
+	defer p.javDBBrowserMu.Unlock()
+	if p.javDBBrowserFlights == nil {
+		p.javDBBrowserFlights = make(map[string]*adultJavDBBrowserFlight)
+	}
+	if flight := p.javDBBrowserFlights[host]; flight != nil {
+		return flight, false
+	}
+	flight := &adultJavDBBrowserFlight{done: make(chan struct{})}
+	p.javDBBrowserFlights[host] = flight
+	return flight, true
+}
+
+func (p *AdultProvider) finishJavDBBrowserFlight(host string, flight *adultJavDBBrowserFlight, err error) {
+	p.javDBBrowserMu.Lock()
+	defer p.javDBBrowserMu.Unlock()
+	flight.err = err
+	if p.javDBBrowserFlights[host] == flight {
+		delete(p.javDBBrowserFlights, host)
+	}
+	close(flight.done)
+}
+
+func (p *AdultProvider) fetchWithFlareSolverrResultContext(
+	ctx context.Context,
+	targetURL string,
+	cookies []helper.FlareSolverrCookie,
+) (*helper.FlareSolverrSolution, error) {
+	if p == nil {
+		return nil, errors.New("adult provider is unavailable")
+	}
+	if p.flareSolverrGate != nil {
+		select {
+		case p.flareSolverrGate <- struct{}{}:
+			defer func() { <-p.flareSolverrGate }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return helper.FetchURLWithFlareSolverrResultContext(
+		ctx,
+		p.flareSolverrURL,
+		targetURL,
+		cookies,
+		p.flareSolverrTimeout,
+		"",
+		p.log,
+	)
 }
 
 func applyAdultHeaders(req *http.Request, referer string) {
@@ -355,4 +569,23 @@ func applyAdultHeaders(req *http.Request, referer string) {
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}
+}
+
+func applyAdultBrowserIdentity(req *http.Request, identity adultJavDBBrowserIdentity) {
+	if strings.TrimSpace(identity.userAgent) != "" {
+		req.Header.Set("User-Agent", identity.userAgent)
+	}
+	host := strings.ToLower(req.URL.Hostname())
+	for _, cookie := range identity.cookies {
+		if strings.TrimSpace(cookie.Name) == "" || !adultCookieDomainMatchesHost(cookie.Domain, host) {
+			continue
+		}
+		req.AddCookie(&http.Cookie{Name: cookie.Name, Value: cookie.Value})
+	}
+}
+
+func adultCookieDomainMatchesHost(domain, host string) bool {
+	domain = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	host = strings.ToLower(strings.TrimSpace(host))
+	return domain == "" || domain == host || strings.HasSuffix(host, "."+domain)
 }

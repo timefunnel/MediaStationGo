@@ -40,6 +40,7 @@ type SchedulerService struct {
 	organizePipeline *OrganizePipelineService
 	storageCfg       *StorageConfigService
 	adult            *AdultProvider
+	discover         *DiscoverService
 	hub              *Hub
 	tasks            *TaskTrackerService
 	cacheDir         string
@@ -65,6 +66,10 @@ func (s *SchedulerService) SetOrganizePipeline(pipeline *OrganizePipelineService
 
 func (s *SchedulerService) SetAdultProvider(adult *AdultProvider) {
 	s.adult = adult
+}
+
+func (s *SchedulerService) SetDiscover(discover *DiscoverService) {
+	s.discover = discover
 }
 
 // scheduledJob is one recurring task.
@@ -148,6 +153,16 @@ func (s *SchedulerService) Start(ctx context.Context) {
 			interval: fd2PPVSessionCheckInterval,
 			run:      s.jobCheckFD2PPVSession,
 		},
+		{
+			name:     "javdb_session_check",
+			interval: javDBSessionCheckInterval,
+			run:      s.jobCheckJavDBSession,
+		},
+		{
+			name:     "adult_discover_refresh",
+			interval: 24 * time.Hour,
+			run:      s.jobRefreshAdultDiscover,
+		},
 	}
 	for _, j := range s.jobs {
 		initialDelay := 15 * time.Second
@@ -156,6 +171,8 @@ func (s *SchedulerService) Start(ctx context.Context) {
 			// 15 秒即全量 walk + ffprobe 曾把 CPU/磁盘打满导致无法登录。
 			// 首轮等满一个完整周期再跑，平时节奏不变。
 			initialDelay = j.interval
+		} else if j.name == "adult_discover_refresh" {
+			initialDelay = nextAdultDiscoverRefreshDelay(s.currentTime())
 		}
 		go s.loopWithInitialDelay(ctx, j, initialDelay)
 	}

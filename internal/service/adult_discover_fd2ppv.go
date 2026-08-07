@@ -176,21 +176,18 @@ func (p *AdultProvider) fetchFD2PPVText(ctx context.Context, targetURL string) (
 	if p.apiConfig != nil {
 		return p.fetchAuthenticatedFD2PPVText(ctx, targetURL)
 	}
-	body, err := helper.FetchURLWithFlareSolverr(
-		p.flareSolverrURL,
+	solution, err := p.fetchWithFlareSolverrResultContext(
+		ctx,
 		targetURL,
-		"",
-		p.flareSolverrTimeout,
-		"",
-		p.log,
+		nil,
 	)
 	if err != nil {
 		return "", err
 	}
-	if helper.IsCloudflareChallenge(body) {
+	if helper.IsCloudflareChallenge(solution.Response) {
 		return "", errors.New("fd2ppv Cloudflare challenge was not solved")
 	}
-	return body, nil
+	return solution.Response, nil
 }
 
 func parseFD2PPVMovieList(body, base string) []ExternalMediaResult {

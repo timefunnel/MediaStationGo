@@ -44,6 +44,16 @@ func (d *DiscoverService) CachedSection(key string, page int) ([]ExternalMediaRe
 	return d.sectionCache.Get(key, page)
 }
 
+// CachedSectionLastGood returns the last successful section result even when
+// its normal freshness TTL has elapsed. Background-refresh-only sections use
+// this to keep serving the previous result while an upstream is unavailable.
+func (d *DiscoverService) CachedSectionLastGood(key string, page int) ([]ExternalMediaResult, bool) {
+	if d == nil || d.sectionCache == nil {
+		return nil, false
+	}
+	return d.sectionCache.GetLastGood(key, page)
+}
+
 func (d *DiscoverService) ForgetSection(key string) {
 	if d == nil || d.sectionCache == nil {
 		return
@@ -64,13 +74,21 @@ func (c *DiscoverSectionCache) Set(key string, page int, items []ExternalMediaRe
 }
 
 func (c *DiscoverSectionCache) Get(key string, page int) ([]ExternalMediaResult, bool) {
+	return c.get(key, page, false)
+}
+
+func (c *DiscoverSectionCache) GetLastGood(key string, page int) ([]ExternalMediaResult, bool) {
+	return c.get(key, page, true)
+}
+
+func (c *DiscoverSectionCache) get(key string, page int, allowExpired bool) ([]ExternalMediaResult, bool) {
 	if c == nil || key == "" || page < 1 {
 		return nil, false
 	}
 	c.mu.RLock()
 	entry, ok := c.entries[discoverSectionCacheKey(key, page)]
 	c.mu.RUnlock()
-	if !ok || time.Since(entry.storedAt) > c.ttl || len(entry.items) == 0 {
+	if !ok || (!allowExpired && time.Since(entry.storedAt) > c.ttl) || len(entry.items) == 0 {
 		return nil, false
 	}
 	return cloneExternalMediaResults(entry.items), true

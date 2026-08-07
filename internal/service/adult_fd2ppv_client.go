@@ -181,14 +181,10 @@ func (c *fd2PPVClient) fetchFresh(ctx context.Context, provider *AdultProvider, 
 			return "", fmt.Errorf("fd2ppv direct request returned HTTP %d", direct.statusCode)
 		}
 
-		solution, fetchErr := helper.FetchURLWithFlareSolverrResultContext(
+		solution, fetchErr := provider.fetchWithFlareSolverrResultContext(
 			ctx,
-			provider.flareSolverrURL,
 			targetURL,
 			cloneFD2PPVCookies(c.cookies),
-			provider.flareSolverrTimeout,
-			"",
-			provider.log,
 		)
 		if fetchErr != nil {
 			lastErr = fetchErr
@@ -452,14 +448,10 @@ func (c *fd2PPVClient) resolveLoginPage(
 	}
 
 	for attempt := 0; attempt < fd2PPVLoginPageAttempts; attempt++ {
-		solution, err := helper.FetchURLWithFlareSolverrResultContext(
+		solution, err := provider.fetchWithFlareSolverrResultContext(
 			ctx,
-			provider.flareSolverrURL,
 			targetURL,
 			nil,
-			provider.flareSolverrTimeout,
-			"",
-			provider.log,
 		)
 		if err != nil {
 			return fd2PPVLoginPage{}, fmt.Errorf("fd2ppv login page direct request failed (%v); FlareSolverr request: %w", directErr, err)

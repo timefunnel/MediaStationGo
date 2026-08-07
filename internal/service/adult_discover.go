@@ -473,13 +473,23 @@ func externalAdultMovieResult(source, providerID, detailURL string, match *Match
 }
 
 func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, follows []model.AdultPerformerFollow, page int) ([]ExternalMediaResult, error) {
+	items, _, err := p.discoverFollowedPerformerWorksPage(ctx, follows, page)
+	return items, err
+}
+
+func (p *AdultProvider) discoverFollowedPerformerWorksPage(
+	ctx context.Context,
+	follows []model.AdultPerformerFollow,
+	page int,
+) ([]ExternalMediaResult, bool, error) {
 	if len(follows) == 0 {
-		return []ExternalMediaResult{}, nil
+		return []ExternalMediaResult{}, false, nil
 	}
 	type result struct {
-		follow model.AdultPerformerFollow
-		items  []ExternalMediaResult
-		err    error
+		follow  model.AdultPerformerFollow
+		items   []ExternalMediaResult
+		hasNext bool
+		err     error
 	}
 	results := make(chan result, len(follows))
 	semaphore := make(chan struct{}, 3)
@@ -496,8 +506,8 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 				results <- result{follow: follow, err: ctx.Err()}
 				return
 			}
-			items, err := p.DiscoverPerformerWorks(ctx, follow.Source, follow.SourceID, page)
-			results <- result{follow: follow, items: items, err: err}
+			items, hasNext, err := p.DiscoverPerformerWorksPage(ctx, follow.Source, follow.SourceID, page)
+			results <- result{follow: follow, items: items, hasNext: hasNext, err: err}
 		}()
 	}
 	go func() {
@@ -508,6 +518,7 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 	out := make([]ExternalMediaResult, 0, len(follows)*8)
 	seen := map[string]struct{}{}
 	errs := make([]error, 0)
+	hasNext := false
 	for fetched := range results {
 		if fetched.err != nil {
 			if errors.Is(fetched.err, errAdultPerformerPageEmpty) {
@@ -516,6 +527,7 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 			errs = append(errs, fmt.Errorf("%s: %w", fetched.follow.Name, fetched.err))
 			continue
 		}
+		hasNext = hasNext || fetched.hasNext
 		person := PersonMetadata{
 			Name:       fetched.follow.Name,
 			ImageURL:   fetched.follow.ImageURL,
@@ -542,11 +554,12 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorks(ctx context.Context, foll
 	})
 	if len(out) > 40 {
 		out = out[:40]
+		hasNext = true
 	}
 	if len(out) == 0 && len(errs) > 0 {
-		return nil, errors.Join(errs...)
+		return nil, false, errors.Join(errs...)
 	}
-	return out, nil
+	return out, hasNext, nil
 }
 
 // DiscoverFollowedPerformerWorksWindow maps the 40-item aggregate pages used
@@ -566,7 +579,7 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorksWindow(
 	targetSize := pageSize + 1
 	out := make([]ExternalMediaResult, 0, targetSize)
 	for len(out) < targetSize {
-		chunk, err := p.DiscoverFollowedPerformerWorks(ctx, follows, sourcePage)
+		chunk, chunkHasNext, err := p.discoverFollowedPerformerWorksPage(ctx, follows, sourcePage)
 		if err != nil {
 			return nil, err
 		}
@@ -578,7 +591,7 @@ func (p *AdultProvider) DiscoverFollowedPerformerWorksWindow(
 			}
 			out = append(out, available...)
 		}
-		if len(chunk) < sourcePageSize {
+		if !chunkHasNext && len(chunk) < sourcePageSize {
 			break
 		}
 		sourcePage++
@@ -696,11 +709,11 @@ func parseAdultMovieList(body, base, source, className, hrefNeedle string) []Ext
 		}
 		attrs := adultAttrs(found[1])
 		classes := " " + strings.ToLower(strings.TrimSpace(attrs["class"])) + " "
-		if !strings.Contains(classes, " "+className+" ") {
-			continue
-		}
 		href := strings.TrimSpace(attrs["href"])
 		if href == "" || (hrefNeedle != "" && !strings.Contains(href, hrefNeedle)) {
+			continue
+		}
+		if !strings.Contains(classes, " "+className+" ") && !(source == "javdb" && strings.Contains(href, "/v/")) {
 			continue
 		}
 		inner := found[2]

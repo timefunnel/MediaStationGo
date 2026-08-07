@@ -162,3 +162,40 @@ func TestFollowedAdultWorksWindowContinuesAcrossSourcePages(t *testing.T) {
 		t.Fatalf("window items = %#v", items)
 	}
 }
+
+func TestFollowedAdultWorksWindowHonorsShortPageNextLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := 1
+		if raw := r.URL.Query().Get("page"); raw != "" {
+			page, _ = strconv.Atoi(raw)
+		}
+		count := 39
+		start := 1
+		if page == 2 {
+			count = 20
+			start = 40
+		} else if page > 2 {
+			count = 0
+		}
+		for index := 0; index < count; index++ {
+			number := start + index
+			_, _ = fmt.Fprintf(w, `<a class="box" href="/v/%d"><strong>TEST-%03d</strong></a>`, number, number)
+		}
+		if page == 1 {
+			_, _ = w.Write([]byte(`<a rel="next" href="/actors/Actor1?page=2">next</a>`))
+		}
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	items, err := provider.DiscoverFollowedPerformerWorksWindow(t.Context(), []model.AdultPerformerFollow{{
+		Name: "Actor", Source: "javdb", SourceID: "Actor1",
+	}}, 3, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 19 || items[0].OriginalName != "TEST-037" || items[18].OriginalName != "TEST-055" {
+		t.Fatalf("window items = %#v", items)
+	}
+}

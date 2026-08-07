@@ -218,6 +218,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.Scheduler.SetTaskTracker(b.c.Tasks)
 	b.c.Scheduler.SetOrganizePipeline(b.c.OrganizePipeline)
 	b.c.Scheduler.SetAdultProvider(b.c.Adult)
+	b.c.Scheduler.SetDiscover(b.c.Discover)
 }
 
 func (b *serviceContainerBuilder) initIdentityServices() {

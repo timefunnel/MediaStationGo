@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,50 @@ func TestDiscoverFeedUsesServerCacheUnlessRefreshRequested(t *testing.T) {
 	}
 	if refreshedPayload.Meta["tmdb_latest_movie"].Cached {
 		t.Fatalf("refresh should not report a cache hit: %#v", refreshedPayload.Meta)
+	}
+}
+
+func TestTemporarilyDisabledAdultSections(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/discover/feed", discoverFeedHandler(&service.Container{}))
+
+	const disabledSections = "adult_followed,adult_javdb_performers_new,adult_javdb_performers_monthly,adult_javdb_performers_fanza"
+	request := httptest.NewRequest(http.MethodGet, "/discover/feed?sections="+disabledSections+"&page=2&refresh=true", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("disabled feed status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Meta map[string]struct {
+			Disabled bool `json:"disabled"`
+			HasNext  bool `json:"has_next"`
+		} `json:"_meta"`
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw["_meta"], &payload.Meta); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range strings.Split(disabledSections, ",") {
+		var items []service.ExternalMediaResult
+		if err := json.Unmarshal(raw[key], &items); err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 0 || !payload.Meta[key].Disabled || payload.Meta[key].HasNext {
+			t.Fatalf("disabled payload for %s = %#v meta=%#v", key, items, payload.Meta[key])
+		}
+	}
+}
+
+func TestTemporarilyDisabledAdultSectionsAreHiddenFromCatalog(t *testing.T) {
+	for _, key := range []string{"adult_followed", "adult_javdb_performers_new", "adult_javdb_performers_monthly", "adult_javdb_performers_fanza"} {
+		if !discoverSectionTemporarilyDisabled(key) {
+			t.Fatalf("%s must be hidden while temporarily disabled", key)
+		}
 	}
 }
 

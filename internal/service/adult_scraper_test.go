@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -133,6 +137,242 @@ func TestAdultProviderDiscoverMovieDetailUsesRequestedJavDBItem(t *testing.T) {
 	}
 	if len(item.People) != 1 || item.People[0].Name != "石川澪" || item.People[0].SourceID != "QV0p9" {
 		t.Fatalf("people = %#v", item.People)
+	}
+}
+
+func TestAdultProviderFallsBackToFlareSolverrForCloudflare403(t *testing.T) {
+	directCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directCalls++
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<html><title>Just a moment...</title><div id="cf-challenge-running"></div></html>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	requestedURL := ""
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1" {
+			t.Fatalf("FlareSolverr path = %q", r.URL.Path)
+		}
+		var request struct {
+			Cmd string `json:"cmd"`
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Cmd != "request.get" {
+			t.Fatalf("FlareSolverr cmd = %q", request.Cmd)
+		}
+		requestedURL = request.URL
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status": 200,
+				"response": `<a class="box" title="SSIS-001 FlareSolverr title" href="/v/ssis001">
+					<img src="/covers/ssis001.jpg">
+					<div>2026-08-06</div>
+				</a>`,
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	items, err := provider.DiscoverJavDBPopular(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directCalls != 1 {
+		t.Fatalf("direct calls = %d, want 1", directCalls)
+	}
+	wantURL := server.URL + "/rankings/movies?p=daily&t=censored"
+	if requestedURL != wantURL {
+		t.Fatalf("FlareSolverr URL = %q, want %q", requestedURL, wantURL)
+	}
+	if len(items) != 1 || items[0].OriginalName != "SSIS-001" || items[0].Title != "FlareSolverr title" {
+		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestAdultProviderReusesJavDBClearanceIdentity(t *testing.T) {
+	var directCalls atomic.Int32
+	var flareCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directCalls.Add(1)
+		cookie, err := r.Cookie("cf_clearance")
+		if err != nil || cookie.Value != "fresh" || r.UserAgent() != "test-browser" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`<title>Just a moment...</title><div id="cf-challenge-running"></div>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<a class="box" title="SSIS-001 reused title" href="/v/ssis001"><img src="/covers/ssis001.jpg"><div>2026-08-06</div></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flareCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status":    200,
+				"userAgent": "test-browser",
+				"response":  `<a class="box" title="SSIS-001 reused title" href="/v/ssis001"><img src="/covers/ssis001.jpg"><div>2026-08-06</div></a>`,
+				"cookies":   []map[string]string{{"name": "cf_clearance", "value": "fresh"}},
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	if err := provider.CheckJavDBSession(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items, err := provider.DiscoverJavDBPopular(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "reused title" {
+		t.Fatalf("items = %#v", items)
+	}
+	if got := flareCalls.Load(); got != 1 {
+		t.Fatalf("FlareSolverr calls = %d, want 1", got)
+	}
+	if got := directCalls.Load(); got != 2 {
+		t.Fatalf("direct calls = %d, want 2", got)
+	}
+}
+
+func TestAdultProviderCoalescesConcurrentJavDBClearanceSolves(t *testing.T) {
+	var flareCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("cf_clearance")
+		if err != nil || cookie.Value != "fresh" || r.UserAgent() != "test-browser" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`<title>Just a moment...</title><div id="cf-challenge-running"></div>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<a class="box" title="SSIS-001 coalesced title" href="/v/ssis001"><img src="/covers/ssis001.jpg"><div>2026-08-06</div></a>`))
+	}))
+	defer server.Close()
+	withAdultDefaultBases(t, []string{server.URL})
+
+	flareStarted := make(chan struct{}, 1)
+	releaseFlare := make(chan struct{})
+	flare := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flareCalls.Add(1)
+		select {
+		case flareStarted <- struct{}{}:
+		default:
+		}
+		<-releaseFlare
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"solution": map[string]any{
+				"status":    200,
+				"userAgent": "test-browser",
+				"response":  `<a class="box" title="SSIS-001 coalesced title" href="/v/ssis001"><img src="/covers/ssis001.jpg"><div>2026-08-06</div></a>`,
+				"cookies":   []map[string]string{{"name": "cf_clearance", "value": "fresh"}},
+			},
+		})
+	}))
+	defer flare.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(flare.URL, 5)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			items, err := provider.DiscoverJavDBPopular(context.Background())
+			if err == nil && (len(items) != 1 || items[0].Title != "coalesced title") {
+				err = fmt.Errorf("items = %#v", items)
+			}
+			errs <- err
+		}()
+	}
+	select {
+	case <-flareStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("FlareSolverr solve did not start")
+	}
+	close(releaseFlare)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := flareCalls.Load(); got != 1 {
+		t.Fatalf("FlareSolverr calls = %d, want 1", got)
+	}
+}
+
+func TestAdultProviderLimitsConcurrentFlareSolverrRequests(t *testing.T) {
+	var active int32
+	var maxActive int32
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := atomic.AddInt32(&active, 1)
+		for {
+			previous := atomic.LoadInt32(&maxActive)
+			if current <= previous || atomic.CompareAndSwapInt32(&maxActive, previous, current) {
+				break
+			}
+		}
+		started <- struct{}{}
+		<-release
+		atomic.AddInt32(&active, -1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","solution":{"status":200,"response":"<html>ok</html>"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewAdultProvider(zap.NewNop(), nil)
+	provider.SetFlareSolverr(server.URL, 5)
+	var wg sync.WaitGroup
+	errs := make(chan error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := provider.fetchWithFlareSolverrResultContext(context.Background(), "https://javdb.com/actors", nil)
+			errs <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("FlareSolverr requests did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("FlareSolverr gate allowed more than two concurrent requests")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := atomic.LoadInt32(&maxActive); got != 2 {
+		t.Fatalf("max concurrent FlareSolverr requests = %d, want 2", got)
 	}
 }
 

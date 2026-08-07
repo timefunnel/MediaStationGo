@@ -63,6 +63,9 @@ func discoverSectionsHandler(svc *service.Container) gin.HandlerFunc {
 		sections := make([]gin.H, 0, len(discoverSectionCatalog))
 		adultAllowed := discoverAdultAllowed(c, svc)
 		for _, section := range enabledDiscoverSections(c.Request.Context(), svc) {
+			if discoverSectionTemporarilyDisabled(section.Key) {
+				continue
+			}
 			if section.Group == "adult" && !adultAllowed {
 				continue
 			}
@@ -105,6 +108,11 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			if k == "" {
 				continue
 			}
+			if discoverSectionTemporarilyDisabled(k) {
+				out[k] = []service.ExternalMediaResult{}
+				meta[k] = gin.H{"page": page, "has_next": false, "disabled": true}
+				continue
+			}
 			if discoverSectionProvider(k) == "adult" && !adultAllowed {
 				out[k] = []service.ExternalMediaResult{}
 				meta[k] = gin.H{"page": page, "has_next": false, "disabled": true}
@@ -122,12 +130,25 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 			cacheKey := discoverSectionCacheKeyForUser(sectionCacheKey, userID)
 			metaEntry := gin.H{"page": page, "has_next": false, "duration_ms": int64(0)}
 			items, cacheHit := cachedDiscoverSection(svc, cacheKey, page)
-			if !refresh && cacheHit {
+			lastGoodItems, lastGoodHit := items, cacheHit
+			if !cacheHit && discoverAdultBackgroundSection(k) {
+				lastGoodItems, lastGoodHit = cachedDiscoverSectionLastGood(svc, cacheKey, page)
+			}
+			if refresh && discoverAdultBackgroundSection(k) {
+				if lastGoodHit {
+					items = lastGoodItems
+					metaEntry["cached"] = true
+					if !cacheHit {
+						metaEntry["stale"] = true
+						metaEntry["warning"] = "成人源正在后台刷新，当前显示最近一次成功缓存"
+					}
+				} else {
+					metaEntry["error"] = "成人源后台缓存尚未准备好，请稍后重试"
+					items = nil
+				}
+			} else if !refresh && cacheHit {
 				metaEntry["cached"] = true
 			} else {
-				if refresh && k == "adult_fd2ppv" && svc != nil && svc.Adult != nil {
-					svc.Adult.ForgetFD2PPVCache()
-				}
 				sectionTimeout := discoverSectionTimeout(k)
 				sectionCtx, cancel := context.WithTimeout(c.Request.Context(), sectionTimeout)
 				started := time.Now()
@@ -140,6 +161,10 @@ func discoverFeedHandler(svc *service.Container) gin.HandlerFunc {
 					logDiscoverFetchFailed(svc, k, page, elapsed, sectionTimeout, err)
 					if cacheHit {
 						items, _ = cachedDiscoverSection(svc, cacheKey, page)
+						metaEntry["stale"] = true
+						metaEntry["warning"] = discoverFeedStaleMessage(err)
+					} else if lastGoodHit && discoverAdultBackgroundSection(k) {
+						items = lastGoodItems
 						metaEntry["stale"] = true
 						metaEntry["warning"] = discoverFeedStaleMessage(err)
 					} else if fallbackItems, fallbackKey, ok := fallbackDiscoverSectionItems(c.Request.Context(), svc, k, page, userID); ok {
@@ -222,6 +247,29 @@ func cachedDiscoverSection(svc *service.Container, key string, page int) ([]serv
 		return nil, false
 	}
 	return svc.Discover.CachedSection(key, page)
+}
+
+func cachedDiscoverSectionLastGood(svc *service.Container, key string, page int) ([]service.ExternalMediaResult, bool) {
+	if svc == nil || svc.Discover == nil {
+		return nil, false
+	}
+	return svc.Discover.CachedSectionLastGood(key, page)
+}
+
+func discoverAdultBackgroundSection(key string) bool {
+	return key == "adult_javdb_popular" || key == "adult_fd2ppv"
+}
+
+func discoverSectionTemporarilyDisabled(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "adult_followed",
+		"adult_javdb_performers_new",
+		"adult_javdb_performers_monthly",
+		"adult_javdb_performers_fanza":
+		return true
+	default:
+		return false
+	}
 }
 
 func rememberDiscoverSection(svc *service.Container, key string, page int, items []service.ExternalMediaResult) {

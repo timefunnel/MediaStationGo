@@ -51,6 +51,15 @@ func TestParseJavDBMovieListKeepsOriginalCover(t *testing.T) {
 	}
 }
 
+func TestParseJavDBMovieListAcceptsCurrentLinkMarkup(t *testing.T) {
+	body := `<a href="/v/current" title="Current markup">
+<strong>ABF-123</strong><span class="meta">2026-08-07</span></a>`
+	items := parseJavDBMovieList(body, "https://javdb.com")
+	if len(items) != 1 || items[0].ProviderID != "current" || items[0].OriginalName != "ABF-123" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 func TestParseJavDBMovieListKeepsExtendedDiscoveryCodes(t *testing.T) {
 	body := `<a href="/v/extended" class="box" title="Extended">
 <strong>EXVR-781jo01</strong></a>

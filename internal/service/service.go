@@ -125,6 +125,13 @@ func (c *Container) Boot() {
 
 	// 启动调度器定时任务
 	c.Scheduler.Start(c.stopCtx)
+	if c.Scheduler != nil && c.Discover != nil && c.Adult != nil {
+		go func() {
+			if err := c.Scheduler.RunNow(c.stopCtx, "adult_discover_refresh"); err != nil && c.Log != nil {
+				c.Log.Warn("adult discover startup refresh failed", zap.Error(err))
+			}
+		}()
+	}
 
 	// 云盘存储健康检查
 	c.BootCloudStorageHealthCheck(c.stopCtx)
