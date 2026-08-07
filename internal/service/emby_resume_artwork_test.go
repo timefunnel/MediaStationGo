@@ -99,8 +99,11 @@ func TestEmbyResumeItemsInheritSeriesArtworkPerUniqueSeries(t *testing.T) {
 	if own["PrimaryImageItemId"] != rows[3].ID || own["PrimaryImageTag"] != wantOwnPrimary {
 		t.Fatalf("episode primary owner was overwritten: %#v", own)
 	}
-	if tags := own["BackdropImageTags"].([]string); len(tags) != 1 || tags[0] != wantABackdrop {
-		t.Fatalf("episode should inherit only the missing backdrop: %#v", own)
+	if tags := own["BackdropImageTags"].([]string); len(tags) != 0 {
+		t.Fatalf("episode must not expose inherited artwork as its own backdrop: %#v", own)
+	}
+	if tags := own["ParentBackdropImageTags"].([]string); len(tags) != 1 || tags[0] != wantABackdrop {
+		t.Fatalf("episode should inherit only the missing parent backdrop: %#v", own)
 	}
 	if own["BackdropImageItemId"] != seriesAID || own["ParentBackdropItemId"] != seriesAID {
 		t.Fatalf("episode inherited backdrop owner = %#v, want %q", own, seriesAID)
@@ -161,8 +164,8 @@ func assertResumeArtwork(t *testing.T, item map[string]any, ownerID, primaryTag,
 	if item["PrimaryImageItemId"] != ownerID || item["PrimaryImageTag"] != primaryTag {
 		t.Fatalf("resume primary owner fields = %#v, want owner %q tag %q", item, ownerID, primaryTag)
 	}
-	if tags := item["BackdropImageTags"].([]string); len(tags) != 1 || tags[0] != backdropTag {
-		t.Fatalf("resume backdrop tags = %#v, want %q", tags, backdropTag)
+	if tags := item["BackdropImageTags"].([]string); len(tags) != 0 {
+		t.Fatalf("resume item must not expose parent artwork as its own backdrop: %#v", tags)
 	}
 	if tags := item["ParentBackdropImageTags"].([]string); len(tags) != 1 || tags[0] != backdropTag {
 		t.Fatalf("resume parent backdrop tags = %#v, want %q", tags, backdropTag)
