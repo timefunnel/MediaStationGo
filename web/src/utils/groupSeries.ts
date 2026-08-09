@@ -236,12 +236,10 @@ function seriesDirectoryNameFromPath(path?: string): string {
 }
 
 function seriesPathPartIsEpisodeContainer(part: string): boolean {
-  return (
-    SEASON_FOLDER_RE.test(part) ||
-    seriesPathPartLooksLikeFile(part) ||
-    unsafeEpisodeTitle(part) ||
-    CJK_EPISODE_PATH_PART_RE.test(part)
-  )
+  if (SEASON_FOLDER_RE.test(part) || seriesPathPartLooksLikeFile(part)) return true
+  if (!unsafeEpisodeTitle(part) && !CJK_EPISODE_PATH_PART_RE.test(part)) return false
+  const normalized = normalizeTitle(part)
+  return stripSeriesSpecialSuffix(normalized) === normalized
 }
 
 function seriesPathPartIsGenericContainer(part: string): boolean {

@@ -134,10 +134,12 @@ func seriesTitleFromMediaPath(path string) string {
 	if last := parts[len(parts)-1]; !seriesPathPartLooksLikeFile(last) && !seriesSeasonDirRE.MatchString(filepath.Base(last)) {
 		dirIndex = len(parts) - 1
 	}
-	for dirIndex >= 0 && seriesSeasonDirRE.MatchString(filepath.Base(parts[dirIndex])) {
+	// OpenList 可能把单个视频包装成同名目录，资源发布站也常为每一集建立
+	// 带 S01E03 / 第03集 的发布包目录。这些层级不是稳定的整剧目录。
+	for dirIndex >= 0 && seriesPathPartIsEpisodeContainer(parts[dirIndex]) {
 		dirIndex--
 	}
-	if dirIndex < 0 {
+	if dirIndex < 0 || seriesPathPartIsGenericContainer(parts[dirIndex]) {
 		return ""
 	}
 	title := normalizeSeriesPathTitle(parts[dirIndex])
@@ -145,6 +147,23 @@ func seriesTitleFromMediaPath(path string) string {
 		return ""
 	}
 	return title
+}
+
+func seriesPathPartIsEpisodeContainer(part string) bool {
+	base := filepath.Base(part)
+	if seriesSeasonDirRE.MatchString(base) || seriesPathPartLooksLikeFile(base) {
+		return true
+	}
+	_, episode := ParseEpisode(base)
+	if episode <= 0 {
+		return false
+	}
+	normalized := normalizeSeriesTitle(base)
+	return stripSeriesSpecialSuffix(normalized) == normalized
+}
+
+func seriesPathPartIsGenericContainer(part string) bool {
+	return episodicPathRE.MatchString("/" + filepath.Base(part) + "/")
 }
 
 func singleFileWrapperDirectory(directory, filename string) bool {

@@ -201,6 +201,48 @@ func TestMediaSeriesKeyIgnoresOpenListSingleFileWrapperDirectory(t *testing.T) {
 	}
 }
 
+func TestMediaSeriesKeyIgnoresOpenListPerEpisodeReleaseDirectories(t *testing.T) {
+	flatReleaseFiles := []string{
+		"Alien - Earth (2025) - S01E01 - Neverland [DSNP WEBDL-1080p][EAC3 5.1][h264]-Kitsune.mkv",
+		"Alien - Earth (2025) - S01E02 - Mr. October [DSNP WEBDL-1080p][EAC3 5.1][h264]-FLUX.mkv",
+	}
+	paths := make([]string, 0, 8)
+	for _, file := range flatReleaseFiles {
+		paths = append(paths, "cloud://openlist/115/剧集/"+file+"/"+file)
+	}
+	for index, host := range []string{"TTHDTT", "TTHDTT", "BTHDTV", "BBEGGE", "TTHDTT", "BBHDTV"} {
+		episode := index + 3
+		directory := fmt.Sprintf(
+			"【高清剧集网发布 www.%s.com】异形：地球.第一季[第%02d集][简繁英字幕].Alien.Earth.S01.2025.2160p.DSNP.WEB-DL.DDP5.1.HDR.H.265-ColorTV",
+			host,
+			episode,
+		)
+		file := fmt.Sprintf("Alien.Earth.S01E%02d.2025.2160p.DSNP.WEB-DL.DDP5.1.HDR.H.265-ColorTV.mkv", episode)
+		paths = append(paths, "cloud://openlist/115/剧集/"+directory+"/"+file)
+	}
+
+	items := make([]model.Media, 0, len(paths))
+	for index, path := range paths {
+		if got := seriesTitleFromMediaPath(path); got != "" {
+			t.Fatalf("episode %d release directory produced path title %q, want empty", index+1, got)
+		}
+		items = append(items, model.Media{
+			Base:       model.Base{ID: fmt.Sprintf("alien-earth-%d", index+1)},
+			LibraryID:  "lib-tv",
+			Title:      "异形：地球",
+			Path:       path,
+			SeasonNum:  1,
+			EpisodeNum: index + 1,
+			TMDbID:     157239,
+		})
+	}
+
+	cards := groupMediaSeriesCards(items)
+	if len(cards) != 1 || cards[0].Count != 8 {
+		t.Fatalf("cards=%#v, want one merged series with eight episodes", cards)
+	}
+}
+
 func TestMediaSeriesKeyCollapsesSpecialTitleSuffix(t *testing.T) {
 	main := model.Media{
 		LibraryID:  "lib-tv",
