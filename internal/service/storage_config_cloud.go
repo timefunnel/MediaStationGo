@@ -137,6 +137,10 @@ func pruneEmptyCloudParentDirectories(ctx context.Context, p cloud.Provider, del
 			entries, err = p.List(ctx, current)
 		}
 		if err != nil {
+			if cloud.IsOpenListAlreadyAbsentError(err) {
+				current = normalizeCloudPath(pathpkg.Dir(current))
+				continue
+			}
 			return fmt.Errorf("list cloud directory %s: %w", current, err)
 		}
 		if len(entries) > 0 {
