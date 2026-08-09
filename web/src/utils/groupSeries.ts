@@ -204,6 +204,9 @@ const EPISODE_TITLE_RE =
 const EPISODIC_RELEASE_TITLE_RE =
   /(?:^|\s)(?:s\d{1,2}\s*e\d{1,3}|season\s*\d{1,2}\s*(?:episode|ep)\s*\d{1,3}|\d{1,2}x\d{1,3}|e(?:p(?:isode)?)?\s*\d{1,3})(?:\s|$)/i
 
+const CJK_EPISODE_PATH_PART_RE =
+  /第\s*[0-9一二三四五六七八九十百零两]+\s*[集期话話]/i
+
 function unsafeEpisodeTitle(title: string): boolean {
   const value = title.trim()
   return EPISODE_ONLY_TITLE_RE.test(value) || EPISODE_TITLE_RE.test(value) || EPISODIC_RELEASE_TITLE_RE.test(normalizeTitle(value))
@@ -223,11 +226,26 @@ function seriesDirectoryNameFromPath(path?: string): string {
   if (!seriesPathPartLooksLikeFile(lastPart) && !SEASON_FOLDER_RE.test(lastPart)) {
     dirIndex = parts.length - 1
   }
-  while (dirIndex >= 0 && SEASON_FOLDER_RE.test(parts[dirIndex])) {
+  // OpenList 可能把单个视频包装成同名目录，资源发布站也常为每一集建立
+  // 带 S01E03 / 第03集 的发布包目录。这些层级不是稳定的整剧目录。
+  while (dirIndex >= 0 && seriesPathPartIsEpisodeContainer(parts[dirIndex])) {
     dirIndex -= 1
   }
-  if (dirIndex < 0) return ''
+  if (dirIndex < 0 || seriesPathPartIsGenericContainer(parts[dirIndex])) return ''
   return parts[dirIndex]
+}
+
+function seriesPathPartIsEpisodeContainer(part: string): boolean {
+  return (
+    SEASON_FOLDER_RE.test(part) ||
+    seriesPathPartLooksLikeFile(part) ||
+    unsafeEpisodeTitle(part) ||
+    CJK_EPISODE_PATH_PART_RE.test(part)
+  )
+}
+
+function seriesPathPartIsGenericContainer(part: string): boolean {
+  return EPISODIC_PATH_RE.test(`/${part}/`)
 }
 
 function seriesExternalIDFromPath(path?: string): string {
