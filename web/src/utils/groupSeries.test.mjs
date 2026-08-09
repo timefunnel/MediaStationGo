@@ -76,3 +76,29 @@ test('OpenList 单集发布包目录不会把同一部剧拆成多张卡片', ()
   assert.equal(cards.length, 1)
   assert.equal(cards[0]?.count, 8)
 })
+
+test('可清洗的 Season 0 特殊集目录继续归入正片剧名', () => {
+  const cards = groupSeries([
+    {
+      id: 'example-main',
+      library_id: 'tv-library',
+      title: 'Example Show',
+      path: 'cloud://openlist/115/剧集/Example Show/Season 01/Example.Show.S01E01.mkv',
+      season_num: 1,
+      episode_num: 1,
+      tmdb_id: 1001,
+    },
+    {
+      id: 'example-special',
+      library_id: 'tv-library',
+      title: 'Example Show',
+      path: 'cloud://openlist/115/剧集/Example Show S00E01/Example.Show.S00E01.mkv',
+      season_num: 0,
+      episode_num: 1,
+      tmdb_id: 1002,
+    },
+  ])
+
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0]?.count, 2)
+})
