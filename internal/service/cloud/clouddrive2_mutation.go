@@ -146,13 +146,20 @@ func (p *cloudDrive2Provider) openListAPIRemove(ctx context.Context, source stri
 		"dir":   normalizeCloudDAVPath(path.Dir(source)),
 		"names": []string{path.Base(source)},
 	}, "remove")
-	if err != nil && openListRemoveAlreadyAbsent(err.Error()) {
+	if IsOpenListAlreadyAbsentError(err) {
 		return nil
 	}
 	return err
 }
 
-func openListRemoveAlreadyAbsent(message string) bool {
+// IsOpenListAlreadyAbsentError reports whether OpenList says the requested
+// file or directory has already disappeared. Delete and cleanup callers use
+// the same predicate so an idempotent delete cannot fail in a later phase.
+func IsOpenListAlreadyAbsentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
 	message = strings.ToLower(strings.TrimSpace(message))
 	for _, marker := range []string{"430004", "file not found", "object not found", "文件不存在", "不存在或已删除"} {
 		if strings.Contains(message, marker) {
