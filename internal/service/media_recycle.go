@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
@@ -202,7 +203,12 @@ func (s *MediaService) PurgeDeleted(ctx context.Context, id string) error {
 		// existing exact-file purge behavior.
 		if provider == cloud.TypeOpenList && rootRef != "" {
 			if err := s.cloudDeleter.PruneEmptyCloudParents(ctx, provider, ref, rootRef); err != nil {
-				return fmt.Errorf("prune empty cloud parents for %s: %w", row.Path, err)
+				if s.log != nil {
+					s.log.Warn("purge deleted media: prune empty cloud parents failed; continuing",
+						zap.String("media_id", row.ID),
+						zap.String("path", row.Path),
+						zap.Error(err))
+				}
 			}
 		}
 	}

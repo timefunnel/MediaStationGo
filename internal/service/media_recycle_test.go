@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
@@ -206,6 +207,41 @@ func TestPurgeDeletedCloudMediaPrunesEmptyParentsWithinLibraryRoot(t *testing.T)
 	}
 	if deleter.pruneProvider != "openlist" || deleter.pruneRef != "115/剧集/My Series/Season 1/My Series.S01E01.mkv" || deleter.pruneRoot != "115/剧集" {
 		t.Fatalf("prune request = provider %q ref %q root %q", deleter.pruneProvider, deleter.pruneRef, deleter.pruneRoot)
+	}
+}
+
+func TestPurgeDeletedCloudMediaContinuesWhenParentPruneFails(t *testing.T) {
+	db := newServiceTestDB(t, &model.LibraryRoot{}, &model.Media{})
+	repos := repository.New(db)
+	root := model.LibraryRoot{Base: model.Base{ID: "root-1"}, LibraryID: "library-1", Path: "cloud://openlist/115/剧集"}
+	if err := db.Create(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{
+		Base:          model.Base{ID: "cloud-media", DeletedAt: gorm.DeletedAt{Time: time.Now(), Valid: true}},
+		LibraryID:     root.LibraryID,
+		LibraryRootID: root.ID,
+		Title:         "My Series",
+		Path:          "cloud://openlist/115/剧集/My Series/Season 1/My Series.S01E01.mkv",
+	}
+	if err := db.Unscoped().Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleter := &fakeCloudMediaDeleter{pruneErr: errors.New("password is incorrect or you have no permission")}
+	core, logs := observer.New(zap.WarnLevel)
+	svc := NewMediaService(&config.Config{}, zap.New(core), repos).SetCloudMediaDeleter(deleter)
+	if err := svc.PurgeDeleted(t.Context(), media.ID); err != nil {
+		t.Fatalf("purge should continue after parent prune failure: %v", err)
+	}
+	if logs.Len() != 1 || logs.All()[0].Message != "purge deleted media: prune empty cloud parents failed; continuing" {
+		t.Fatalf("parent prune warning logs = %+v", logs.All())
+	}
+	var count int64
+	if err := db.Unscoped().Model(&model.Media{}).Where("id = ?", media.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("database row should be purged after provider delete succeeds")
 	}
 }
 
