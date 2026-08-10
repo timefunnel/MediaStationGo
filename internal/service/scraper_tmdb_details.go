@@ -79,6 +79,13 @@ func (s *ScraperService) fetchAndSaveTMDbEpisodeDetails(ctx context.Context, m *
 	if episode == nil {
 		return false
 	}
+	return s.saveTMDbEpisodeDetails(ctx, m, tmdbID, matchYear, episode, options)
+}
+
+func (s *ScraperService) saveTMDbEpisodeDetails(ctx context.Context, m *model.Media, tmdbID int, matchYear int, episode *TMDbEpisodeDetails, options ScrapeOptions) bool {
+	if m == nil || episode == nil {
+		return false
+	}
 	updates := tmdbEpisodeMetadataUpdates(m, episode, matchYear, options)
 	if len(updates) == 0 {
 		return false

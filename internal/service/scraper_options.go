@@ -6,6 +6,9 @@ type ScrapeOptions struct {
 	RefreshWeakMatched  bool
 	EpisodeArtwork      *bool
 	DeferEpisodeDetails bool
+	deferTMDbDetails        bool
+	deferPeople             bool
+	deferCacheInvalidation bool
 }
 
 func (o ScrapeOptions) episodeArtworkEnabled() bool {
