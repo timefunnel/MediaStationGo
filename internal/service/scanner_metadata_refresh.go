@@ -108,14 +108,6 @@ func cloudPathHintNeedsRefresh(existing existingCloudMedia, localMeta *LocalMeta
 	return strings.TrimSpace(localMeta.TheTVDBID) != "" && strings.TrimSpace(existing.TheTVDBID) != strings.TrimSpace(localMeta.TheTVDBID)
 }
 
-func cloudTrackMetadataMissing(existing existingCloudMedia) bool {
-	return existing.DurationSec <= 0 ||
-		existing.Width <= 0 ||
-		existing.Height <= 0 ||
-		strings.TrimSpace(existing.VideoCodec) == "" ||
-		strings.TrimSpace(existing.AudioCodec) == ""
-}
-
 func localMetadataNeedsRefresh(existing existingLocalMedia, local *LocalMetadata) bool {
 	if local == nil {
 		return false

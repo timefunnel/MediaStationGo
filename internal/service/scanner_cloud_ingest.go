@@ -12,7 +12,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
-func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library, rootID, typ, ref, path, name string, size int64, localMeta *LocalMetadata, existingMedia map[string]existingCloudMedia, writeBatch *localMediaWriteBatch, probeBudget *int, res *ScanResult) {
+func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library, rootID, typ, ref, path, name string, size int64, localMeta *LocalMetadata, existingMedia map[string]existingCloudMedia, writeBatch *localMediaWriteBatch, res *ScanResult) {
 	res.Visited++
 	ext := strings.ToLower(filepath.Ext(name))
 	preserveSourceTitle := libraryPreservesSourceTitle(lib)
@@ -83,18 +83,13 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		}
 	}
 	isNewMedia := false
-	needsTrackProbe := true
 	if existingMedia != nil {
 		existing, exists := existingMedia[path]
 		isNewMedia = !exists
-		needsTrackProbe = !exists || cloudTrackMetadataMissing(existing)
 		if exists && existing.SizeBytes == size {
 			preserveCloudTrackMetadata(m, existing)
 		}
 		if exists && existing.LibraryID == lib.ID && existing.SizeBytes == size && existing.STRMURL == expectedSTRMURL && !cloudMetadataNeedsRefresh(existing, localMeta) && !cloudDerivedMetadataNeedsRefresh(existing, m) {
-			if needsTrackProbe && ext != ".strm" {
-				s.queueCloudMediaProbeWithBudget(typ, ref, path, probeBudget)
-			}
 			res.Skipped++
 			return
 		}
@@ -105,13 +100,7 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		res.LocalMetadata++
 	}
 	if isNewMedia && writeBatch != nil {
-		var after func()
-		if needsTrackProbe && ext != ".strm" {
-			after = func() {
-				s.queueCloudMediaProbeWithBudget(typ, ref, path, probeBudget)
-			}
-		}
-		writeBatch.AddWithAfter(path, m, after)
+		writeBatch.Add(path, m)
 		return
 	}
 	if err := s.repo.Media.Upsert(ctx, m); err != nil {
@@ -122,9 +111,6 @@ func (s *ScannerService) ingestCloudFile(ctx context.Context, lib *model.Library
 		addScanError(res, path, err)
 		s.log.Warn("upsert cloud media failed", zap.String("path", path), zap.Error(err))
 		return
-	}
-	if needsTrackProbe && ext != ".strm" {
-		s.queueCloudMediaProbeWithBudget(typ, ref, path, probeBudget)
 	}
 	if isNewMedia {
 		res.Added++

@@ -12,6 +12,19 @@ import (
 )
 
 var ErrMediaProbeEmpty = errors.New("ffprobe returned no supported media metadata")
+var ErrMediaProbeIncomplete = errors.New("ffprobe left required media metadata incomplete")
+
+func mediaTrackMetadataMissing(media *model.Media) bool {
+	if media == nil {
+		return true
+	}
+	return media.MediaProbeVersion < mediaProbeMetadataVersion ||
+		media.DurationSec <= 0 ||
+		media.Width <= 0 ||
+		media.Height <= 0 ||
+		strings.TrimSpace(media.VideoCodec) == "" ||
+		strings.TrimSpace(media.AudioCodec) == ""
+}
 
 func persistMediaProbeResult(
 	ctx context.Context,
@@ -98,4 +111,63 @@ func applyProbeResultToMediaValue(media *model.Media, probe *ProbeResult) {
 		media.AudioSampleRate = probe.AudioSampleRate
 	}
 	media.MediaProbeVersion = mediaProbeMetadataVersion
+}
+
+func probeResultUpdates(probe *ProbeResult) map[string]any {
+	updates := map[string]any{}
+	if probe == nil {
+		return updates
+	}
+	if probe.DurationSec > 0 {
+		updates["duration_sec"] = probe.DurationSec
+	}
+	if probe.Width > 0 {
+		updates["width"] = probe.Width
+	}
+	if probe.Height > 0 {
+		updates["height"] = probe.Height
+	}
+	if strings.TrimSpace(probe.VideoCodec) != "" {
+		updates["video_codec"] = probe.VideoCodec
+	}
+	if strings.TrimSpace(probe.AudioCodec) != "" {
+		updates["audio_codec"] = probe.AudioCodec
+	}
+	if probe.Container != "" {
+		updates["container"] = probe.Container
+	}
+	if probe.BitRate > 0 {
+		updates["bit_rate"] = probe.BitRate
+	}
+	if probe.VideoBitRate > 0 {
+		updates["video_bit_rate"] = probe.VideoBitRate
+	}
+	if probe.FrameRate > 0 {
+		updates["frame_rate"] = probe.FrameRate
+	}
+	if strings.TrimSpace(probe.VideoProfile) != "" {
+		updates["video_profile"] = probe.VideoProfile
+	}
+	if strings.TrimSpace(probe.VideoRange) != "" {
+		updates["video_range"] = probe.VideoRange
+	}
+	if probe.VideoBitDepth > 0 {
+		updates["video_bit_depth"] = probe.VideoBitDepth
+	}
+	if probe.AudioBitRate > 0 {
+		updates["audio_bit_rate"] = probe.AudioBitRate
+	}
+	if probe.AudioChannels > 0 {
+		updates["audio_channels"] = probe.AudioChannels
+	}
+	if strings.TrimSpace(probe.AudioChannelLayout) != "" {
+		updates["audio_channel_layout"] = probe.AudioChannelLayout
+	}
+	if probe.AudioSampleRate > 0 {
+		updates["audio_sample_rate"] = probe.AudioSampleRate
+	}
+	if len(updates) > 0 {
+		updates["media_probe_version"] = mediaProbeMetadataVersion
+	}
+	return updates
 }

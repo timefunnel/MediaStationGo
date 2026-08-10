@@ -16,7 +16,6 @@ type cloudScanImportRequest struct {
 	candidates    []cloudCandidate
 	existingMedia map[string]existingCloudMedia
 	writeBatch    *localMediaWriteBatch
-	probeBudget   *int
 	defaultRootID string
 	progress      *cloudScanProgressState
 	result        *ScanResult
@@ -104,13 +103,11 @@ func (s *ScannerService) scanCloudLibraryRootTargets(ctx context.Context, lib *m
 	}
 	sortCloudCandidatesByRefreshPriority(candidates, existingMedia)
 	writeBatch := newLocalMediaWriteBatch(s, ctx, res, 100)
-	probeBudget := maxCloudMediaProbeQueuePerScan
 	imported, err := s.importCloudScanCandidates(ctx, lib, cloudScanImportRequest{
 		provider:      typ,
 		candidates:    candidates,
 		existingMedia: existingMedia,
 		writeBatch:    writeBatch,
-		probeBudget:   &probeBudget,
 		defaultRootID: libraryRootID(root),
 		progress:      progress,
 		result:        res,
@@ -162,13 +159,11 @@ func (s *ScannerService) scanCloudLibraryWithRoot(ctx context.Context, lib *mode
 	}
 	sortCloudCandidatesByRefreshPriority(candidates, existingMedia)
 	writeBatch := newLocalMediaWriteBatch(s, ctx, res, 100)
-	probeBudget := maxCloudMediaProbeQueuePerScan
 	imported, err := s.importCloudScanCandidates(ctx, lib, cloudScanImportRequest{
 		provider:      typ,
 		candidates:    candidates,
 		existingMedia: existingMedia,
 		writeBatch:    writeBatch,
-		probeBudget:   &probeBudget,
 		defaultRootID: defaultRootID,
 		progress:      progress,
 		result:        res,
@@ -242,7 +237,7 @@ func (s *ScannerService) importCloudScanCandidates(ctx context.Context, rootLib 
 		}
 		imported.touchedLibraryIDs = appendUniqueLibraryIDs(imported.touchedLibraryIDs, targetLib.ID)
 		imported.seen[candidate.path] = struct{}{}
-		s.ingestCloudFile(ctx, targetLib, target.rootID, req.provider, candidate.ref, candidate.path, candidate.name, candidate.size, candidate.localMeta, req.existingMedia, req.writeBatch, req.probeBudget, req.result)
+		s.ingestCloudFile(ctx, targetLib, target.rootID, req.provider, candidate.ref, candidate.path, candidate.name, candidate.size, candidate.localMeta, req.existingMedia, req.writeBatch, req.result)
 		req.progress.publish(s, rootLib.ID, req.result, "importing", req.result.Visited == 1 || req.result.Visited%100 == 0)
 	}
 	return imported, nil

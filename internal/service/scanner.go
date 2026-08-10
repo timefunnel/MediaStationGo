@@ -70,13 +70,6 @@ type ScannerService struct {
 	cloudImagePrefetchQueue chan cloudImagePrefetchTask
 	cloudImagePrefetchMu    sync.Mutex
 	cloudImagePrefetching   map[string]struct{}
-	cloudMediaProbeOnce     sync.Once
-	cloudMediaProbeQueue    chan cloudMediaProbeTask
-	cloudMediaProbeMu       sync.Mutex
-	cloudMediaProbing       map[string]struct{}
-	cloudMediaProbeBackoff  map[string]time.Time
-	cloudMediaProbeWarnMu   sync.Mutex
-	cloudMediaProbeLastWarn time.Time
 	localMediaProbeOnce     sync.Once
 	localMediaProbeQueue    chan localMediaProbeTask
 	localMediaProbeMu       sync.Mutex
@@ -102,9 +95,6 @@ func NewScannerService(
 		cloudSlots:              make(chan struct{}, 1),
 		cloudImagePrefetchQueue: make(chan cloudImagePrefetchTask, 256),
 		cloudImagePrefetching:   make(map[string]struct{}),
-		cloudMediaProbeQueue:    make(chan cloudMediaProbeTask, 1024),
-		cloudMediaProbing:       make(map[string]struct{}),
-		cloudMediaProbeBackoff:  make(map[string]time.Time),
 		localMediaProbeQueue:    make(chan localMediaProbeTask, 1024),
 		localMediaProbing:       make(map[string]struct{}),
 		localScans:              make(map[string]struct{}),
@@ -116,14 +106,6 @@ func NewScannerService(
 // while the scanner is needed earlier by watcher/download services.
 func (s *ScannerService) SetStorageConfig(storage *StorageConfigService) {
 	s.storage = storage
-	if storage != nil && s.probe != nil {
-		s.cloudMediaProbeOnce.Do(func() {
-			workers := s.ffprobeWorkerCount()
-			for i := 0; i < workers; i++ {
-				go s.cloudMediaProbeWorker()
-			}
-		})
-	}
 }
 
 func (s *ScannerService) SetOrganizer(organizer *OrganizerService) {
@@ -203,14 +185,6 @@ func addScanError(res *ScanResult, path string, err error) {
 	res.Errors = append(res.Errors, msg)
 }
 
-const maxCloudMediaProbeQueuePerScan = 256
-
-const cloudMediaProbeFailureBackoff = 6 * time.Hour
-
-// cloudMediaProbeQueueFullBackoff 是探测队列饱和时给单个文件挂的短退避，
-// 防止后续扫描轮次对同一批文件反复尝试入队。
-const cloudMediaProbeQueueFullBackoff = 30 * time.Minute
-
 // CloudScanStatus is the operator-facing state for long-running cloud scans.
 type CloudScanStatus struct {
 	LibraryID      string    `json:"library_id"`
@@ -238,12 +212,6 @@ type CloudScanStatus struct {
 type cloudScanEntry struct {
 	status CloudScanStatus
 	cancel context.CancelFunc
-}
-
-type cloudMediaProbeTask struct {
-	typ  string
-	ref  string
-	path string
 }
 
 type localMediaProbeTask struct {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -38,9 +40,18 @@ type StreamService struct {
 	repo             *repository.Container
 	transcoder       *TranscoderService
 	storage          cloudPlaybackResolver
+	probe            cloudPlaybackProber
 	playback         *PlaybackService
 	cache            *RuntimeCacheService
 	generatedArtwork *GeneratedArtworkService
+
+	cloudTrackProbeOnce     sync.Once
+	cloudTrackProbeQueue    chan playbackCloudProbeTask
+	cloudTrackProbeMu       sync.Mutex
+	cloudTrackProbePending  map[string]struct{}
+	cloudTrackProbeBackoff  map[string]time.Time
+	cloudTrackProbeWarnMu   sync.Mutex
+	cloudTrackProbeLastWarn time.Time
 }
 
 type mediaTrackProber interface {
@@ -50,11 +61,15 @@ type mediaTrackProber interface {
 
 // NewStreamService is the constructor.
 func NewStreamService(cfg *config.Config, log *zap.Logger, repo *repository.Container, transcoder *TranscoderService) *StreamService {
+	workers := playbackCloudProbeWorkerCount(cfg)
 	return &StreamService{
-		cfg:        cfg,
-		log:        log,
-		repo:       repo,
-		transcoder: transcoder,
+		cfg:                    cfg,
+		log:                    log,
+		repo:                   repo,
+		transcoder:             transcoder,
+		cloudTrackProbeQueue:   make(chan playbackCloudProbeTask, workers*4),
+		cloudTrackProbePending: make(map[string]struct{}),
+		cloudTrackProbeBackoff: make(map[string]time.Time),
 	}
 }
 
@@ -79,6 +94,37 @@ func (s *StreamService) SetCloudProbe(storage cloudPlaybackResolver) {
 	if s != nil {
 		s.storage = storage
 	}
+}
+
+// SetCloudTrackProbe wires the HTTP media prober used by the playback-time
+// metadata queue. Workers are started once and the queue itself stays bounded,
+// so successful playback never waits for ffprobe or creates unbounded goroutines.
+func (s *StreamService) SetCloudTrackProbe(probe cloudPlaybackProber) {
+	if s == nil {
+		return
+	}
+	s.cloudTrackProbeMu.Lock()
+	s.probe = probe
+	if s.cloudTrackProbeQueue == nil {
+		workers := playbackCloudProbeWorkerCount(s.cfg)
+		s.cloudTrackProbeQueue = make(chan playbackCloudProbeTask, workers*4)
+	}
+	if s.cloudTrackProbePending == nil {
+		s.cloudTrackProbePending = make(map[string]struct{})
+	}
+	if s.cloudTrackProbeBackoff == nil {
+		s.cloudTrackProbeBackoff = make(map[string]time.Time)
+	}
+	s.cloudTrackProbeMu.Unlock()
+	if probe == nil {
+		return
+	}
+	s.cloudTrackProbeOnce.Do(func() {
+		workers := playbackCloudProbeWorkerCount(s.cfg)
+		for i := 0; i < workers; i++ {
+			go s.playbackCloudProbeWorker()
+		}
+	})
 }
 
 func (s *StreamService) SetPlaybackService(playback *PlaybackService) {
