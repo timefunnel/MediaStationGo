@@ -22,7 +22,7 @@ func (f cloudResolveTestRoundTripper) RoundTrip(r *http.Request) (*http.Response
 	return f(r)
 }
 
-func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
+func TestCloudResolveHotCacheHitDoesNotRefresh(t *testing.T) {
 	var resolves atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/fs/list" {
@@ -56,7 +56,7 @@ func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
 	if link.URL != "http://cdn.local/1.mkv" || resolves.Load() != 1 {
 		t.Fatalf("first resolve link=%#v resolves=%d", link, resolves.Load())
 	}
-	for i := 0; i < cloudResolveHotHitThreshold-1; i++ {
+	for i := 0; i < 3; i++ {
 		link, err = storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
 		if err != nil {
 			t.Fatal(err)
@@ -69,7 +69,6 @@ func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
 	key := storage.resolveCacheKey("openlist", "/Movies/f1.mkv", "Player/1")
 	storage.resolveMu.Lock()
 	entry := storage.resolveCache[key]
-	entry.hits = cloudResolveHotHitThreshold
 	entry.expiresAt = time.Now().Add(5 * time.Second)
 	storage.resolveCache[key] = entry
 	storage.resolveMu.Unlock()
@@ -79,15 +78,18 @@ func TestCloudResolveHotCacheRefreshesInBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	if link.URL != "http://cdn.local/1.mkv" {
-		t.Fatalf("hot hit should return cached link immediately, got %s", link.URL)
+		t.Fatalf("hot hit should return cached link, got %s", link.URL)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for resolves.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	if resolves.Load() != 1 {
+		t.Fatalf("hot cache hit triggered an unexpected refresh, resolves=%d", resolves.Load())
 	}
-	if resolves.Load() < 2 {
-		t.Fatalf("background refresh did not run, resolves=%d", resolves.Load())
-	}
+
+	storage.resolveMu.Lock()
+	entry = storage.resolveCache[key]
+	entry.expiresAt = time.Now().Add(-time.Second)
+	storage.resolveCache[key] = entry
+	storage.resolveMu.Unlock()
 	link, err = storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
 	if err != nil {
 		t.Fatal(err)
@@ -112,8 +114,27 @@ func TestCloudResolveCacheUses115DirectLinkExpiry(t *testing.T) {
 	if ttl <= 2*time.Minute || ttl > 30*time.Minute {
 		t.Fatalf("ttl = %v, want extended ttl within 30m", ttl)
 	}
-	if staleTTL <= ttl || staleTTL > 50*time.Minute {
-		t.Fatalf("stale ttl = %v, ttl = %v, want stale window within 50m", staleTTL, ttl)
+	if staleTTL != ttl {
+		t.Fatalf("openlist stale ttl = %v, want %v", staleTTL, ttl)
+	}
+}
+
+func TestOpenListCacheTTLRespects115ExpirySafetyMargin(t *testing.T) {
+	nearExpiry := time.Now().Add(90 * time.Second).Unix()
+	link := &cloud.DirectLink{URL: fmt.Sprintf("https://cdnfhnfile.115cdn.net/hash/movie.mp4?t=%d&k=secret", nearExpiry)}
+	ttl, staleTTL := cloudResolveCacheDurations("openlist", link)
+	if ttl <= 0 || ttl > 30*time.Second {
+		t.Fatalf("ttl = %v, want a positive value no greater than the 30s safety window", ttl)
+	}
+	if staleTTL != ttl {
+		t.Fatalf("openlist stale ttl = %v, want %v", staleTTL, ttl)
+	}
+
+	expiringNow := time.Now().Add(30 * time.Second).Unix()
+	link.URL = fmt.Sprintf("https://cdnfhnfile.115cdn.net/hash/movie.mp4?t=%d&k=secret", expiringNow)
+	ttl, staleTTL = cloudResolveCacheDurations("openlist", link)
+	if ttl != 0 || staleTTL != 0 {
+		t.Fatalf("near-expiry link cache ttl = (%v, %v), want (0, 0)", ttl, staleTTL)
 	}
 }
 
@@ -153,7 +174,7 @@ func TestCloudResolveCacheRefreshAtCapacityDoesNotEvict(t *testing.T) {
 	}
 }
 
-func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
+func TestCloudResolveExpiredLinkDoesNotReturnStaleOnResolveFailure(t *testing.T) {
 	var resolves atomic.Int32
 	expiry := time.Now().Add(time.Hour).Unix()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -197,28 +218,22 @@ func TestCloudResolveReturnsStaleLinkAndRefreshesInBackground(t *testing.T) {
 	storage.resolveMu.Lock()
 	entry := storage.resolveCache[key]
 	entry.expiresAt = time.Now().Add(-time.Second)
-	entry.staleUntil = time.Now().Add(10 * time.Minute)
-	entry.refreshAfter = time.Time{}
 	storage.resolveCache[key] = entry
 	storage.resolveMu.Unlock()
 
 	link, err = storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatalf("expired link unexpectedly succeeded: %#v", link)
 	}
-	if link.URL != entry.link.URL {
-		t.Fatalf("stale link = %s, want %s", link.URL, entry.link.URL)
+	if link != nil {
+		t.Fatalf("expired link returned stale URL: %#v", link)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for resolves.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if resolves.Load() < 2 {
-		t.Fatalf("background stale refresh did not run, resolves=%d", resolves.Load())
+	if resolves.Load() != 2 {
+		t.Fatalf("resolves = %d, want one synchronous re-resolve", resolves.Load())
 	}
 }
 
-func TestCloudResolveReturnsStaleLinkWithoutRefreshWhileCircuitOpen(t *testing.T) {
+func TestCloudResolveExpiredLinkReturnsCircuitErrorInsteadOfStale(t *testing.T) {
 	var resolves atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/fs/list" {
@@ -238,27 +253,27 @@ func TestCloudResolveReturnsStaleLinkWithoutRefreshWhileCircuitOpen(t *testing.T
 	if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "token"}}); err != nil {
 		t.Fatal(err)
 	}
-	link, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
-	if err != nil {
+	if _, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1"); err != nil {
 		t.Fatal(err)
 	}
 	key := storage.resolveCacheKey("openlist", "/Movies/f1.mkv", "Player/1")
 	storage.resolveMu.Lock()
 	entry := storage.resolveCache[key]
 	entry.expiresAt = time.Now().Add(-time.Second)
-	entry.staleUntil = time.Now().Add(time.Minute)
-	entry.refreshAfter = time.Time{}
 	storage.resolveCache[key] = entry
 	storage.resolveCircuit[cloud.TypeOpenList] = cloudResolveCircuitState{openUntil: time.Now().Add(time.Minute)}
 	storage.resolveMu.Unlock()
 
-	stale, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
-	if err != nil || stale == nil || stale.URL != link.URL {
-		t.Fatalf("stale link=%#v err=%v", stale, err)
+	resolved, err := storage.CloudResolve(t.Context(), "openlist", "/Movies/f1.mkv", "Player/1")
+	var circuitErr *cloudResolveCircuitOpenError
+	if !errors.As(err, &circuitErr) {
+		t.Fatalf("expired resolve link=%#v err=%v, want circuit error", resolved, err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	if resolved != nil {
+		t.Fatalf("expired link returned stale URL: %#v", resolved)
+	}
 	if resolves.Load() != 1 {
-		t.Fatalf("resolves = %d, want no background refresh while circuit is open", resolves.Load())
+		t.Fatalf("resolves = %d, want no provider call while circuit is open", resolves.Load())
 	}
 }
 

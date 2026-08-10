@@ -140,6 +140,17 @@ func (s *StorageConfigService) cachedResolve(key, typ string) (*cloud.DirectLink
 	if !ok {
 		return nil, false, false
 	}
+	if strings.TrimSpace(typ) == cloud.TypeOpenList {
+		// OpenList's 115 CDN URLs are finite and may be UA-bound. Reuse only a
+		// still-fresh link; the next real request resolves again through singleflight.
+		if entry.expiresAt.IsZero() || !now.Before(entry.expiresAt) {
+			delete(s.resolveCache, key)
+			return nil, false, false
+		}
+		entry.lastHit = now
+		s.resolveCache[key] = entry
+		return cloneDirectLink(entry.link), true, false
+	}
 	if entry.staleUntil.IsZero() {
 		entry.staleUntil = entry.expiresAt
 	}
@@ -593,6 +604,14 @@ func cloudResolveCacheDurations(typ string, link *cloud.DirectLink) (time.Durati
 		return ttl, staleTTL
 	}
 	untilExpiry := time.Until(expiry)
+	if strings.TrimSpace(typ) == cloud.TypeOpenList {
+		usable := untilExpiry - time.Minute
+		if usable <= 0 {
+			return 0, 0
+		}
+		ttl = minDuration(usable, 30*time.Minute)
+		return ttl, ttl
+	}
 	if untilExpiry <= time.Minute {
 		return ttl, staleTTL
 	}
