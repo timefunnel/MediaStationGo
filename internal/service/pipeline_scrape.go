@@ -40,6 +40,7 @@ type PipelineScrapeResult struct {
 	MediaID      string               `json:"media_id"`
 	MediaTitle   string               `json:"media_title,omitempty"`
 	AppliedCount int                  `json:"applied_count,omitempty"`
+	ScrapeStatus string               `json:"scrape_status,omitempty"`
 }
 
 func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req PipelineScrapeRequest) (PipelineScrapeResult, error) {
@@ -86,11 +87,14 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 			}
 			if refreshed != nil {
 				result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
-				propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
-				if err != nil {
-					return PipelineScrapeResult{}, err
+				result.ScrapeStatus = strings.TrimSpace(refreshed.ScrapeStatus)
+				if result.ScrapeStatus == "matched" {
+					propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
+					if err != nil {
+						return PipelineScrapeResult{}, err
+					}
+					result.AppliedCount = 1 + propagated
 				}
-				result.AppliedCount = 1 + propagated
 			}
 			return result, nil
 		}
@@ -103,11 +107,14 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 	result := PipelineScrapeResult{Mode: PipelineScrapeModeSmart, MediaID: mediaID}
 	if refreshed != nil {
 		result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
-		propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
-		if err != nil {
-			return PipelineScrapeResult{}, err
+		result.ScrapeStatus = strings.TrimSpace(refreshed.ScrapeStatus)
+		if result.ScrapeStatus == "matched" {
+			propagated, err := s.propagateEpisodeMatch(ctx, media, refreshed, req)
+			if err != nil {
+				return PipelineScrapeResult{}, err
+			}
+			result.AppliedCount = 1 + propagated
 		}
-		result.AppliedCount = 1 + propagated
 	}
 	return result, nil
 }

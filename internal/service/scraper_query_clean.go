@@ -20,7 +20,7 @@ var noiseTokens = []string{
 	"hdr", "hdr10", "sdr", "dts", "ddp", "ddp5", "dd5", "dd2", "eac3", "truehd",
 	"dovi", "atmos", "aac", "ac3", "flac", "fps", "hlg", "dv",
 	"remux", "extended", "uncut", "remastered", "repack", "proper", "internal",
-	"limited", "imax", "directors-cut", "directors_cut",
+	"limited", "imax", "hybrid", "multi", "directors-cut", "directors_cut",
 	"hkfree", "yify", "rarbg", "ettv", "fgt", "tgx", "ctrlhd", "ntb", "flux", "qhstudio",
 
 	// 流媒体平台 / 字幕组 / 国家版本（动漫常见）

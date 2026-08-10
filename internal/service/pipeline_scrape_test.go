@@ -209,3 +209,42 @@ func TestPipelineScrapeMatchesForMediaType(t *testing.T) {
 		t.Fatalf("filtered match = %+v", filtered[0])
 	}
 }
+
+func TestPipelineScrapeNoMatchIsNotReportedAsApplied(t *testing.T) {
+	db := newServiceTestDB(t, &model.Library{}, &model.Media{})
+	repos := repository.New(db)
+	log := zap.NewNop()
+	scraper := NewScraperService(&config.Config{}, log, repos, nil, nil, nil, nil, NewHub(log))
+	svc := NewPipelineScrapeService(repos, scraper)
+
+	lib := model.Library{Name: "TV", Path: "cloud://openlist/115/剧集", Type: "tv", Enabled: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	media := model.Media{
+		LibraryID:  lib.ID,
+		Title:      "unknown hybrid multi",
+		Path:       "cloud://openlist/115/剧集/Unknown.Hybrid.MULTI/S01/Unknown.S01E01.mkv",
+		SeasonNum:  1,
+		EpisodeNum: 1,
+	}
+	if err := repos.DB.Create(&media).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Scrape(t.Context(), media.ID, PipelineScrapeRequest{Category: "tv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Mode != PipelineScrapeModeSmart || result.ScrapeStatus != "no_match" || result.AppliedCount != 0 {
+		t.Fatalf("unexpected no-match result: %#v", result)
+	}
+
+	var got model.Media
+	if err := repos.DB.First(&got, "id = ?", media.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.ScrapeStatus != "no_match" {
+		t.Fatalf("media scrape status = %q, want no_match", got.ScrapeStatus)
+	}
+}
