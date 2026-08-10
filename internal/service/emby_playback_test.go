@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
-	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 	"go.uber.org/zap"
 )
 
@@ -735,7 +734,7 @@ func TestEmbyPlaybackInfoUsesVideoStreamWhenSTRMDisabled(t *testing.T) {
 	}
 }
 
-func TestEmbyPlaybackInfoProbesMissingCloudTrackMetadata(t *testing.T) {
+func TestEmbyPlaybackInfoDoesNotProbeMissingCloudTrackMetadata(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "OpenList", Path: `cloud://openlist/Movies`, Type: "movie", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
@@ -751,59 +750,23 @@ func TestEmbyPlaybackInfoProbesMissingCloudTrackMetadata(t *testing.T) {
 	if err := svc.repo.DB.Create(&media).Error; err != nil {
 		t.Fatalf("create media: %v", err)
 	}
-	resolver := &fakeCloudPlaybackResolver{
-		link: &cloud.DirectLink{
-			URL:     "http://cdn.example.test/Movie.mkv",
-			Headers: map[string]string{"Authorization": "Bearer probe-token"},
-		},
-	}
-	prober := &fakeCloudPlaybackProber{
-		probe: &ProbeResult{
-			DurationSec: 3661,
-			Width:       3840,
-			Height:      2160,
-			VideoCodec:  "hevc",
-			AudioCodec:  "eac3",
-			Container:   "matroska,webm",
-		},
-	}
-	svc.SetCloudProbe(resolver, prober)
-
-	if _, err := svc.PlaybackInfo(t.Context(), "cloud-probe-1", "user-1"); err != nil {
-		t.Fatalf("playback info: %v", err)
-	}
-
-	var persisted model.Media
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if err := svc.repo.DB.First(&persisted, "id = ?", "cloud-probe-1").Error; err != nil {
-			t.Fatalf("reload media: %v", err)
-		}
-		if persisted.DurationSec > 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if persisted.DurationSec != 3661 || persisted.Width != 3840 || persisted.Height != 2160 || persisted.VideoCodec != "hevc" || persisted.AudioCodec != "eac3" {
-		t.Fatalf("probe metadata not persisted: %#v", persisted)
-	}
-	if resolver.typ != "openlist" || resolver.ref != "/Movies/Movie.mkv" {
-		t.Fatalf("resolver called with typ=%q ref=%q", resolver.typ, resolver.ref)
-	}
-	if prober.rawURL != "http://cdn.example.test/Movie.mkv" || prober.headers["Authorization"] != "Bearer probe-token" {
-		t.Fatalf("probe called with url=%q headers=%#v", prober.rawURL, prober.headers)
-	}
-
 	pb, err := svc.PlaybackInfo(t.Context(), "cloud-probe-1", "user-1")
 	if err != nil {
-		t.Fatalf("playback info (second): %v", err)
+		t.Fatalf("playback info: %v", err)
+	}
+	var persisted model.Media
+	if err := svc.repo.DB.First(&persisted, "id = ?", "cloud-probe-1").Error; err != nil {
+		t.Fatalf("reload media: %v", err)
+	}
+	if persisted.MediaProbeVersion != 0 || persisted.DurationSec != 0 || persisted.VideoCodec != "" || persisted.AudioCodec != "" {
+		t.Fatalf("PlaybackInfo must not mutate missing track metadata: %#v", persisted)
 	}
 	src := pb["MediaSources"].([]map[string]any)[0]
-	if src["RunTimeTicks"] != int64(3661)*10_000_000 {
-		t.Fatalf("runtime ticks not filled after async probe: %#v", src)
+	if src["RunTimeTicks"] != int64(0) {
+		t.Fatalf("PlaybackInfo should expose current persisted runtime without probing: %#v", src)
 	}
 	streams := src["MediaStreams"].([]map[string]any)
-	if len(streams) != 2 || streams[0]["Codec"] != "hevc" || streams[1]["Codec"] != "eac3" {
-		t.Fatalf("media streams not filled after async probe: %#v", streams)
+	if len(streams) != 1 || streams[0]["Codec"] != "unknown" {
+		t.Fatalf("PlaybackInfo should keep the existing unknown stream placeholder: %#v", streams)
 	}
 }

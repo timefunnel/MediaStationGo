@@ -199,9 +199,8 @@ func TestIngestAdultCloudFileMarksAndRepairsNSFW(t *testing.T) {
 		ref  = "/adult/ABF-363/ABF-363.mp4"
 		path = "cloud://openlist/adult/ABF-363/ABF-363.mp4"
 	)
-	probeBudget := 0
 	first := &ScanResult{LibraryID: library.ID}
-	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, nil, nil, &probeBudget, first)
+	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, nil, nil, first)
 	if first.Added != 1 || first.ErrorCount != 0 {
 		t.Fatalf("first cloud ingest = %#v, want added=1", first)
 	}
@@ -221,7 +220,7 @@ func TestIngestAdultCloudFileMarksAndRepairsNSFW(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := &ScanResult{LibraryID: library.ID}
-	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, existing, nil, &probeBudget, second)
+	scanner.ingestCloudFile(t.Context(), &library, "", "openlist", ref, path, "ABF-363.mp4", 1024, nil, existing, nil, second)
 	if second.Updated != 1 || second.Skipped != 0 || second.ErrorCount != 0 {
 		t.Fatalf("second cloud ingest = %#v, want the stale NSFW flag repaired", second)
 	}

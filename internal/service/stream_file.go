@@ -52,7 +52,7 @@ func (s *StreamService) serveFileWithCloudMode(w http.ResponseWriter, r *http.Re
 		// 云盘播放 URL 先规范化为相对路径，免疫扫描时固化的旧 host。
 		if shouldResolveCloudPlaybackAtStreamEntry(r.Context(), s.repo, cloudMode) {
 			if typ, ref, ok := parseCloudMediaPlaybackURL(strmURL); ok {
-				redirected, err := s.redirectResolvedCloudPlayback(w, r, mediaID, userID, typ, ref)
+				redirected, err := s.redirectResolvedCloudPlayback(w, r, m, userID, typ, ref)
 				if err != nil {
 					return err
 				}
@@ -106,11 +106,15 @@ func shouldResolveCloudPlaybackAtStreamEntry(ctx context.Context, repo *reposito
 func (s *StreamService) redirectResolvedCloudPlayback(
 	w http.ResponseWriter,
 	r *http.Request,
-	mediaID string,
+	media *model.Media,
 	userID string,
 	typ string,
 	ref string,
 ) (bool, error) {
+	mediaID := ""
+	if media != nil {
+		mediaID = strings.TrimSpace(media.ID)
+	}
 	if s == nil || s.storage == nil {
 		return false, fmt.Errorf("%w: cloud storage service unavailable", ErrCloudPlaybackResolveFailed)
 	}
@@ -163,6 +167,9 @@ func (s *StreamService) redirectResolvedCloudPlayback(
 	}
 	setCloudRedirectNoStore(w)
 	http.Redirect(w, r, link.URL, http.StatusFound)
+	if r.Method == http.MethodGet {
+		s.enqueuePlaybackCloudProbe(media, link, r.UserAgent())
+	}
 	return true, nil
 }
 

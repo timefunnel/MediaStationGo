@@ -12,6 +12,23 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 )
 
+func (s *ScannerService) cloudScanWorkerCount() int {
+	if s == nil || s.cfg == nil {
+		return 4
+	}
+	return normalizeCloudScanMaxConcurrent(s.cfg.App.CloudScanMaxConcurrent)
+}
+
+func normalizeCloudScanMaxConcurrent(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	if n > 16 {
+		return 16
+	}
+	return n
+}
+
 type cloudScanCandidateRequest struct {
 	provider         string
 	rootDir          string

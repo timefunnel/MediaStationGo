@@ -20,7 +20,6 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
-	"github.com/ShukeBta/MediaStationGo/internal/service/cloud"
 	"go.uber.org/zap"
 )
 
@@ -48,8 +47,6 @@ type EmbyService struct {
 	cfg              *config.Config
 	log              *zap.Logger
 	repo             *repository.Container
-	storage          cloudPlaybackResolver
-	probe            cloudPlaybackProber
 	subtitle         *SubtitleService
 	cache            *RuntimeCacheService
 	playback         *PlaybackService
@@ -64,9 +61,6 @@ type EmbyService struct {
 	visibilityCache   map[string]embyVisibilityCacheEntry
 	visibilityVersion map[string]uint64
 
-	cloudProbeMu       sync.Mutex
-	cloudProbeInFlight map[string]struct{}
-
 	readCacheMu       sync.Mutex
 	readCacheInFlight map[string]*embyReadCacheFlight
 
@@ -74,14 +68,6 @@ type EmbyService struct {
 	personCache        map[string]model.Person
 	personCacheExpires time.Time
 	personCacheVersion uint64
-}
-
-type cloudPlaybackResolver interface {
-	CloudResolve(ctx context.Context, typ, fileRef, clientUA string) (*cloud.DirectLink, error)
-}
-
-type cloudPlaybackProber interface {
-	ProbeHTTP(ctx context.Context, rawURL string, headers map[string]string) (*ProbeResult, error)
 }
 
 // NewEmbyService is the constructor.
@@ -106,14 +92,6 @@ func (e *EmbyService) SetPlaybackService(playback *PlaybackService) {
 	if e != nil {
 		e.playback = playback
 	}
-}
-
-func (e *EmbyService) SetCloudProbe(storage cloudPlaybackResolver, probe cloudPlaybackProber) {
-	if e == nil {
-		return
-	}
-	e.storage = storage
-	e.probe = probe
 }
 
 func (e *EmbyService) SetGeneratedArtworkService(generated *GeneratedArtworkService) {
