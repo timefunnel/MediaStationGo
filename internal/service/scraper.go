@@ -169,8 +169,10 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 		Updates(updates).Error; err != nil {
 		return err
 	}
-	if err := s.persistMatchPeople(ctx, match); err != nil {
-		s.log.Warn("failed to save person metadata", zap.String("media_id", m.ID), zap.Error(err))
+	if !options.deferPeople {
+		if err := s.persistMatchPeople(ctx, match); err != nil {
+			s.log.Warn("failed to save person metadata", zap.String("media_id", m.ID), zap.Error(err))
+		}
 	}
 	s.removeCachedScrapedArtwork(removePoster, removeBackdrop)
 
@@ -179,7 +181,9 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 	// details request is slow or unavailable.
 	if match.TMDbID > 0 && s.tmdb != nil && s.tmdb.Enabled() {
 		mediaType := s.determineMediaTypeForMedia(lib, m, match)
-		s.fetchAndSaveTMDbExtendedMetadata(ctx, m.ID, match.TMDbID, mediaType)
+		if !options.deferTMDbDetails {
+			s.fetchAndSaveTMDbExtendedMetadata(ctx, m.ID, match.TMDbID, mediaType)
+		}
 		if mediaType == "tv" && !options.DeferEpisodeDetails {
 			s.fetchAndSaveTMDbEpisodeDetails(ctx, m, match.TMDbID, match.Year, options)
 		}
@@ -190,7 +194,9 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 	if !(options.DeferEpisodeDetails && m != nil && m.EpisodeNum > 0) {
 		s.writeMediaNFOAfterScrape(ctx, m, lib)
 	}
-	s.invalidateMediaCache(ctx)
+	if !options.deferCacheInvalidation {
+		s.invalidateMediaCache(ctx)
+	}
 	s.hub.Publish("scrape", map[string]any{
 		"media_id":   m.ID,
 		"title":      match.Title,

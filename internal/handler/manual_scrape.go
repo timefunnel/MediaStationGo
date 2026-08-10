@@ -90,21 +90,27 @@ func manualScrapeApplyBatchHandler(svc *service.Container) gin.HandlerFunc {
 		applyCtx, cancel := manualScrapeApplyContext(c)
 		defer cancel()
 		options := service.ScrapeOptions{EpisodeArtwork: req.episodeArtworkOption()}
-		applied := 0
-		errorsOut := make([]string, 0)
-		for _, id := range ids {
-			if _, err := svc.Scraper.ApplyManualMatchWithOptions(applyCtx, id, req.Match, options); err != nil {
-				errorsOut = append(errorsOut, id+": "+err.Error())
-				continue
-			}
-			reclassifyMediaAfterScrapeWithTypeHints(applyCtx, svc, map[string]string{id: req.Match.MediaType}, id)
-			applied++
+		result, err := svc.Scraper.ApplyManualMatchBatchWithOptions(applyCtx, ids, req.Match, options)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
-		if applied == 0 && len(errorsOut) > 0 {
+		if len(result.AppliedIDs) > 0 {
+			mediaTypeHints := make(map[string]string, len(result.AppliedIDs))
+			for _, id := range result.AppliedIDs {
+				mediaTypeHints[id] = req.Match.MediaType
+			}
+			reclassifyMediaAfterScrapeWithTypeHints(applyCtx, svc, mediaTypeHints, result.AppliedIDs...)
+		}
+		errorsOut := make([]string, 0, len(result.Errors))
+		for _, applyErr := range result.Errors {
+			errorsOut = append(errorsOut, applyErr.MediaID+": "+applyErr.Err.Error())
+		}
+		if len(result.AppliedIDs) == 0 && len(errorsOut) > 0 {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": strings.Join(errorsOut, "\n")})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"applied": applied, "errors": errorsOut})
+		c.JSON(http.StatusOK, gin.H{"applied": len(result.AppliedIDs), "errors": errorsOut})
 	}
 }
 

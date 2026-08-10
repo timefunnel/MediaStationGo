@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -574,6 +575,115 @@ func TestApplyManualMatchSavesSelectedCloudMatchWhenDetailsSlow(t *testing.T) {
 	}
 	if got.Title != "Correct Cloud Movie" || got.ScrapeStatus != "matched" || got.TMDbID != 77 {
 		t.Fatalf("manual cloud match was not saved: title=%q status=%q tmdb=%d", got.Title, got.ScrapeStatus, got.TMDbID)
+	}
+}
+
+func TestApplyManualMatchBatchFetchesSeriesOnceAndEpisodesBySeason(t *testing.T) {
+	var mu sync.Mutex
+	paths := make([]string, 0)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/tv/1434":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":               1434,
+				"name":             "恶搞之家",
+				"original_name":    "Family Guy",
+				"overview":         "整剧简介",
+				"poster_path":      "/poster.jpg",
+				"backdrop_path":    "/backdrop.jpg",
+				"first_air_date":   "1999-01-31",
+				"vote_average":     7.4,
+				"episode_run_time": []int{22},
+				"origin_country":   []string{"US"},
+				"spoken_languages": []map[string]any{{"iso_639_1": "en"}},
+				"genres":           []map[string]any{{"name": "Animation"}},
+				"credits": map[string]any{
+					"cast": []map[string]any{{"id": 1, "name": "Seth MacFarlane"}},
+				},
+			})
+		case "/tv/1434/season/1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"episodes": []map[string]any{
+					{"episode_number": 1, "name": "Death Has a Shadow", "overview": "S01E01", "still_path": "/s01e01.jpg", "air_date": "1999-01-31", "vote_average": 7.8, "runtime": 22},
+					{"episode_number": 2, "name": "I Never Met the Dead Man", "overview": "S01E02", "still_path": "/s01e02.jpg", "air_date": "1999-04-11", "vote_average": 7.6, "runtime": 22},
+				},
+			})
+		case "/tv/1434/season/2":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"episodes": []map[string]any{
+					{"episode_number": 1, "name": "Peter, Peter, Caviar Eater", "overview": "S02E01", "still_path": "/s02e01.jpg", "air_date": "1999-09-23", "vote_average": 7.7, "runtime": 22},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	db := newServiceTestDB(t, &model.Library{}, &model.Series{}, &model.Media{}, &model.Person{})
+	repos := repository.New(db)
+	cfg := &config.Config{}
+	cfg.Secrets.TMDbAPIKey = "test-key"
+	cfg.Secrets.TMDbAPIProxy = upstream.URL
+	cfg.Secrets.TMDbImageProxy = upstream.URL + "/images"
+	log := zap.NewNop()
+	scraper := NewScraperService(cfg, log, repos, NewTMDbProvider(cfg, log, nil), nil, nil, nil, NewHub(log))
+
+	lib := model.Library{Name: "欧美剧", Path: "cloud://openlist/115/欧美剧", Type: "tv", Enabled: true}
+	if err := repos.DB.Create(&lib).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.Media{
+		{Base: model.Base{ID: "fg-s01e01"}, LibraryID: lib.ID, Title: "Family Guy", Path: "cloud://openlist/115/Family Guy/S01/Family Guy S01E01.mkv", SeasonNum: 1, EpisodeNum: 1, ScrapeStatus: "pending"},
+		{Base: model.Base{ID: "fg-s01e02"}, LibraryID: lib.ID, Title: "Family Guy", Path: "cloud://openlist/115/Family Guy/S01/Family Guy S01E02.mkv", SeasonNum: 1, EpisodeNum: 2, ScrapeStatus: "pending"},
+		{Base: model.Base{ID: "fg-s02e01"}, LibraryID: lib.ID, Title: "Family Guy", Path: "cloud://openlist/115/Family Guy/S02/Family Guy S02E01.mkv", SeasonNum: 2, EpisodeNum: 1, ScrapeStatus: "pending"},
+	}
+	if err := repos.DB.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{rows[0].ID, rows[1].ID, rows[2].ID}
+	result, err := scraper.ApplyManualMatchBatchWithOptions(t.Context(), ids, ManualScrapeRequest{
+		Source:    "tmdb",
+		MediaType: "tv",
+		Title:     "恶搞之家",
+		TMDbID:    1434,
+	}, ScrapeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.AppliedIDs) != 3 || len(result.Errors) != 0 {
+		t.Fatalf("batch result = %+v, want three applied rows", result)
+	}
+
+	mu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	mu.Unlock()
+	counts := map[string]int{}
+	for _, path := range gotPaths {
+		counts[path]++
+		if strings.Contains(path, "/episode/") {
+			t.Fatalf("batch apply fetched per-episode endpoint: paths=%v", gotPaths)
+		}
+	}
+	if counts["/tv/1434"] != 1 || counts["/tv/1434/season/1"] != 1 || counts["/tv/1434/season/2"] != 1 || len(gotPaths) != 3 {
+		t.Fatalf("unexpected TMDb request paths: %v", gotPaths)
+	}
+
+	var stored []model.Media
+	if err := repos.DB.Where("library_id = ?", lib.ID).Order("season_num ASC, episode_num ASC").Find(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 3 || stored[0].EpisodeTitle != "Death Has a Shadow" || stored[1].EpisodeTitle != "I Never Met the Dead Man" || stored[2].EpisodeTitle != "Peter, Peter, Caviar Eater" {
+		t.Fatalf("season episode metadata not applied: %+v", stored)
+	}
+	for _, media := range stored {
+		if media.Title != "恶搞之家" || media.OriginalName != "Family Guy" || media.TMDbID != 1434 || media.ScrapeStatus != "matched" || media.Actors != "Seth MacFarlane" {
+			t.Fatalf("shared series metadata not applied: %+v", media)
+		}
 	}
 }
 
