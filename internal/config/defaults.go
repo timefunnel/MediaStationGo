@@ -135,4 +135,5 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("resource_import.max_concurrent_per_user", 2)
 	v.SetDefault("resource_import.poll_seconds", 5)
 	v.SetDefault("resource_import.search_timeout_seconds", 30)
+	v.SetDefault("resource_import.bt4g_search_timeout_seconds", 70)
 }

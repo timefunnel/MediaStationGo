@@ -52,11 +52,11 @@ const cancelledStatuses = new Set(['cancelled', 'canceled'])
 
 export function supportsResourceSource(
   capabilities: ResourceSearchCapabilities | undefined,
-  source: 'pansou',
+  source: 'pansou' | 'bt4g',
 ): boolean {
   if (!capabilities) return false
   if (capabilities.sources?.includes(source)) return true
-  return capabilities.pansou === true
+  return source === 'pansou' ? capabilities.pansou === true : capabilities.bt4g === true
 }
 
 export function supportsResourceLLMRerank(capabilities: ResourceSearchCapabilities | undefined): boolean {

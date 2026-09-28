@@ -20,13 +20,14 @@ type Config struct {
 
 // ResourceImportConfig configures the trusted media-pipeline bridge.
 type ResourceImportConfig struct {
-	Enabled              bool   `mapstructure:"enabled"`
-	PipelineURL          string `mapstructure:"pipeline_url"`
-	PipelineToken        string `mapstructure:"pipeline_token"`
-	MaxConcurrent        int    `mapstructure:"max_concurrent"`
-	MaxConcurrentPerUser int    `mapstructure:"max_concurrent_per_user"`
-	PollSeconds          int    `mapstructure:"poll_seconds"`
-	SearchTimeoutSeconds int    `mapstructure:"search_timeout_seconds"`
+	Enabled                  bool   `mapstructure:"enabled"`
+	PipelineURL              string `mapstructure:"pipeline_url"`
+	PipelineToken            string `mapstructure:"pipeline_token"`
+	MaxConcurrent            int    `mapstructure:"max_concurrent"`
+	MaxConcurrentPerUser     int    `mapstructure:"max_concurrent_per_user"`
+	PollSeconds              int    `mapstructure:"poll_seconds"`
+	SearchTimeoutSeconds     int    `mapstructure:"search_timeout_seconds"`
+	BT4GSearchTimeoutSeconds int    `mapstructure:"bt4g_search_timeout_seconds"`
 }
 
 // ApiConfigConfig API 配置相关设置。

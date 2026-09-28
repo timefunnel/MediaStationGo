@@ -70,6 +70,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.License.ServerURL != defaultLicenseServerURL || cfg.License.PublicKey != defaultLicensePublicKey || cfg.License.HMACSecret != "" {
 		t.Fatalf("expected bundled license bridge defaults, got url=%q public_key=%q hmac=%q", cfg.License.ServerURL, cfg.License.PublicKey, cfg.License.HMACSecret)
 	}
+	if cfg.ResourceImport.SearchTimeoutSeconds != 30 || cfg.ResourceImport.BT4GSearchTimeoutSeconds != 70 {
+		t.Fatalf("unexpected default resource import search timeouts: %+v", cfg.ResourceImport)
+	}
 	// Re-loading must reuse the persisted secret on disk.
 	cfg2, err := Load()
 	if err != nil {
@@ -113,6 +116,8 @@ func TestEnvOverride(t *testing.T) {
 	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_PIPELINE_TOKEN", "test-pipeline-token")
 	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_MAX_CONCURRENT", "4")
 	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_MAX_CONCURRENT_PER_USER", "2")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_SEARCH_TIMEOUT_SECONDS", "30")
+	t.Setenv("MEDIASTATION_RESOURCE_IMPORT_BT4G_SEARCH_TIMEOUT_SECONDS", "70")
 	t.Setenv("MEDIASTATION_APP_WINDOWS_UPDATE_DOWNLOAD_SOURCES", "https://one.example/,direct")
 	t.Setenv("MEDIASTATION_APP_WINDOWS_UPDATE_POLICY_MAX_AGE_SECONDS", "3600")
 	cfg, err := Load()
@@ -145,6 +150,9 @@ func TestEnvOverride(t *testing.T) {
 	}
 	if cfg.ResourceImport.MaxConcurrent != 4 || cfg.ResourceImport.MaxConcurrentPerUser != 2 {
 		t.Fatalf("unexpected resource import concurrency config: %+v", cfg.ResourceImport)
+	}
+	if cfg.ResourceImport.SearchTimeoutSeconds != 30 || cfg.ResourceImport.BT4GSearchTimeoutSeconds != 70 {
+		t.Fatalf("unexpected resource import search timeouts: %+v", cfg.ResourceImport)
 	}
 	if cfg.App.WindowsUpdateDownloadSources != "https://one.example/,direct" || cfg.App.WindowsUpdatePolicyMaxAgeSeconds != 3600 {
 		t.Fatalf("unexpected Windows update policy from env: %+v", cfg.App)

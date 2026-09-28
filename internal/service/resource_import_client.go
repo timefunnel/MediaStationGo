@@ -37,9 +37,10 @@ type resourcePipelineMigrationRequest struct {
 }
 
 type resourcePipelineHTTPClient struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL          string
+	token            string
+	client           *http.Client
+	bt4gSearchClient *http.Client
 }
 
 type resourcePipelineError struct {
@@ -154,21 +155,34 @@ func newResourcePipelineHTTPClient(cfg config.ResourceImportConfig) (*resourcePi
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	bt4gSearchTimeout := time.Duration(cfg.BT4GSearchTimeoutSeconds) * time.Second
+	if bt4gSearchTimeout <= 0 {
+		bt4gSearchTimeout = 70 * time.Second
+	}
 	return &resourcePipelineHTTPClient{
-		baseURL: base,
-		token:   token,
-		client: &http.Client{
-			Timeout: timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		baseURL:          base,
+		token:            token,
+		client:           newResourcePipelineHTTPTransport(timeout),
+		bt4gSearchClient: newResourcePipelineHTTPTransport(bt4gSearchTimeout),
 	}, nil
+}
+
+func newResourcePipelineHTTPTransport(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func (c *resourcePipelineHTTPClient) Search(ctx context.Context, in resourcePipelineSearchRequest) (resourcePipelineSearchResponse, error) {
 	var out resourcePipelineSearchResponse
-	err := c.doJSON(ctx, http.MethodPost, "/v1/search", in, "", &out)
+	httpClient := c.client
+	if strings.EqualFold(strings.TrimSpace(in.Source), "bt4g") {
+		httpClient = c.bt4gSearchClient
+	}
+	err := c.doJSONWithClient(ctx, httpClient, http.MethodPost, "/v1/search", in, "", &out)
 	return out, err
 }
 
@@ -231,6 +245,10 @@ func (c *resourcePipelineHTTPClient) RetryImport(ctx context.Context, ownerID, i
 }
 
 func (c *resourcePipelineHTTPClient) doJSON(ctx context.Context, method, endpoint string, body any, idempotencyKey string, out any) error {
+	return c.doJSONWithClient(ctx, c.client, method, endpoint, body, idempotencyKey, out)
+}
+
+func (c *resourcePipelineHTTPClient) doJSONWithClient(ctx context.Context, httpClient *http.Client, method, endpoint string, body any, idempotencyKey string, out any) error {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -251,7 +269,7 @@ func (c *resourcePipelineHTTPClient) doJSON(ctx context.Context, method, endpoin
 	if strings.TrimSpace(idempotencyKey) != "" {
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -70,7 +70,7 @@ type ResourceSearchDrawerProps = {
   onClose: () => void
 }
 
-type SearchSource = '' | 'pansou'
+type SearchSource = '' | 'pansou' | 'bt4g'
 
 type ResourceViewFilters = {
   resultQuery: string
@@ -152,6 +152,7 @@ export function ResourceSearchDrawer({
   )
   const currentPage = clampResourcePage(response?.page ?? 1, totalPages)
   const pansouAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'pansou')
+  const bt4gAvailable = capabilities === undefined || supportsResourceSource(capabilities, 'bt4g')
   const upgrading = Boolean(upgradeMediaID?.trim())
   const replenishing = Boolean(replenishment?.media_id.trim())
   const hasAppliedFilters = resourceFiltersActive(appliedFilters)
@@ -345,6 +346,13 @@ export function ResourceSearchDrawer({
     setFilters(cleared)
     setAppliedFilters(cleared)
     void runSearch(1, 'pansou', cleared)
+  }
+
+  const searchBT4G = () => {
+    const cleared = emptyResourceFilters()
+    setFilters(cleared)
+    setAppliedFilters(cleared)
+    void runSearch(1, 'bt4g', cleared)
   }
 
   const selectSource = (nextSource: SearchSource) => {
@@ -557,6 +565,7 @@ export function ResourceSearchDrawer({
                   source={source}
                   searching={searching}
                   pansou={pansouAvailable}
+                  bt4g={bt4gAvailable}
                   onSelect={selectSource}
                 />
                 {releaseDate?.trim() && (
@@ -676,7 +685,7 @@ export function ResourceSearchDrawer({
                 <div className="flex min-h-56 flex-col items-center justify-center text-center" aria-live="polite">
                   <LoaderCircle className="mb-3 h-8 w-8 animate-spin text-brand-500" />
                   <p className="text-sm font-medium text-ink-100">
-                    {source === 'pansou' ? '正在查找网盘资源…' : '正在查找资源…'}
+                    {source === 'pansou' ? '正在查找网盘资源…' : source === 'bt4g' ? '正在补查 BT4G 资源…' : '正在查找资源…'}
                   </p>
                 </div>
               )}
@@ -686,7 +695,9 @@ export function ResourceSearchDrawer({
                   failed
                   source={source}
                   pansouAvailable={pansouAvailable}
+                  bt4gAvailable={bt4gAvailable}
                   onSearchPansou={searchPansou}
+                  onSearchBT4G={searchBT4G}
                 />
               )}
 
@@ -696,9 +707,11 @@ export function ResourceSearchDrawer({
                     <ResourceSearchEmptyState
                       source={source}
                       pansouAvailable={pansouAvailable}
+                      bt4gAvailable={bt4gAvailable}
                       filtered={hasAppliedFilters}
                       onResetFilters={resetFilters}
                       onSearchPansou={searchPansou}
+                      onSearchBT4G={searchBT4G}
                     />
                   ) : (
                     <>
@@ -799,11 +812,13 @@ function SearchSourceControl({
   source,
   searching,
   pansou,
+  bt4g,
   onSelect,
 }: {
   source: SearchSource
   searching: boolean
   pansou: boolean
+  bt4g: boolean
   onSelect: (source: SearchSource) => void
 }) {
   return (
@@ -818,6 +833,16 @@ function SearchSourceControl({
         >
           普通
         </SourceButton>
+        {bt4g && (
+          <SourceButton
+            active={source === 'bt4g'}
+            disabled={searching}
+            loading={searching && source === 'bt4g'}
+            onClick={() => onSelect('bt4g')}
+          >
+            BT4G
+          </SourceButton>
+        )}
         {pansou && (
           <SourceButton
             active={source === 'pansou'}
@@ -960,18 +985,23 @@ function ResourceSearchEmptyState({
   failed = false,
   source,
   pansouAvailable,
+  bt4gAvailable,
   filtered = false,
   onResetFilters,
   onSearchPansou,
+  onSearchBT4G,
 }: {
   failed?: boolean
   source: SearchSource
   pansouAvailable: boolean
+  bt4gAvailable: boolean
   filtered?: boolean
   onResetFilters?: () => void
   onSearchPansou: () => void
+  onSearchBT4G: () => void
 }) {
   const canSearchPansou = pansouAvailable && source !== 'pansou'
+  const canSearchBT4G = bt4gAvailable && source !== 'bt4g'
   return (
     <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center" aria-live="polite">
       <span className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-sand-500">
@@ -981,18 +1011,28 @@ function ResourceSearchEmptyState({
         {filtered ? '当前筛选没有结果' : failed ? '当前搜索暂时未返回结果' : '没有找到相关资源'}
       </h3>
       <p className="mt-1 max-w-sm text-xs leading-5 text-sand-500">
-        {filtered ? '可以重置筛选条件后继续查看。' : canSearchPansou ? '可以改用网盘搜索继续查找。' : '可以调整关键词后重新查找。'}
+        {filtered ? '可以重置筛选条件后继续查看。' : canSearchBT4G && canSearchPansou ? '可以补查 BT4G，或改用网盘搜索。' : canSearchBT4G ? '可以单独补查 BT4G。' : canSearchPansou ? '可以改用网盘搜索继续查找。' : '可以调整关键词后重新查找。'}
       </p>
       {filtered && onResetFilters ? (
         <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onResetFilters}>
           <RotateCcw size={16} />
           重置筛选
         </button>
-      ) : canSearchPansou && (
-        <button type="button" className="btn-outline mt-4 h-10 px-4" onClick={onSearchPansou}>
-          <Globe size={16} />
-          网盘查找
-        </button>
+      ) : (canSearchBT4G || canSearchPansou) && (
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {canSearchBT4G && (
+            <button type="button" className="btn-outline h-10 px-4" onClick={onSearchBT4G}>
+              <Search size={16} />
+              BT4G 补查
+            </button>
+          )}
+          {canSearchPansou && (
+            <button type="button" className="btn-outline h-10 px-4" onClick={onSearchPansou}>
+              <Globe size={16} />
+              网盘查找
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
@@ -1054,7 +1094,10 @@ function ResourceCandidateRow({
 }
 
 function resourceSourceLabel(source: string): string {
-  return source.trim().toLowerCase() === 'pansou' ? '网盘' : source
+  const normalized = source.trim().toLowerCase()
+  if (normalized === 'pansou') return '网盘'
+  if (normalized === 'bt4g') return 'BT4G'
+  return source
 }
 
 function resourceResolutionLabel(value: string): string {

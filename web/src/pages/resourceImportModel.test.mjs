@@ -73,10 +73,13 @@ test('单 root 自动选择，多 root 必须显式选择', () => {
   assert.equal(resolveResourceRootID(roots, 'root-b'), 'root-b')
 })
 
-test('仅在后端声明能力时显示 Pansou 补查', () => {
+test('仅在后端声明能力时显示 Pansou 和 BT4G 补查', () => {
   assert.equal(supportsResourceSource(undefined, 'pansou'), false)
   assert.equal(supportsResourceSource({ pansou: true }, 'pansou'), true)
   assert.equal(supportsResourceSource({ sources: ['pansou'] }, 'pansou'), true)
+  assert.equal(supportsResourceSource(undefined, 'bt4g'), false)
+  assert.equal(supportsResourceSource({ bt4g: true }, 'bt4g'), true)
+  assert.equal(supportsResourceSource({ sources: ['bt4g'] }, 'bt4g'), true)
 })
 
 test('任务进度兼容 0-1 和 0-100 数值', () => {

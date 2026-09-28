@@ -10,6 +10,7 @@ export interface ResourceSearchRoot {
 export interface ResourceSearchCapabilities {
   sources?: string[]
   pansou?: boolean
+  bt4g?: boolean
   llm_rerank?: boolean
 }
 

@@ -3,12 +3,64 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
 )
+
+type resourcePipelineRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn resourcePipelineRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func TestResourcePipelineHTTPClientUsesDedicatedBT4GSearchTimeout(t *testing.T) {
+	client, err := newResourcePipelineHTTPClient(config.ResourceImportConfig{
+		PipelineURL:              "http://pipeline.example",
+		PipelineToken:            "secret",
+		SearchTimeoutSeconds:     30,
+		BT4GSearchTimeoutSeconds: 70,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.client.Timeout != 30*time.Second {
+		t.Fatalf("default timeout = %s", client.client.Timeout)
+	}
+	if client.bt4gSearchClient.Timeout != 70*time.Second {
+		t.Fatalf("BT4G timeout = %s", client.bt4gSearchClient.Timeout)
+	}
+	client.client.Transport = resourcePipelineSearchResponseTransport("normal")
+	client.bt4gSearchClient.Transport = resourcePipelineSearchResponseTransport("bt4g")
+
+	normal, err := client.Search(context.Background(), resourcePipelineSearchRequest{Query: "IPZZ-912"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt4g, err := client.Search(context.Background(), resourcePipelineSearchRequest{Query: "IPZZ-912", Source: "BT4G"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normal.SessionID != "normal" || bt4g.SessionID != "bt4g" {
+		t.Fatalf("unexpected search client routing: normal=%q bt4g=%q", normal.SessionID, bt4g.SessionID)
+	}
+}
+
+func resourcePipelineSearchResponseTransport(sessionID string) http.RoundTripper {
+	return resourcePipelineRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"session_id":"` + sessionID + `","items":[]}`)),
+			Request:    request,
+		}, nil
+	})
+}
 
 func TestResourcePipelineHTTPClientUsesBearerOwnerAndIdempotency(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
