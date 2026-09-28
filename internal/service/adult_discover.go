@@ -20,7 +20,8 @@ import (
 var (
 	adultListStrongPattern     = regexp.MustCompile(`(?is)<strong[^>]*>(.*?)</strong>`)
 	adultListDatePattern       = regexp.MustCompile(`(?:19|20)\d{2}-\d{2}-\d{2}`)
-	adultListScorePattern      = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?)`)
+	adultSlashDatePattern      = regexp.MustCompile(`\b(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/((?:19|20)\d{2})\b`)
+	adultListScorePattern      = regexp.MustCompile(`(?i)([0-9](?:\.[0-9]+)?)\s*(?:分|points?|,\s*by\b)`)
 	adultPerformerIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	adultMovieIDPattern        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	adultDiscoveryCodePattern  = regexp.MustCompile(`^[A-Z]{2,10}-[0-9]{2,8}(?:[A-Z]{1,4}[0-9]{1,4}|-[0-9]{1,4})?$`)
@@ -925,7 +926,21 @@ func firstAdultListImage(inner string) string {
 }
 
 func adultListReleaseDate(inner string) string {
-	return adultListDatePattern.FindString(inner)
+	if value := adultListDatePattern.FindString(inner); value != "" {
+		return value
+	}
+	match := adultSlashDatePattern.FindStringSubmatch(inner)
+	if len(match) < 4 {
+		return ""
+	}
+	month, _ := strconv.Atoi(match[1])
+	day, _ := strconv.Atoi(match[2])
+	year, _ := strconv.Atoi(match[3])
+	date := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	if date.Year() != year || int(date.Month()) != month || date.Day() != day {
+		return ""
+	}
+	return date.Format("2006-01-02")
 }
 
 func adultListRating(inner string) float32 {

@@ -62,7 +62,7 @@ func parseAdultDetailHTML(body, code, source, detailURL string) *Match {
 	}
 	match.DurationMinutes = adultPanelDurationMinutes(body)
 	match.Maker = adultPanelValue(body, "片商", "メーカー", "Maker")
-	genres := adultPanelList(body, "類別", "类别", "ジャンル", "Genre")
+	genres := adultPanelList(body, "類別", "类别", "ジャンル", "Genre", "Tags")
 	if source == "javdb" {
 		genres = normalizeJavDBGenreValues(genres)
 	}
@@ -133,11 +133,11 @@ func isLargeJavDBPreviewImageURL(raw string) bool {
 }
 
 func adultPanelDate(body string) string {
-	return adultListDatePattern.FindString(adultPanelValue(body, "日期", "發行日期", "发行日期", "発売日", "Release Date"))
+	return adultListReleaseDate(adultPanelValue(body, "日期", "發行日期", "发行日期", "発売日", "Release Date", "Released Date"))
 }
 
 func adultPanelDurationMinutes(body string) int {
-	value := adultPanelValue(body, "時長", "时长", "収録時間", "Runtime")
+	value := adultPanelValue(body, "時長", "时长", "収録時間", "Runtime", "Duration")
 	match := regexp.MustCompile(`\d+`).FindString(value)
 	minutes, _ := strconv.Atoi(match)
 	return minutes
@@ -228,7 +228,7 @@ func firstAdultPeople(body, source, detailURL string) []PersonMetadata {
 			if strings.EqualFold(strings.TrimSpace(source), "javdb") {
 				sourceID = adultPerformerSourceID(profileURL)
 				tailEnd := min(len(body), found[1]+256)
-				if sourceID == "" || !adultJavDBFemaleAfterAnchorPattern.MatchString(body[found[1]:tailEnd]) {
+				if sourceID == "" || !adultJavDBFemaleActor(attrs, body[found[1]:tailEnd]) {
 					continue
 				}
 			}
@@ -253,6 +253,12 @@ func firstAdultPeople(body, source, detailURL string) []PersonMetadata {
 		}
 	}
 	return deduplicatePersonMetadata(people)
+}
+
+func adultJavDBFemaleActor(attrs map[string]string, afterAnchor string) bool {
+	classes := " " + strings.ToLower(strings.Join(strings.Fields(attrs["class"]), " ")) + " "
+	return strings.Contains(classes, " actor-female ") ||
+		adultJavDBFemaleAfterAnchorPattern.MatchString(afterAnchor)
 }
 
 func adultActorImageName(body string) string {

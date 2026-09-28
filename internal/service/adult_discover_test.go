@@ -38,6 +38,21 @@ func TestParseJavDBMovieList(t *testing.T) {
 	}
 }
 
+func TestParseJavDBMovieListReadsCurrentEnglishMetadata(t *testing.T) {
+	body := `<a href="/v/0eE3ak" class="box" title="Current title">
+<div class="video-title"><strong>ATID-698</strong> Current title</div>
+<div class="score"><span class="value">3.99, by 301 users</span></div>
+<div class="meta">09/29/2026</div></a>`
+	items := parseJavDBMovieList(body, "https://javdb.com")
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+	item := items[0]
+	if item.ReleaseDate != "2026-09-29" || item.Year != 2026 || item.Rating != 3.99 {
+		t.Fatalf("current English metadata = %#v", item)
+	}
+}
+
 func TestParseJavDBMovieListKeepsOriginalCover(t *testing.T) {
 	body := `<a href="/v/1Axvvw" class="box" title="Sample title">
 <div class="cover"><img loading="lazy" src="https://c0.jdbstatic.com/covers/1a/1Axvvw.jpg"></div>

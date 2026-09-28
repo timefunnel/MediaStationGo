@@ -73,6 +73,33 @@ func TestParseAdultDetailHTML(t *testing.T) {
 	}
 }
 
+func TestParseAdultDetailHTMLReadsCurrentEnglishJavDBMetadata(t *testing.T) {
+	body := `<html>
+<h2 class="title"><strong>ATID-698 Current title</strong></h2>
+<div class="panel-block"><strong>Released Date:</strong><span class="value">09/29/2026</span></div>
+<div class="panel-block"><strong>Duration:</strong><span class="value">120 minute(s)</span></div>
+<div class="panel-block"><strong>Maker:</strong><span class="value">Attackers</span></div>
+<div class="panel-block"><strong>Rating:</strong><span class="value">3.99, by 301 users</span></div>
+<div class="panel-block"><strong>Tags:</strong><span class="value">Humiliation, Female Investigator</span></div>
+<div class="panel-block"><strong>Actor(s):</strong><span class="value">
+<a class="actor-female" href="/actors/QDvG">天川そら</a>, <a href="/actors/75MP">大島丈</a>
+</span></div>
+</html>`
+	got := parseAdultDetailHTML(body, "ATID-698", "javdb", "https://javdb.com/v/0eE3ak")
+	if got == nil {
+		t.Fatal("parseAdultDetailHTML returned nil")
+	}
+	if got.ReleaseDate != "2026-09-29" || got.Year != 2026 || got.DurationMinutes != 120 || got.Rating != 3.99 {
+		t.Fatalf("current English fields = release %q year %d duration %d rating %.2f", got.ReleaseDate, got.Year, got.DurationMinutes, got.Rating)
+	}
+	if got.Maker != "Attackers" || len(got.Genres) != 4 || got.Genres[2] != "Humiliation" || got.Genres[3] != "Female Investigator" {
+		t.Fatalf("current English maker/genres = maker %q genres %#v", got.Maker, got.Genres)
+	}
+	if len(got.Actors) != 1 || got.Actors[0] != "天川そら" || len(got.People) != 1 || got.People[0].SourceID != "QDvG" {
+		t.Fatalf("current English actors = actors %#v people %#v", got.Actors, got.People)
+	}
+}
+
 func TestParseAdultDetailHTMLRejectsMismatchedNumber(t *testing.T) {
 	body := `<html><h2 class="title"><strong>SIS-001 错误页面</strong></h2></html>`
 	if got := parseAdultDetailHTML(body, "ABF-362", "javdb", "https://javdb.com/v/wrong"); got != nil {
