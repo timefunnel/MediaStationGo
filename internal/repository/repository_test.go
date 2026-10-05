@@ -635,8 +635,16 @@ func TestMediaSearchFilteredMatchesCaseInsensitiveTermsAcrossFields(t *testing.T
 	if err != nil {
 		t.Fatalf("search overview and genre terms: %v", err)
 	}
+	if len(items) != 0 {
+		t.Fatalf("overview-only term must not satisfy the search: %#v", items)
+	}
+
+	items, err = repos.Media.SearchFiltered(t.Context(), "taxi crime", 10, MediaQueryFilter{IncludeNSFW: true})
+	if err != nil {
+		t.Fatalf("search title and genre terms: %v", err)
+	}
 	if len(items) != 1 || items[0].ID != "taxi" {
-		t.Fatalf("overview/genre split search should match taxi only: %#v", items)
+		t.Fatalf("title/genre split search should match taxi only: %#v", items)
 	}
 
 	items, err = repos.Media.SearchFiltered(t.Context(), "dune part", 10, MediaQueryFilter{IncludeNSFW: true})

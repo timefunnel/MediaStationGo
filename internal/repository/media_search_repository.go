@@ -160,11 +160,8 @@ func (r *MediaRepository) searchFilteredLIKE(ctx context.Context, query string, 
 	q = applyMediaQueryFilter(q, filter)
 	terms := mediaSearchTerms(query)
 	for _, term := range terms {
-		like := "%" + escapeLike(term) + "%"
-		q = q.Where(
-			"(LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(actors, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(search_pinyin, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(search_initials, '')) LIKE ? ESCAPE '\\')",
-			like, like, like, like, like, like, like, like, like,
-		)
+		condition, args := MediaSearchTermSQL(term, "")
+		q = q.Where(condition, args...)
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

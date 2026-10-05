@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
 
 type embyMediaSearch struct {
@@ -40,11 +41,8 @@ func applyEmbyMediaSearch(q *gorm.DB, p ItemsParams) *gorm.DB {
 		return q.Where("(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\')", pattern, pattern)
 	}
 	for _, term := range search.terms {
-		pattern := "%" + escapeEmbyLike(term) + "%"
-		q = q.Where(
-			"(LOWER(COALESCE(media.title, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.original_name, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.relative_path, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.overview, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.genres, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.actors, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.search_pinyin, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(media.search_initials, '')) LIKE ? ESCAPE '\\')",
-			pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
-		)
+		condition, args := repository.MediaSearchTermSQL(term, "media")
+		q = q.Where(condition, args...)
 	}
 	return q
 }
@@ -72,7 +70,6 @@ func embyMediaMatchesSearch(row model.Media, p ItemsParams) bool {
 	values = append(values,
 		strings.ToLower(row.Path),
 		strings.ToLower(row.RelativePath),
-		strings.ToLower(row.Overview),
 		strings.ToLower(row.Genres),
 		strings.ToLower(row.Actors),
 		strings.ToLower(row.SearchPinyin),
