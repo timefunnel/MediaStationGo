@@ -10,7 +10,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-const embyFolderCoverTagVersion = "folder-cover-grid-v6-jellyfin-shape"
+const embyFolderCoverTagVersion = "folder-cover-gallery-v7"
 
 type EmbyFolderCoverArtwork struct {
 	MediaID   string
@@ -87,7 +87,7 @@ func (e *EmbyService) FolderCoverTag(ctx context.Context, id, imageType string) 
 func EmbyFolderCoverTag(folderID string, covers []EmbyFolderCoverArtwork) string {
 	items := make([][]string, 0, len(covers))
 	for _, cover := range covers {
-		items = append(items, []string{cover.MediaID, cover.ImageType, cover.Tag})
+		items = append(items, []string{cover.MediaID, cover.ImageType, cover.Tag, cover.URL})
 	}
 	payload := []any{embyFolderCoverTagVersion, strings.TrimSpace(folderID), items}
 	body, err := json.Marshal(payload)

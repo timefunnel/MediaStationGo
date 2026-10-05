@@ -7,6 +7,18 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
+func TestEmbyFolderCoverTagChangesWithArtworkURL(t *testing.T) {
+	artwork := EmbyFolderCoverArtwork{MediaID: "movie", ImageType: "Primary", Tag: "movie", URL: "https://img.example/old.jpg"}
+	before := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork})
+	if again := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork}); again != before {
+		t.Fatal("unchanged artwork must retain its cache tag")
+	}
+	artwork.URL = "https://img.example/new.jpg"
+	if after := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork}); after == before {
+		t.Fatal("replacing a poster must invalidate the generated library cover")
+	}
+}
+
 func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Base: model.Base{ID: "lib-movies"}, Name: "电影", Path: "/media/movies", Type: "movie", Enabled: true}
@@ -48,8 +60,8 @@ func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 		t.Fatalf("unexpected first artwork metadata: %#v", artworks[0])
 	}
 	tag := svc.FolderCoverTag(t.Context(), lib.ID, "Primary")
-	if tag != "633957117b943d361c7f31f9eeca792c" {
-		t.Fatalf("folder tag = %q, want legacy proxy tag", tag)
+	if tag == "" || tag == "633957117b943d361c7f31f9eeca792c" {
+		t.Fatalf("folder tag = %q, want a nonempty tag distinct from the old grid", tag)
 	}
 
 	view := svc.libraryAsView(t.Context(), &lib)

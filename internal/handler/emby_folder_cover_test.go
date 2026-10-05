@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bytes"
+	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +26,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
-func TestEmbyLibraryImageServesFolderCoverGrid(t *testing.T) {
+func TestEmbyLibraryImageServesFolderCoverGallery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
 	posterA := writeTestPNG(t, filepath.Join(dir, "poster-a.png"), color.RGBA{220, 40, 40, 255})
@@ -101,6 +104,78 @@ func TestEmbyLibraryImageServesFolderCoverGrid(t *testing.T) {
 	}
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
 		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+}
+
+func TestEmbyFolderCoverGalleryPreservesPosterEdges(t *testing.T) {
+	// Edge markers catch the old strip renderer's horizontal/vertical cropping.
+	edges := []color.RGBA{
+		{255, 0, 0, 255}, {0, 255, 0, 255},
+		{0, 0, 255, 255}, {255, 255, 0, 255},
+	}
+	poster := image.NewRGBA(image.Rect(0, 0, 80, 120))
+	draw.Draw(poster, poster.Bounds(), &image.Uniform{C: color.RGBA{100, 100, 100, 255}}, image.Point{}, draw.Src)
+	for i, rect := range []image.Rectangle{
+		image.Rect(10, 0, 70, 10), image.Rect(10, 110, 70, 120),
+		image.Rect(0, 10, 10, 110), image.Rect(70, 10, 80, 110),
+	} {
+		draw.Draw(poster, rect, &image.Uniform{C: edges[i]}, image.Point{}, draw.Src)
+	}
+	for count := 1; count <= embyFolderCoverGridLimit; count++ {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			images := make([]image.Image, count)
+			for i := range images {
+				images[i] = poster
+			}
+			body, err := buildEmbyFolderCoverGallery(images, 320, 180)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := png.Decode(bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if img.Bounds() != image.Rect(0, 0, 320, 180) {
+				t.Fatalf("unexpected cover dimensions: %v", img.Bounds())
+			}
+			for _, edge := range edges {
+				found := false
+				for y := 0; y < 180 && !found; y++ {
+					for x := 0; x < 320; x++ {
+						if color.RGBAModel.Convert(img.At(x, y)).(color.RGBA) == edge {
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("poster edge %v was cropped out", edge)
+				}
+			}
+			second, err := buildEmbyFolderCoverGallery(images, 320, 180)
+			if err != nil || !bytes.Equal(body, second) {
+				t.Fatalf("identical artwork must produce identical cover bytes: %v", err)
+			}
+		})
+	}
+}
+
+func TestEmbyFolderCoverGalleryRejectsMissingArtwork(t *testing.T) {
+	for _, images := range [][]image.Image{nil, {nil}, {image.NewRGBA(image.Rectangle{})}} {
+		if _, err := buildEmbyFolderCoverGallery(images, 320, 180); err == nil {
+			t.Fatal("missing artwork must not produce a successful cover")
+		}
+	}
+}
+
+func TestEmbyFolderCoverGalleryPreservesLandscapeAspect(t *testing.T) {
+	images := []image.Image{image.NewRGBA(image.Rect(0, 0, 160, 90))}
+	rects := embyFolderCoverPosterRects(320, 180, images)
+	if len(rects) != 1 || !rects[0].In(image.Rect(0, 0, 320, 180)) {
+		t.Fatalf("landscape artwork outside cover: %v", rects)
+	}
+	if delta := absInt(rects[0].Dx()*9 - rects[0].Dy()*16); delta > 9 {
+		t.Fatalf("landscape aspect was distorted: %v", rects[0])
 	}
 }
 
