@@ -1,14 +1,13 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRight, Film, FolderOpen, Library as LibraryIcon, Music, PlayCircle, RefreshCw, Tv } from 'lucide-react'
+import { ArrowRight, Film, Library as LibraryIcon, Music, PlayCircle, RefreshCw, Tv } from 'lucide-react'
 
-import { imageURL } from '../api/client'
 import { MediaCard } from '../components/MediaCard'
-import { artworkScore, seriesCardLink, type SeriesCard } from '../utils/groupSeries'
-import { mediaPrimaryArtworkURL } from '../utils/mediaArtwork'
+import { LibraryCoverImage } from '../components/LibraryCoverImage'
+import { seriesCardLink } from '../utils/groupSeries'
 import { libraryDisplayPath } from './libraryDisplayModel'
-import { mediaTime, type LibraryPreview } from './librariesPageModel'
+import type { LibraryPreview } from './librariesPageModel'
 
 const TYPE_ICONS: Record<string, ReactNode> = {
   movie: <Film size={18} />,
@@ -119,7 +118,6 @@ export function LibrariesContent({ previews }: { previews: LibraryPreview[] }) {
 
 function LibraryEntryCard({ preview }: { preview: LibraryPreview }) {
   const library = preview.library
-  const artwork = libraryArtworkItems(preview.cards)
   const displayPath = libraryDisplayPath(library.path)
 
   return (
@@ -127,42 +125,7 @@ function LibraryEntryCard({ preview }: { preview: LibraryPreview }) {
       to={`/library/${library.id}`}
       className="group flex overflow-hidden rounded-3xl border border-sand-200 bg-white p-3 shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover"
     >
-      <div className="relative h-[5.0625rem] w-36 shrink-0 overflow-hidden rounded-2xl bg-slate-950">
-        {artwork.length > 0 ? (
-          <>
-            <img
-              src={imageURL(artwork[0].src, artwork[0].version, { maxWidth: 180, quality: 76 })}
-              alt=""
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              className="absolute inset-0 h-full w-full scale-125 object-cover opacity-40 blur-md"
-              onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-b from-slate-950/20 to-slate-950/[0.65]" />
-            <div className="absolute inset-0 flex items-center justify-center gap-1.5 px-2">
-              {artwork.map(({ src, version }, index) => (
-                <img
-                  key={`${src}-${index}`}
-                  src={imageURL(src, version, { maxWidth: 180, quality: 76 })}
-                  alt=""
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  className="aspect-[2/3] min-w-0 rounded-[3px] bg-slate-900 object-contain ring-1 ring-white/[0.15] shadow-[0_3px_8px_rgba(0,0,0,0.45)]"
-                  style={{
-                    width: Math.min(43, (126 - (artwork.length - 1) * 6) / artwork.length),
-                    transform: `translateY(${(index - (artwork.length - 1) / 2) * 2}px)`,
-                  }}
-                  onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
-                />
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="flex h-full items-center justify-center text-brand-400">
-            {TYPE_ICONS[library.type] ?? <FolderOpen size={34} />}
-          </div>
-        )}
-      </div>
+      <LibraryCoverImage library={library} />
       <div className="flex min-w-0 flex-1 flex-col justify-between px-4 py-1">
         <div>
           <div className="mb-1 inline-flex rounded-full bg-sand-100 px-2 py-0.5 text-[10px] font-bold text-sand-600">
@@ -227,15 +190,4 @@ function LibraryShelf({ preview }: { preview: LibraryPreview }) {
       )}
     </section>
   )
-}
-
-function libraryArtworkItems(cards: SeriesCard[]): Array<{ src: string; version?: string }> {
-  return [...cards]
-    .sort((a, b) => artworkScore(b.rep) - artworkScore(a.rep) || mediaTime(b.rep) - mediaTime(a.rep))
-    .map((card) => ({
-      src: mediaPrimaryArtworkURL(card.rep),
-      version: card.rep.updated_at,
-    }))
-    .filter((item) => Boolean(item.src))
-    .slice(0, 4)
 }

@@ -16,6 +16,7 @@ export interface Library {
   type: string
   title_mode: 'smart' | 'filename'
   generate_artwork: boolean
+  cover_media_ids?: string[]
   enabled: boolean
   roots?: LibraryRoot[]
   created_at: string

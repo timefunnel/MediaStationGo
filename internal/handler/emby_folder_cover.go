@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
@@ -37,25 +38,17 @@ func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, id, image
 	}
 	artworks, err := svc.Emby.FolderCoverArtwork(c.Request.Context(), id, imageType, embyFolderCoverGridLimit)
 	if err != nil || len(artworks) == 0 {
-		return false
-	}
-	images := make([]image.Image, 0, len(artworks))
-	for _, artwork := range artworks {
-		img, err := fetchEmbyFolderArtwork(c.Request.Context(), svc, artwork.URL)
-		if err != nil {
-			continue
+		if err != nil && svc.Log != nil {
+			svc.Log.Warn("library cover selection failed", zap.String("library_id", id), zap.Error(err))
 		}
-		images = append(images, img)
-		if len(images) >= embyFolderCoverGridLimit {
-			break
-		}
-	}
-	if len(images) == 0 {
 		return false
 	}
 	width, height := embyFolderCoverDimensions(c)
-	body, err := buildEmbyFolderCoverGallery(images, width, height)
+	body, err := renderLibraryCover(c.Request.Context(), svc, artworks, width, height)
 	if err != nil {
+		if svc.Log != nil {
+			svc.Log.Warn("library cover rendering failed", zap.String("library_id", id), zap.Error(err))
+		}
 		return false
 	}
 	tag := service.EmbyFolderCoverTag(id, artworks)

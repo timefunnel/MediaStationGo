@@ -8,6 +8,7 @@ type Library struct {
 	Type            string        `gorm:"size:16;not null;default:movie" json:"type"` // movie / tv / anime / music
 	TitleMode       string        `gorm:"size:16;not null;default:smart" json:"title_mode"`
 	GenerateArtwork bool          `gorm:"not null;default:false" json:"generate_artwork"`
+	CoverMediaIDs   []string      `gorm:"serializer:json;type:text;not null;default:'[]'" json:"cover_media_ids"`
 	Enabled         bool          `gorm:"default:true" json:"enabled"`
 	Roots           []LibraryRoot `gorm:"foreignKey:LibraryID" json:"roots,omitempty"`
 }

@@ -22,6 +22,7 @@ type LibraryTableProps = {
   onRunGeneratedArtwork: (library: Library) => void
   onCancelGeneratedArtwork: (library: Library) => void
   onRemoveLibrary: (library: Library) => void
+  onConfigureCover: (library: Library) => void
 }
 
 export function AdminLibraryTable({ libs, ...actions }: LibraryTableProps) {
@@ -200,9 +201,13 @@ function LibraryActionsCell({
   onRunGeneratedArtwork,
   onCancelGeneratedArtwork,
   onRemoveLibrary,
+  onConfigureCover,
 }: LibraryTableRowProps) {
   return (
     <ActionMenu label="媒体库操作">
+      <MenuButton icon={<Image size={14} />} label="设置入口封面" onClick={() => onConfigureCover(library)}>
+        设置入口封面
+      </MenuButton>
       <MenuButton
         icon={library.enabled ? <PowerOff size={14} /> : <Power size={14} />}
         label={library.enabled ? '停用媒体库' : '启用媒体库'}

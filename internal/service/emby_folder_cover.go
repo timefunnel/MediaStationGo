@@ -30,6 +30,25 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 	if err != nil || lib == nil {
 		return nil, err
 	}
+	if len(lib.CoverMediaIDs) > 0 {
+		artworks, _, err := e.LibraryCoverSelection(ctx, id, lib.CoverMediaIDs)
+		return artworks, err
+	}
+	return e.automaticFolderCoverArtwork(ctx, lib, imageType, limit)
+}
+
+func (e *EmbyService) AutomaticFolderCoverArtwork(ctx context.Context, id, imageType string, limit int) ([]EmbyFolderCoverArtwork, error) {
+	lib, err := e.repo.Library.FindByID(ctx, id)
+	if err != nil || lib == nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 8 {
+		limit = 4
+	}
+	return e.automaticFolderCoverArtwork(ctx, lib, imageType, limit)
+}
+
+func (e *EmbyService) automaticFolderCoverArtwork(ctx context.Context, lib *model.Library, imageType string, limit int) ([]EmbyFolderCoverArtwork, error) {
 	libraryIDs := e.mergedLibraryIDs(ctx, lib.ID)
 	if len(libraryIDs) == 0 {
 		libraryIDs = []string{lib.ID}

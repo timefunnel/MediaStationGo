@@ -1,8 +1,12 @@
+import { useState } from 'react'
+import type { Library } from '../types'
+import { LibraryCoverDialog } from '../components/LibraryCoverDialog'
 import { AdminLibraryCreateForm } from './AdminLibraryPanelSections'
 import { AdminLibraryTable } from './AdminLibraryTable'
 import { useAdminLibraryPanel } from './useAdminLibraryPanel'
 
 export function AdminLibraryPanel() {
+  const [coverLibrary, setCoverLibrary] = useState<Library | null>(null)
   const { libs, createForm, editableRoots, rootActions, libraryActions } = useAdminLibraryPanel()
 
   return (
@@ -35,7 +39,9 @@ export function AdminLibraryPanel() {
         onRunGeneratedArtwork={libraryActions.runGeneratedArtwork}
         onCancelGeneratedArtwork={libraryActions.cancelGeneratedArtwork}
         onRemoveLibrary={libraryActions.removeLibrary}
+        onConfigureCover={setCoverLibrary}
       />
+      {coverLibrary && <LibraryCoverDialog library={coverLibrary} onClose={() => setCoverLibrary(null)} />}
     </div>
   )
 }

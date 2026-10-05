@@ -93,6 +93,12 @@ export interface ScrapePreviewRow {
   episode_part_num: number
 }
 
+export interface LibraryCoverConfig {
+  media_ids: string[]
+  items: Array<{ id: string; title: string }> | null
+  selection_error?: string
+}
+
 export interface TMDbScrapeSummary {
   tmdb_id: number
   title: string
@@ -230,6 +236,22 @@ export const libraryAPI = {
 
   update: (id: string, patch: { enabled?: boolean; title_mode?: 'smart' | 'filename'; generate_artwork?: boolean }) =>
     api.patch<Library>(`/libraries/${id}`, patch).then((r) => r.data),
+
+  cover: (id: string) => api.get<LibraryCoverConfig>(`/libraries/${id}/cover`).then((r) => r.data),
+  saveCover: (id: string, media_ids: string[]) => api.put(`/libraries/${id}/cover`, { media_ids }).then((r) => r.data),
+  previewCover: async (id: string, media_ids: string[]) => {
+    try {
+      const response = await api.post<Blob>(`/libraries/${id}/cover/preview`, { media_ids }, { responseType: 'blob' })
+      return response.data
+    } catch (error) {
+      const data = (error as { response?: { data?: Blob } }).response?.data
+      if (data instanceof Blob) {
+        const payload: { error?: string } = JSON.parse(await data.text())
+        throw Object.assign(new Error(payload.error || '封面预览失败'), { cause: error })
+      }
+      throw error
+    }
+  },
 
   remove: (id: string) => api.delete(`/libraries/${id}`).then((r) => r.data),
 
