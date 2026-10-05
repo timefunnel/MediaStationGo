@@ -8,6 +8,16 @@ import (
 	"gorm.io/gorm"
 )
 
+const embySeriesAnchorOrder = `
+CASE WHEN COALESCE(part_group_key, '') <> '' THEN CASE WHEN part_index > 0 THEN part_index ELSE 2147483647 END ELSE 0 END ASC,
+CASE WHEN COALESCE(part_group_key, '') <> '' THEN CASE WHEN LOWER(TRIM(path)) LIKE 'cloud://%' OR LOWER(TRIM(strm_url)) LIKE '%/api/cloud/play/%' THEN 1 ELSE 0 END ELSE 0 END ASC,
+CASE WHEN COALESCE(part_group_key, '') <> '' THEN width * height ELSE 0 END DESC,
+CASE WHEN COALESCE(part_group_key, '') <> '' THEN size_bytes ELSE 0 END DESC,
+CASE WHEN COALESCE(part_group_key, '') = '' THEN release_date ELSE '' END DESC,
+CASE WHEN COALESCE(part_group_key, '') = '' THEN year ELSE 0 END DESC,
+created_at DESC, CASE WHEN COALESCE(part_group_key, '') <> '' THEN part_index ELSE 0 END ASC,
+CASE WHEN COALESCE(part_group_key, '') <> '' THEN id ELSE '' END ASC, id DESC`
+
 func applyEmbyBrowseGenres(q *gorm.DB, p ItemsParams) *gorm.DB {
 	if !hasEmbyGenreFilter(p) {
 		return q
@@ -105,15 +115,7 @@ func (e *EmbyService) seriesPageSQLMode(ctx context.Context, libraryID string, p
 MAX(CASE WHEN COALESCE(part_group_key, '') <> '' THEN 1 ELSE 0 END) AS is_multipart,
 MAX(media.created_at) AS added_at, MAX(NULLIF(media.emby_premiere_date, '')) AS premiere,
 MAX(CASE WHEN media.year > 0 THEN media.year ELSE NULL END) AS production_year`).Group(keyColumn)
-	anchorOrder := `
-CASE WHEN COALESCE(part_group_key, '') <> '' THEN CASE WHEN part_index > 0 THEN part_index ELSE 2147483647 END ELSE 0 END ASC,
-CASE WHEN COALESCE(part_group_key, '') <> '' THEN CASE WHEN LOWER(TRIM(path)) LIKE 'cloud://%' OR LOWER(TRIM(strm_url)) LIKE '%/api/cloud/play/%' THEN 1 ELSE 0 END ELSE 0 END ASC,
-CASE WHEN COALESCE(part_group_key, '') <> '' THEN width * height ELSE 0 END DESC,
-CASE WHEN COALESCE(part_group_key, '') <> '' THEN size_bytes ELSE 0 END DESC,
-CASE WHEN COALESCE(part_group_key, '') = '' THEN release_date ELSE '' END DESC,
-CASE WHEN COALESCE(part_group_key, '') = '' THEN year ELSE 0 END DESC,
-created_at DESC, CASE WHEN COALESCE(part_group_key, '') <> '' THEN part_index ELSE 0 END ASC,
-CASE WHEN COALESCE(part_group_key, '') <> '' THEN id ELSE '' END ASC, id DESC`
+	anchorOrder := embySeriesAnchorOrder
 	if latest {
 		anchorOrder = "media.created_at DESC, media.id DESC"
 	}

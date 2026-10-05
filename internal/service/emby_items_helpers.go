@@ -16,10 +16,10 @@ func containsItemType(types []string, want string) bool {
 }
 
 func normalizeEmbyGlobalSearchParams(p ItemsParams) ItemsParams {
-	if !embyHasMediaSearch(p) || strings.TrimSpace(p.ParentID) != "" {
+	if !embyHasMediaSearch(p) || strings.TrimSpace(p.ParentID) != "" || len(p.IncludeItemTypes) > 0 {
 		return p
 	}
-	p.IncludeItemTypes = nil
+	p.IncludeItemTypes = []string{"Movie", "Series"}
 	return p
 }
 

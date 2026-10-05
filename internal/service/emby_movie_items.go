@@ -173,7 +173,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 			}
 			var total int64
 			movieRows, total, err = e.collapsedMediaPageSQL(ctx, movieQ, pageParams, queryOrder, false,
-				!strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending"))
+				!strings.EqualFold(firstCSVValue(p.SortOrder), "Ascending"), false)
 			if err != nil {
 				return nil, err
 			}

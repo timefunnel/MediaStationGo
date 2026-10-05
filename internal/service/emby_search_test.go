@@ -145,7 +145,7 @@ func TestEmbyNameStartsWithMatchesTitlePrefixOnly(t *testing.T) {
 	}
 }
 
-func TestEmbyGlobalSearchIgnoresClientItemTypeHints(t *testing.T) {
+func TestEmbyGlobalSearchReturnsSeriesCards(t *testing.T) {
 	svc := newTestEmbyService(t)
 	movieLib := model.Library{Name: "电影", Path: `/media/movie`, Type: "movie", Enabled: true}
 	if err := svc.repo.Library.Create(t.Context(), &movieLib); err != nil {
@@ -177,7 +177,7 @@ func TestEmbyGlobalSearchIgnoresClientItemTypeHints(t *testing.T) {
 	}
 	items := out["Items"].([]map[string]any)
 	if len(items) != 2 {
-		t.Fatalf("global search should ignore client Movie,Series hints and include matching media rows, got %#v", items)
+		t.Fatalf("global search should include a movie and a series card, got %#v", items)
 	}
 	typesByID := map[string]any{}
 	for _, item := range items {
@@ -188,21 +188,22 @@ func TestEmbyGlobalSearchIgnoresClientItemTypeHints(t *testing.T) {
 	if typesByID["mermaid-movie"] != "Movie" {
 		t.Fatalf("global search with client hints dropped Movie result: %#v", items)
 	}
-	if typesByID["mermaid-series-ep1"] != "Episode" {
-		t.Fatalf("global search with client hints dropped episodic result: %#v", items)
+	if typesByID[svc.seriesIDForMedia(&rows[1])] != "Series" {
+		t.Fatalf("global search did not group the episode into its series card: %#v", items)
 	}
 }
 
-func TestNormalizeEmbyGlobalSearchParamsIgnoresClientItemTypeHints(t *testing.T) {
+func TestNormalizeEmbyGlobalSearchParamsPreservesExplicitTypes(t *testing.T) {
 	cases := []struct {
 		name string
 		in   ItemsParams
 		want []string
 	}{
-		{name: "default search", in: ItemsParams{SearchTerm: "美人鱼"}, want: nil},
-		{name: "movie only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie"}}, want: nil},
-		{name: "series only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Series"}}, want: nil},
-		{name: "movie and series global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie", "Series"}}, want: nil},
+		{name: "default search", in: ItemsParams{SearchTerm: "美人鱼"}, want: []string{"Movie", "Series"}},
+		{name: "movie only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie"}}, want: []string{"Movie"}},
+		{name: "series only global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Series"}}, want: []string{"Series"}},
+		{name: "episode global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Episode"}}, want: []string{"Episode"}},
+		{name: "movie and series global search", in: ItemsParams{SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie", "Series"}}, want: []string{"Movie", "Series"}},
 		{name: "movie and series without search", in: ItemsParams{IncludeItemTypes: []string{"Movie", "Series"}}, want: []string{"Movie", "Series"}},
 		{name: "library scoped search keeps hints", in: ItemsParams{ParentID: "library-1", SearchTerm: "美人鱼", IncludeItemTypes: []string{"Movie", "Series"}}, want: []string{"Movie", "Series"}},
 	}

@@ -144,7 +144,7 @@ func (e *EmbyService) LatestItems(ctx context.Context, userID, parentID string, 
 	// 100-500 条完整媒体记录再在 Go 内去重。
 	rows, _, err := e.collapsedMediaPageSQL(ctx, q, ItemsParams{
 		ParentID: parentID, Limit: limit, SortBy: "DateCreated", SortOrder: "Descending",
-	}, "media.created_at DESC, media.id DESC", false, true)
+	}, "media.created_at DESC, media.id DESC", false, true, false)
 	if err != nil {
 		return nil, err
 	}

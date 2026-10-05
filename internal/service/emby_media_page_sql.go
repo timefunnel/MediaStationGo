@@ -25,6 +25,7 @@ func (e *EmbyService) collapsedMediaPageSQL(
 	requestedOrder string,
 	resumeFilter bool,
 	descending bool,
+	groupSeries bool,
 ) ([]model.Media, int64, error) {
 	if e == nil || e.repo == nil || e.repo.DB == nil || scope == nil {
 		return []model.Media{}, 0, nil
@@ -45,9 +46,12 @@ func (e *EmbyService) collapsedMediaPageSQL(
 	if resumeFilter {
 		datePlayedSelect = "resume.watched_at AS emby_date_played"
 	}
-	const candidateColumns = `media.id, media.library_id, media.emby_version_key, media.part_group_key, media.part_index,
+	candidateColumns := `media.id, media.library_id, media.emby_version_key, media.part_group_key, media.part_index,
 media.strm_url, media.path, media.width, media.size_bytes, media.created_at, media.updated_at,
 media.release_date, media.year, media.title, media.rating`
+	if groupSeries {
+		candidateColumns += ", media.emby_list_key, media.emby_series_name, media.season_num, media.episode_num, media.part_group_title"
+	}
 	scoped := scope.Session(&gorm.Session{}).Select(
 		candidateColumns+", ("+libraryGroupSQL+") AS library_group, "+datePlayedSelect,
 		libraryGroupArgs...,
@@ -57,21 +61,39 @@ media.release_date, media.year, media.title, media.rating`
 	if strings.TrimSpace(p.ParentID) == "" {
 		groupKeySQL = "candidate.library_group || ':' || candidate.emby_version_key"
 	}
-	keyed := e.repo.DB.WithContext(ctx).Table("(?) AS candidate", scoped).
-		Select("candidate.*, " + groupKeySQL + " AS version_group")
+	keyedSelect := "candidate.*, " + groupKeySQL + " AS version_group"
+	if groupSeries {
+		seriesCondition := "candidate.season_num > 0 OR candidate.episode_num > 0 OR COALESCE(candidate.part_group_key, '') <> ''"
+		groupKeySQL = "CASE WHEN " + seriesCondition + " THEN 'series:' || candidate.emby_list_key ELSE 'media:' || " + groupKeySQL + " END"
+		keyedSelect = "candidate.*, " + groupKeySQL + " AS version_group, CASE WHEN " + seriesCondition + " THEN 1 ELSE 0 END AS is_series, " +
+			"CASE WHEN " + seriesCondition + " THEN candidate.emby_list_key ELSE candidate.id END AS public_id, " +
+			"CASE WHEN COALESCE(candidate.part_group_key, '') <> '' THEN COALESCE(NULLIF(TRIM(candidate.part_group_title), ''), candidate.title) " +
+			"WHEN " + seriesCondition + " THEN candidate.emby_series_name ELSE candidate.title END AS public_name"
+	}
+	keyed := e.repo.DB.WithContext(ctx).Table("(?) AS candidate", scoped).Select(keyedSelect)
 
 	candidateOrder := strings.ReplaceAll(requestedOrder, "media.", "candidate.")
 	candidateOrder = strings.ReplaceAll(candidateOrder, "resume.watched_at", "candidate.emby_date_played")
 	if strings.TrimSpace(candidateOrder) == "" {
 		candidateOrder = "candidate.release_date DESC, candidate.year DESC, candidate.created_at DESC, candidate.id DESC"
 	}
+	if groupSeries {
+		candidateOrder = strings.ReplaceAll(candidateOrder, "candidate.title", "candidate.public_name")
+		candidateOrder = strings.ReplaceAll(candidateOrder, "candidate.id", "candidate.public_id")
+		if !strings.Contains(candidateOrder, "candidate.public_id") {
+			candidateOrder += ", candidate.public_id " + embySortDirection(descending)
+		}
+	}
 	representativeOrder := `
 CASE WHEN TRIM(COALESCE(candidate.part_group_key, '')) <> '' AND candidate.part_index > 0 THEN 0 ELSE 1 END ASC,
 CASE WHEN TRIM(COALESCE(candidate.part_group_key, '')) <> '' AND candidate.part_index > 0 THEN candidate.part_index ELSE 2147483647 END ASC,
 CASE WHEN TRIM(COALESCE(candidate.strm_url, '')) <> '' OR LOWER(TRIM(COALESCE(candidate.path, ''))) LIKE 'cloud://%%' THEN 0 ELSE 1 END DESC,
 candidate.width DESC, candidate.size_bytes DESC, candidate.created_at DESC, ` + candidateOrder
+	if groupSeries {
+		representativeOrder += ", candidate.id ASC"
+	}
 	isDateCreated := primarySupportedEmbySort(p.SortBy, resumeFilter) == "datecreated"
-	if isDateCreated && e.repo.DB.Dialector.Name() == "postgres" {
+	if isDateCreated && !groupSeries && e.repo.DB.Dialector.Name() == "postgres" {
 		representatives := e.repo.DB.WithContext(ctx).Table("(?) AS candidate", keyed).
 			Select("DISTINCT ON (candidate.version_group) candidate.id, candidate.created_at").
 			Order("candidate.version_group, " + representativeOrder)
@@ -87,6 +109,14 @@ ROW_NUMBER() OVER (PARTITION BY candidate.version_group ORDER BY ` + representat
 	groupedSelect := `ranked.version_group,
 MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.id END) AS representative_id,
 MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.created_at END) AS representative_created_at`
+	if groupSeries {
+		rankedSelect += ", candidate.is_series, candidate.public_id"
+		groupedSelect = `ranked.version_group,
+MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.id END) AS representative_id,
+MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.public_id END) AS public_id,
+CASE WHEN MAX(ranked.is_series) = 1 THEN MAX(ranked.created_at)
+ELSE MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.created_at END) END AS representative_created_at`
+	}
 	if !isDateCreated {
 		rankedSelect += ", ROW_NUMBER() OVER (ORDER BY " + candidateOrder + ") AS global_sort_rank"
 		groupedSelect += ", MIN(ranked.global_sort_rank) AS first_sort_rank"
@@ -103,6 +133,10 @@ MAX(CASE WHEN ranked.representative_rank = 1 THEN ranked.created_at END) AS repr
 		}
 		selectedOrder = "selected.representative_created_at " + direction + ", selected.representative_id " + direction
 		groupedOrder = "grouped.representative_created_at " + direction + ", grouped.representative_id " + direction
+		if groupSeries {
+			selectedOrder = "selected.representative_created_at " + direction + ", selected.public_id " + direction
+			groupedOrder = "grouped.representative_created_at " + direction + ", grouped.public_id " + direction
+		}
 	}
 	selected := e.repo.DB.WithContext(ctx).Table("(?) AS grouped", grouped).
 		Select("grouped.representative_id AS id, grouped.*, COUNT(*) OVER () AS total_groups").

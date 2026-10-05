@@ -38,6 +38,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Omit("search_pinyin", "search_initials")
 	q = e.applyUserMediaVisibility(ctx, q, p.UserID)
+	groupSeries := p.ParentID == "" && embyHasMediaSearch(p) && containsItemType(p.IncludeItemTypes, "Series") && !containsItemType(p.IncludeItemTypes, "Episode")
 	if p.ParentID != "" {
 		q = q.Where("library_id IN ? OR series_id = ?", e.mergedLibraryIDs(ctx, p.ParentID), p.ParentID)
 	}
@@ -76,7 +77,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	if parentKnownNonEpisodic && containsItemType(p.IncludeItemTypes, "Episode") && !containsItemType(p.IncludeItemTypes, "Movie") {
 		return emptyItemsEnvelope(p.StartIndex), nil
 	}
-	if filterBySeasonNumbers && containsItemType(p.IncludeItemTypes, "Movie") && !containsItemType(p.IncludeItemTypes, "Episode") {
+	if filterBySeasonNumbers && !groupSeries && containsItemType(p.IncludeItemTypes, "Movie") && !containsItemType(p.IncludeItemTypes, "Episode") {
 		q = e.filterMovieItems(ctx, q)
 	}
 	if parentKnownNonEpisodic && containsItemType(p.IncludeItemTypes, "Movie") && !containsItemType(p.IncludeItemTypes, "Episode") {
@@ -128,11 +129,16 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 		q = applyEmbyBrowseGenres(q, p)
 	}
 	if collapseVersions {
-		rows, total, err := e.collapsedMediaPageSQL(ctx, q, p, order, resumeFilter, desc)
+		rows, total, err := e.collapsedMediaPageSQL(ctx, q, p, order, resumeFilter, desc, groupSeries)
 		if err != nil {
 			return nil, err
 		}
-		items, err := e.payloadsForMediaRows(ctx, rows, p.UserID, !p.OmitMediaSources, false)
+		var items []map[string]any
+		if groupSeries {
+			items, err = e.payloadsForSearchRows(ctx, rows, p)
+		} else {
+			items, err = e.payloadsForMediaRows(ctx, rows, p.UserID, !p.OmitMediaSources, false)
+		}
 		if err != nil {
 			return nil, err
 		}
