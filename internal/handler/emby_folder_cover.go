@@ -129,27 +129,23 @@ func buildEmbyFolderCoverGallery(images []image.Image, width, height int) ([]byt
 	return buf.Bytes(), nil
 }
 
-// A small intermediate image removes background detail without additional
-// artwork requests. The fixed gradient keeps the output deterministic.
+// Use the first poster's full-image mean color at 70% intensity. Premultiplied
+// RGB averages transparent pixels over black; no extra artwork is requested.
 func drawEmbyFolderCoverBackground(dst *image.RGBA, src image.Image) {
-	soft := image.NewRGBA(image.Rect(0, 0, 24, 14))
-	drawCoverFit(soft, soft.Bounds(), src)
-	xdraw.BiLinear.Scale(dst, dst.Bounds(), soft, soft.Bounds(), draw.Src, nil)
-	width, height := dst.Bounds().Dx(), dst.Bounds().Dy()
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			edge := math.Abs(2*float64(x)/float64(width) - 1)
-			shade := uint8(135 + 35*float64(y)/float64(height) + 25*edge)
-			p := dst.RGBAAt(x, y)
-			keep := uint32(255 - shade)
-			dst.SetRGBA(x, y, color.RGBA{
-				R: uint8((uint32(p.R)*keep + 12*uint32(shade)) / 255),
-				G: uint8((uint32(p.G)*keep + 15*uint32(shade)) / 255),
-				B: uint8((uint32(p.B)*keep + 23*uint32(shade)) / 255),
-				A: 255,
-			})
+	bounds := src.Bounds()
+	var red, green, blue uint64
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := src.At(x, y).RGBA()
+			red += uint64(r)
+			green += uint64(g)
+			blue += uint64(b)
 		}
 	}
+	// RGBA returns 16-bit channels. Convert the mean to 8-bit and darken it.
+	divisor := uint64(bounds.Dx()) * uint64(bounds.Dy()) * 257 * 10
+	background := color.RGBA{uint8(red * 7 / divisor), uint8(green * 7 / divisor), uint8(blue * 7 / divisor), 255}
+	draw.Draw(dst, dst.Bounds(), &image.Uniform{C: background}, image.Point{}, draw.Src)
 }
 
 // Preserve each source's aspect ratio, including libraries with landscape
@@ -196,35 +192,6 @@ func roundedEmbyFolderCoverMask(width, height, radius int) *image.Alpha {
 		}
 	}
 	return mask
-}
-
-func drawCoverFit(dst draw.Image, rect image.Rectangle, src image.Image) {
-	if src == nil || rect.Empty() {
-		return
-	}
-	sb := src.Bounds()
-	sw, sh := sb.Dx(), sb.Dy()
-	dw, dh := rect.Dx(), rect.Dy()
-	if sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 {
-		return
-	}
-	srcRatio := float64(sw) / float64(sh)
-	dstRatio := float64(dw) / float64(dh)
-	cropW, cropH := sw, sh
-	if srcRatio > dstRatio {
-		cropW = int(math.Round(float64(sh) * dstRatio))
-	} else if srcRatio < dstRatio {
-		cropH = int(math.Round(float64(sw) / dstRatio))
-	}
-	if cropW < 1 {
-		cropW = 1
-	}
-	if cropH < 1 {
-		cropH = 1
-	}
-	sx0 := sb.Min.X + (sw-cropW)/2
-	sy0 := sb.Min.Y + (sh-cropH)/2
-	xdraw.CatmullRom.Scale(dst, rect, src, image.Rect(sx0, sy0, sx0+cropW, sy0+cropH), draw.Src, nil)
 }
 
 func embyFolderCoverDimensions(c *gin.Context) (int, int) {

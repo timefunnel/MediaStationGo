@@ -168,6 +168,36 @@ func TestEmbyFolderCoverGalleryRejectsMissingArtwork(t *testing.T) {
 	}
 }
 
+func TestEmbyFolderCoverGalleryUsesFirstPosterMeanColor(t *testing.T) {
+	// A shifted, two-color image catches center-pixel sampling and cover cropping.
+	first := image.NewRGBA(image.Rect(5, 8, 45, 68))
+	draw.Draw(first, first.Bounds(), &image.Uniform{C: color.RGBA{255, 0, 0, 255}}, image.Point{}, draw.Src)
+	draw.Draw(first, image.Rect(25, 8, 45, 68), &image.Uniform{C: color.RGBA{0, 0, 255, 255}}, image.Point{}, draw.Src)
+	second := image.NewRGBA(image.Rect(0, 0, 40, 60))
+	draw.Draw(second, second.Bounds(), &image.Uniform{C: color.RGBA{0, 255, 0, 255}}, image.Point{}, draw.Src)
+	for _, width := range []int{320, 640} {
+		for _, row := range []struct {
+			images []image.Image
+			want   color.RGBA
+		}{{[]image.Image{first, second}, color.RGBA{89, 0, 89, 255}}, {[]image.Image{second, first}, color.RGBA{0, 178, 0, 255}}} {
+			body, err := buildEmbyFolderCoverGallery(row.images, width, width*9/16)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := png.Decode(bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The uncovered top row must be one flat color across the canvas.
+			for x := 0; x < width; x++ {
+				if got := color.RGBAModel.Convert(img.At(x, 0)).(color.RGBA); got != row.want {
+					t.Fatalf("background at (%d,0), width=%d: %v, want %v", x, width, got, row.want)
+				}
+			}
+		}
+	}
+}
+
 func TestEmbyFolderCoverGalleryPreservesLandscapeAspect(t *testing.T) {
 	images := []image.Image{image.NewRGBA(image.Rect(0, 0, 160, 90))}
 	rects := embyFolderCoverPosterRects(320, 180, images)

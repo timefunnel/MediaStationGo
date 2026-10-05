@@ -10,6 +10,9 @@ import (
 func TestEmbyFolderCoverTagChangesWithArtworkURL(t *testing.T) {
 	artwork := EmbyFolderCoverArtwork{MediaID: "movie", ImageType: "Primary", Tag: "movie", URL: "https://img.example/old.jpg"}
 	before := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork})
+	if before == "aef5eedc1dca4b57d06f76369afafa23" {
+		t.Fatal("solid background must invalidate the previous blurred-background cache tag")
+	}
 	if again := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork}); again != before {
 		t.Fatal("unchanged artwork must retain its cache tag")
 	}
