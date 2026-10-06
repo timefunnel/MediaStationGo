@@ -84,6 +84,7 @@ RUN mkdir -p /data /cache /media \
 
 COPY --from=backend /app/mediastation-go /usr/local/bin/mediastation-go
 COPY --from=frontend /app/web/dist /app/web/dist
+COPY internal/handler/assets/fonts/OFL.txt internal/handler/assets/fonts/README.md /app/licenses/noto-sans-cjk/
 
 ARG VERSION=dev
 ARG REVISION=dev

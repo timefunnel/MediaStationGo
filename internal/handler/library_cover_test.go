@@ -48,7 +48,7 @@ func TestLibraryCoverHTTPPreviewSaveAndPermissions(t *testing.T) {
 		return w
 	}
 	const payload = `{"media_ids":["media-2","media-1"]}`
-	for _, route := range []struct{ method, path string }{{"GET", "/api/libraries/lib-1/cover"}, {"PUT", "/api/libraries/lib-1/cover"}, {"POST", "/api/libraries/lib-1/cover/preview"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "/api/libraries/lib-1/cover"}, {"GET", "/api/libraries/lib-1/cover/candidates"}, {"PUT", "/api/libraries/lib-1/cover"}, {"POST", "/api/libraries/lib-1/cover/preview"}} {
 		if w := request(route.method, route.path, payload, ""); w.Code != 401 {
 			t.Fatalf("anonymous status=%d", w.Code)
 		}
@@ -67,6 +67,40 @@ func TestLibraryCoverHTTPPreviewSaveAndPermissions(t *testing.T) {
 	if w := request("PUT", "/api/libraries/lib-1/cover", payload, admin); w.Code != 200 {
 		t.Fatalf("save status=%d body=%s", w.Code, w.Body)
 	}
+	for _, route := range []string{"/api/libraries/lib-1/cover", "/api/libraries/lib-1/cover/candidates"} {
+		w := request("GET", route, "", admin)
+		var response struct {
+			Items []service.LibraryCoverItem `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || len(response.Items) != 2 {
+			t.Fatalf("poster card response %s: %s err=%v", route, w.Body, err)
+		}
+		for _, item := range response.Items {
+			if item.UpdatedAt.IsZero() {
+				t.Fatalf("card poster metadata missing: %#v", item)
+			}
+			if item.ID == "media-1" || item.ID == "media-2" {
+				if item.PosterURL != filepath.Join(dir, item.ID+".png") || item.SelectionError != "" {
+					t.Fatalf("card artwork differs from renderer: %#v", item)
+				}
+			} else if item.PosterURL != "" || item.SelectionError == "" {
+				t.Fatalf("missing candidate artwork not explicitly marked: %#v", item)
+			}
+		}
+	}
+	for _, query := range []string{"?page=0", "?page=1.5", "?page=10000001"} {
+		if w := request("GET", "/api/libraries/lib-1/cover/candidates"+query, "", admin); w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid candidate page accepted: %s status=%d", query, w.Code)
+		}
+	}
+	search := request("GET", "/api/libraries/lib-1/cover/candidates?q=no-matching-cover-title", "", admin)
+	var empty struct {
+		Items []service.LibraryCoverItem `json:"items"`
+		Total int64                      `json:"total"`
+	}
+	if err := json.Unmarshal(search.Body.Bytes(), &empty); err != nil || search.Code != http.StatusOK || empty.Items == nil || len(empty.Items) != 0 || empty.Total != 0 {
+		t.Fatalf("candidate search did not preserve browse contract: %s err=%v", search.Body, err)
+	}
 	image := request("GET", "/Items/lib-1/Images/Primary?maxWidth=960", "", admin)
 	if image.Code != 200 || !bytes.Equal(image.Body.Bytes(), preview.Body.Bytes()) {
 		t.Fatalf("saved Emby image differs from preview: status=%d", image.Code)
@@ -74,6 +108,26 @@ func TestLibraryCoverHTTPPreviewSaveAndPermissions(t *testing.T) {
 	native := request("GET", "/api/libraries/lib-1/cover/image?maxWidth=960", "", admin)
 	if native.Code != 200 || !bytes.Equal(native.Body.Bytes(), preview.Body.Bytes()) || native.Header().Get("Cache-Control") != "private, no-cache" {
 		t.Fatalf("Web image differs from preview: status=%d", native.Code)
+	}
+	if err := svc.Repo.DB.Table("libraries").Where("id = ?", "lib-1").Update("name", "华语电影").Error; err != nil {
+		t.Fatal(err)
+	}
+	renamedPreview := request("POST", "/api/libraries/lib-1/cover/preview", payload, admin)
+	renamedImage := request("GET", "/Items/lib-1/Images/Primary?maxWidth=960", "", admin)
+	renamedNative := request("GET", "/api/libraries/lib-1/cover/image?maxWidth=960", "", admin)
+	if renamedPreview.Code != 200 || renamedImage.Code != 200 || renamedNative.Code != 200 ||
+		!bytes.Equal(renamedPreview.Body.Bytes(), renamedImage.Body.Bytes()) || !bytes.Equal(renamedPreview.Body.Bytes(), renamedNative.Body.Bytes()) {
+		t.Fatal("renamed library preview and saved images disagree")
+	}
+	if bytes.Equal(image.Body.Bytes(), renamedImage.Body.Bytes()) || image.Header().Get("ETag") == renamedImage.Header().Get("ETag") {
+		t.Fatal("renaming must update both the rendered library name and its cache tag")
+	}
+	wantTag := service.EmbyFolderCoverTag("lib-1", "华语电影", []service.EmbyFolderCoverArtwork{
+		{MediaID: "media-2", ImageType: "Primary", Tag: "media-2", URL: filepath.Join(dir, "media-2.png")},
+		{MediaID: "media-1", ImageType: "Primary", Tag: "media-1", URL: filepath.Join(dir, "media-1.png")},
+	})
+	if renamedImage.Header().Get("ETag") != `"`+wantTag+`"` {
+		t.Fatal("Emby response cache tag must include the authoritative library name")
 	}
 	if w := request("GET", "/api/libraries/lib-1/cover/image", "", ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous Web image status=%d", w.Code)

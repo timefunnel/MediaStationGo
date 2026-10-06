@@ -3,6 +3,7 @@
 .gitignore
 .dockerignore
 README.md
+!internal/handler/assets/fonts/README.md
 CONTRIBUTING.md
 LICENSE
 docs/

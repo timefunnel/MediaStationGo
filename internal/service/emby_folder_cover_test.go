@@ -9,16 +9,19 @@ import (
 
 func TestEmbyFolderCoverTagChangesWithArtworkURL(t *testing.T) {
 	artwork := EmbyFolderCoverArtwork{MediaID: "movie", ImageType: "Primary", Tag: "movie", URL: "https://img.example/old.jpg"}
-	before := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork})
+	before := EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork})
 	if before == "aef5eedc1dca4b57d06f76369afafa23" {
-		t.Fatal("solid background must invalidate the previous blurred-background cache tag")
+		t.Fatal("textured wall must invalidate the previous cover cache tag")
 	}
-	if again := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork}); again != before {
+	if again := EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork}); again != before {
 		t.Fatal("unchanged artwork must retain its cache tag")
 	}
 	artwork.URL = "https://img.example/new.jpg"
-	if after := EmbyFolderCoverTag("library", []EmbyFolderCoverArtwork{artwork}); after == before {
+	if after := EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork}); after == before {
 		t.Fatal("replacing a poster must invalidate the generated library cover")
+	}
+	if renamed := EmbyFolderCoverTag("library", "华语电影", []EmbyFolderCoverArtwork{artwork}); renamed == EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork}) {
+		t.Fatal("renaming a library must invalidate its rendered title")
 	}
 }
 
@@ -62,7 +65,7 @@ func TestEmbyLibraryViewExposesFolderCoverTag(t *testing.T) {
 	if artworks[0].ImageType != "Primary" || artworks[0].Tag != "media-new" {
 		t.Fatalf("unexpected first artwork metadata: %#v", artworks[0])
 	}
-	tag := svc.FolderCoverTag(t.Context(), lib.ID, "Primary")
+	tag := svc.FolderCoverTag(t.Context(), lib.ID, "Primary", lib.Name)
 	if tag == "" || tag == "633957117b943d361c7f31f9eeca792c" {
 		t.Fatalf("folder tag = %q, want a nonempty tag distinct from the old grid", tag)
 	}

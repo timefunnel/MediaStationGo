@@ -27,6 +27,7 @@ func registerAuthedLibraryRoutes(authed *gin.RouterGroup, svc *service.Container
 	authed.PATCH("/libraries/:id", middleware.AdminRequired(), updateLibraryHandler(svc))
 	authed.DELETE("/libraries/:id", middleware.AdminRequired(), deleteLibraryHandler(svc))
 	authed.GET("/libraries/:id/cover", middleware.AdminRequired(), getLibraryCoverHandler(svc))
+	authed.GET("/libraries/:id/cover/candidates", middleware.AdminRequired(), libraryCoverCandidatesHandler(svc))
 	authed.PUT("/libraries/:id/cover", middleware.AdminRequired(), saveLibraryCoverHandler(svc))
 	authed.POST("/libraries/:id/cover/preview", middleware.AdminRequired(), previewLibraryCoverHandler(svc))
 	authed.GET("/libraries/:id/cover/image", requirePermission(svc, "can_play_media"), libraryCoverImageHandler(svc))

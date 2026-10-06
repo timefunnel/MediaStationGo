@@ -93,9 +93,17 @@ export interface ScrapePreviewRow {
   episode_part_num: number
 }
 
+export interface LibraryCoverItem {
+  id: string
+  title: string
+  poster_url: string
+  updated_at?: string
+  selection_error?: string
+}
+
 export interface LibraryCoverConfig {
   media_ids: string[]
-  items: Array<{ id: string; title: string }> | null
+  items: LibraryCoverItem[] | null
   selection_error?: string
 }
 
@@ -210,6 +218,10 @@ export interface MediaMetadataUpdate {
 }
 
 export const libraryAPI = {
+  coverCandidates: (id: string, options: { page: number; q?: string }, signal?: AbortSignal) =>
+    api.get<{ items: LibraryCoverItem[]; total: number; page: number; page_size: number }>(`/libraries/${id}/cover/candidates`, {
+      params: options, signal, timeout: LONG_REQUEST_TIMEOUT,
+    }).then((r) => r.data),
   browse: (id: string, options: LibraryBrowseOptions, signal?: AbortSignal) =>
     api.get<LibraryBrowsePage>(`/libraries/${id}/browse`, {
       params: options, signal, timeout: LONG_REQUEST_TIMEOUT,

@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	xdraw "golang.org/x/image/draw"
+	"golang.org/x/image/math/f64"
 	_ "golang.org/x/image/webp"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
@@ -33,7 +34,14 @@ const (
 )
 
 func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, id, imageType string) bool {
-	if svc == nil || svc.Emby == nil || svc.ImageProxy == nil {
+	if svc == nil || svc.Repo == nil || svc.Repo.Library == nil || svc.Emby == nil || svc.ImageProxy == nil {
+		return false
+	}
+	lib, err := svc.Repo.Library.FindByID(c.Request.Context(), id)
+	if err != nil || lib == nil {
+		if err != nil && svc.Log != nil {
+			svc.Log.Warn("library cover name lookup failed", zap.String("library_id", id), zap.Error(err))
+		}
 		return false
 	}
 	artworks, err := svc.Emby.FolderCoverArtwork(c.Request.Context(), id, imageType, embyFolderCoverGridLimit)
@@ -44,14 +52,14 @@ func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, id, image
 		return false
 	}
 	width, height := embyFolderCoverDimensions(c)
-	body, err := renderLibraryCover(c.Request.Context(), svc, artworks, width, height)
+	body, err := renderLibraryCover(c.Request.Context(), svc, lib.Name, artworks, width, height)
 	if err != nil {
 		if svc.Log != nil {
 			svc.Log.Warn("library cover rendering failed", zap.String("library_id", id), zap.Error(err))
 		}
 		return false
 	}
-	tag := service.EmbyFolderCoverTag(id, artworks)
+	tag := service.EmbyFolderCoverTag(id, lib.Name, artworks)
 	setEmbyFolderCoverHeaders(c, tag)
 	c.Header("Content-Length", strconv.Itoa(len(body)))
 	if c.Request.Method == http.MethodHead {
@@ -94,7 +102,7 @@ func decodeEmbyFolderArtwork(data []byte) (image.Image, error) {
 	return img, err
 }
 
-func buildEmbyFolderCoverGallery(images []image.Image, width, height int) ([]byte, error) {
+func buildEmbyFolderCoverGallery(images []image.Image, title string, width, height int) ([]byte, error) {
 	if len(images) == 0 || len(images) > embyFolderCoverGridLimit {
 		return nil, fmt.Errorf("folder cover requires 1 to %d artworks", embyFolderCoverGridLimit)
 	}
@@ -111,16 +119,31 @@ func buildEmbyFolderCoverGallery(images []image.Image, width, height int) ([]byt
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	drawEmbyFolderCoverBackground(dst, images[0])
-	rects := embyFolderCoverPosterRects(width, height, images)
-	for i, rect := range rects {
-		radius := max(1, rect.Dx()/24)
-		shadow := roundedEmbyFolderCoverMask(rect.Dx()+2*radius, rect.Dy()+2*radius, 2*radius)
-		shadowRect := rect.Inset(-radius).Add(image.Pt(0, radius))
-		draw.DrawMask(dst, shadowRect, &image.Uniform{C: color.NRGBA{A: 75}}, image.Point{}, shadow, image.Point{}, draw.Over)
-		poster := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	for i, placement := range embyFolderCoverPosterPlacements(width, height, images) {
+		rect := image.Rect(0, 0, placement.width, placement.height)
+		radius := max(1, int(math.Round(float64(width)*0.008)))
+		poster := image.NewRGBA(rect)
 		xdraw.CatmullRom.Scale(poster, poster.Bounds(), images[i], images[i].Bounds(), draw.Src, nil)
 		mask := roundedEmbyFolderCoverMask(rect.Dx(), rect.Dy(), radius)
-		draw.DrawMask(dst, rect, poster, image.Point{}, mask, image.Point{}, draw.Over)
+		clipped := image.NewRGBA(rect)
+		draw.DrawMask(clipped, rect, poster, image.Point{}, mask, image.Point{}, draw.Src)
+		blur := max(1, width/160)
+		padding := 3 * blur
+		shadowBounds := image.Rect(0, 0, rect.Dx()+2*padding, rect.Dy()+2*padding)
+		shadowMask := image.NewAlpha(shadowBounds)
+		draw.Draw(shadowMask, rect.Add(image.Pt(padding, padding)), mask, image.Point{}, draw.Src)
+		for pass := 0; pass < 3; pass++ {
+			shadowMask = blurEmbyFolderCoverAlpha(shadowMask, blur)
+		}
+		shadow := image.NewRGBA(shadowBounds)
+		draw.DrawMask(shadow, shadowBounds, &image.Uniform{C: color.NRGBA{A: 42}}, image.Point{}, shadowMask, image.Point{}, draw.Src)
+		shadowPlacement := placement
+		shadowPlacement.y += float64(height) * 0.012
+		xdraw.CatmullRom.Transform(dst, shadowPlacement.matrix(shadowBounds.Dx(), shadowBounds.Dy()), shadow, shadowBounds, draw.Over, nil)
+		xdraw.CatmullRom.Transform(dst, placement.matrix(rect.Dx(), rect.Dy()), clipped, rect, draw.Over, nil)
+	}
+	if err := drawEmbyFolderCoverTitle(dst, title); err != nil {
+		return nil, err
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, dst); err != nil {
@@ -129,54 +152,69 @@ func buildEmbyFolderCoverGallery(images []image.Image, width, height int) ([]byt
 	return buf.Bytes(), nil
 }
 
-// Use the first poster's full-image mean color at 70% intensity. Premultiplied
-// RGB averages transparent pixels over black; no extra artwork is requested.
+// The first poster supplies a muted palette. Broad smooth lighting and stable,
+// low-amplitude grain create the textured background without another image.
 func drawEmbyFolderCoverBackground(dst *image.RGBA, src image.Image) {
-	bounds := src.Bounds()
-	var red, green, blue uint64
+	hue, saturation := embyFolderCoverPalette(src)
+	dark := embyFolderCoverHSL(hue, saturation, 0.27)
+	light := embyFolderCoverHSL(hue+0.025, saturation*0.60, 0.62)
+	bounds := dst.Bounds()
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		ny := (float64(y-bounds.Min.Y) + 0.5) / float64(bounds.Dy())
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, _ := src.At(x, y).RGBA()
-			red += uint64(r)
-			green += uint64(g)
-			blue += uint64(b)
+			nx := (float64(x-bounds.Min.X) + 0.5) / float64(bounds.Dx())
+			glow := 0.13 * math.Exp(-math.Pow((nx-0.27)/0.37, 2)-math.Pow((ny-0.22)/0.55, 2))
+			mix := min(1.0, max(0.0, 0.12+0.59*nx+0.19*(1-ny)+glow))
+			seed := uint32(x-bounds.Min.X)*0x9e3779b1 ^ uint32(y-bounds.Min.Y)*0x85ebca77
+			seed ^= seed >> 16
+			seed *= 0x7feb352d
+			seed ^= seed >> 15
+			grain := float64(seed&255)/255*2.4 - 1.2
+			var rgb [3]uint8
+			for channel := range rgb {
+				v := (dark[channel]*(1-mix)+light[channel]*mix)*255 + grain
+				rgb[channel] = uint8(math.Round(min(255.0, max(0.0, v))))
+			}
+			dst.SetRGBA(x, y, color.RGBA{rgb[0], rgb[1], rgb[2], 255})
 		}
 	}
-	// RGBA returns 16-bit channels. Convert the mean to 8-bit and darken it.
-	divisor := uint64(bounds.Dx()) * uint64(bounds.Dy()) * 257 * 10
-	background := color.RGBA{uint8(red * 7 / divisor), uint8(green * 7 / divisor), uint8(blue * 7 / divisor), 255}
-	draw.Draw(dst, dst.Bounds(), &image.Uniform{C: background}, image.Point{}, draw.Src)
 }
 
-// Preserve each source's aspect ratio, including libraries with landscape
-// artwork. Sparse libraries use the same layout without repeating posters.
-func embyFolderCoverPosterRects(width, height int, images []image.Image) []image.Rectangle {
-	gap := max(2, int(math.Round(float64(width)*0.018)))
-	ratios := make([]float64, len(images))
-	totalRatio := 0.0
+type embyFolderCoverPosterPlacement struct {
+	x, y          float64
+	width, height int
+}
+
+func (p embyFolderCoverPosterPlacement) matrix(width, height int) f64.Aff3 {
+	angle := 15.0 * math.Pi / 180
+	cos, sin := math.Cos(angle), math.Sin(angle)
+	return f64.Aff3{cos, -sin, p.x - cos*float64(width)/2 + sin*float64(height)/2, sin, cos, p.y - sin*float64(width)/2 - cos*float64(height)/2}
+}
+
+// Each selected image appears once, at its original aspect ratio. The wall
+// deliberately extends beyond the canvas; the library title keeps its own area.
+func embyFolderCoverPosterPlacements(width, height int, images []image.Image) []embyFolderCoverPosterPlacement {
+	w, h := float64(width), float64(height)
+	positions := [][2]float64{{0.66, 0.18}, {0.915, 0.34}, {0.56, 0.82}, {0.815, 0.98}}
+	maxWidth, maxHeight := 0.25*w, 0.61*h
+	switch len(images) {
+	case 1:
+		positions = [][2]float64{{0.75, 0.50}}
+		maxWidth, maxHeight = 0.40*w, 0.86*h
+	case 2:
+		positions = [][2]float64{{0.64, 0.36}, {0.91, 0.66}}
+		maxWidth, maxHeight = 0.28*w, 0.78*h
+	}
+	placements := make([]embyFolderCoverPosterPlacement, 0, len(images))
 	for i, img := range images {
-		ratios[i] = float64(img.Bounds().Dx()) / float64(img.Bounds().Dy())
-		totalRatio += ratios[i]
+		ratio := float64(img.Bounds().Dx()) / float64(img.Bounds().Dy())
+		posterHeight := min(maxHeight, maxWidth/ratio)
+		placements = append(placements, embyFolderCoverPosterPlacement{
+			x: positions[i][0] * w, y: positions[i][1] * h,
+			width: max(1, int(math.Round(posterHeight*ratio))), height: max(1, int(math.Round(posterHeight))),
+		})
 	}
-	availableWidth := float64(width)*0.90 - float64(gap*(len(images)-1))
-	posterHeight := max(1, int(math.Floor(math.Min(float64(height)*0.80, availableWidth/totalRatio))))
-	posterWidths := make([]int, len(images))
-	totalWidth := gap * (len(images) - 1)
-	for i, ratio := range ratios {
-		posterWidths[i] = max(1, int(math.Round(float64(posterHeight)*ratio)))
-		totalWidth += posterWidths[i]
-	}
-	x := (width - totalWidth) / 2
-	rects := make([]image.Rectangle, 0, len(images))
-	for i, posterWidth := range posterWidths {
-		y := (height - posterHeight) / 2
-		if len(images) > 1 {
-			y += int(math.Round((float64(i) - float64(len(images)-1)/2) * float64(height) * 0.025))
-		}
-		rects = append(rects, image.Rect(x, y, x+posterWidth, y+posterHeight))
-		x += posterWidth + gap
-	}
-	return rects
+	return placements
 }
 
 func roundedEmbyFolderCoverMask(width, height, radius int) *image.Alpha {

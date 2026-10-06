@@ -10,7 +10,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-const embyFolderCoverTagVersion = "folder-cover-gallery-solid-v8"
+const embyFolderCoverTagVersion = "folder-cover-textured-wall-v9"
 
 type EmbyFolderCoverArtwork struct {
 	MediaID   string
@@ -95,20 +95,20 @@ func (e *EmbyService) folderCoverSeriesArtwork(ctx context.Context, libraryIDs [
 	return e.folderCoverSeriesSQL(ctx, libraryIDs, imageType, limit)
 }
 
-func (e *EmbyService) FolderCoverTag(ctx context.Context, id, imageType string) string {
+func (e *EmbyService) FolderCoverTag(ctx context.Context, id, imageType, libraryName string) string {
 	artworks, err := e.FolderCoverArtwork(ctx, id, imageType, 4)
 	if err != nil || len(artworks) == 0 {
 		return ""
 	}
-	return EmbyFolderCoverTag(id, artworks)
+	return EmbyFolderCoverTag(id, libraryName, artworks)
 }
 
-func EmbyFolderCoverTag(folderID string, covers []EmbyFolderCoverArtwork) string {
+func EmbyFolderCoverTag(folderID, libraryName string, covers []EmbyFolderCoverArtwork) string {
 	items := make([][]string, 0, len(covers))
 	for _, cover := range covers {
 		items = append(items, []string{cover.MediaID, cover.ImageType, cover.Tag, cover.URL})
 	}
-	payload := []any{embyFolderCoverTagVersion, strings.TrimSpace(folderID), items}
+	payload := []any{embyFolderCoverTagVersion, strings.TrimSpace(folderID), libraryName, items}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return ""

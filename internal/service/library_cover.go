@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
@@ -12,8 +13,11 @@ import (
 var ErrLibraryCoverSelection = errors.New("invalid library cover selection")
 
 type LibraryCoverItem struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	PosterURL      string    `json:"poster_url"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	SelectionError string    `json:"selection_error,omitempty"`
 }
 
 // Only persist media references; artwork is resolved from the existing media
@@ -33,8 +37,7 @@ func (e *EmbyService) LibraryCoverSelection(ctx context.Context, libraryID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	artworks := make([]EmbyFolderCoverArtwork, 0, len(ids))
-	items := make([]LibraryCoverItem, 0, len(ids))
+	rows := make([]model.Media, 0, len(ids))
 	seenIDs, seenWorks, seenURLs := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, id := range ids {
 		if id == "" || seenIDs[id] {
@@ -49,28 +52,70 @@ func (e *EmbyService) LibraryCoverSelection(ctx context.Context, libraryID strin
 		if result.RowsAffected != 1 {
 			return nil, nil, fmt.Errorf("%w: 所选作品已删除或不属于该媒体库", ErrLibraryCoverSelection)
 		}
-		art, ok := folderCoverArtworkForMedia(&m, "Primary")
-		title := m.Title
-		if embyLibraryTypeIsEpisodic(lib.Type) {
-			groups, err := e.seriesGroupsFromMedia(ctx, []model.Media{m})
-			if err != nil {
-				return nil, nil, err
-			}
-			if len(groups) != 1 {
-				return nil, nil, fmt.Errorf("%w: 所选剧集无法确定所属作品", ErrLibraryCoverSelection)
-			}
-			art, ok = folderCoverArtworkForSeries(&groups[0], "Primary")
-			title = groups[0].Name
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("%w: 「%s」没有作品海报，请先补全海报", ErrLibraryCoverSelection, title)
+		rows = append(rows, m)
+	}
+	artworks, items, err := e.libraryCoverItems(ctx, lib.Type, rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, art := range artworks {
+		if items[i].SelectionError != "" {
+			return nil, nil, fmt.Errorf("%w: %s", ErrLibraryCoverSelection, items[i].SelectionError)
 		}
 		if seenWorks[art.MediaID] || seenURLs[art.URL] {
 			return nil, nil, fmt.Errorf("%w: 请选择不同作品及不同海报", ErrLibraryCoverSelection)
 		}
 		seenWorks[art.MediaID], seenURLs[art.URL] = true, true
+	}
+	return artworks, items, nil
+}
+
+// Candidates reuse the selection resolver, so a series card shows the exact
+// canonical poster used by the renderer rather than an episode still.
+func (e *EmbyService) LibraryCoverCandidates(ctx context.Context, libraryType string, rows []model.Media) ([]LibraryCoverItem, error) {
+	_, items, err := e.libraryCoverItems(ctx, libraryType, rows)
+	return items, err
+}
+
+func (e *EmbyService) libraryCoverItems(ctx context.Context, libraryType string, rows []model.Media) ([]EmbyFolderCoverArtwork, []LibraryCoverItem, error) {
+	seriesByMedia := make(map[string]*embySeriesGroup)
+	if embyLibraryTypeIsEpisodic(libraryType) && len(rows) > 0 {
+		groups, err := e.seriesGroupsFromMedia(ctx, rows)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range groups {
+			for _, episode := range groups[i].Episodes {
+				seriesByMedia[episode.ID] = &groups[i]
+			}
+		}
+	}
+	artworks := make([]EmbyFolderCoverArtwork, 0, len(rows))
+	items := make([]LibraryCoverItem, 0, len(rows))
+	for _, m := range rows {
+		item := LibraryCoverItem{ID: m.ID, Title: m.Title, UpdatedAt: m.UpdatedAt}
+		if m.DisplayTitle != "" {
+			item.Title = m.DisplayTitle
+		}
+		art, ok := folderCoverArtworkForMedia(&m, "Primary")
+		if embyLibraryTypeIsEpisodic(libraryType) {
+			group, found := seriesByMedia[m.ID]
+			if !found {
+				return nil, nil, fmt.Errorf("resolve library cover candidate %q: series group missing", m.ID)
+			}
+			art, ok = folderCoverArtworkForSeries(group, "Primary")
+			item.Title = group.Name
+			if group.ArtworkUpdatedAt.After(item.UpdatedAt) {
+				item.UpdatedAt = group.ArtworkUpdatedAt
+			}
+		}
+		if ok {
+			item.PosterURL = art.URL
+		} else {
+			item.SelectionError = fmt.Sprintf("「%s」没有作品海报，请先补全海报", item.Title)
+		}
 		artworks = append(artworks, art)
-		items = append(items, LibraryCoverItem{ID: id, Title: title})
+		items = append(items, item)
 	}
 	return artworks, items, nil
 }

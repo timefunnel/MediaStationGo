@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, Image, LoaderCircle, Plus, Search, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import { libraryAPI } from '../api/library'
+import { libraryAPI, type LibraryCoverItem } from '../api/library'
+import { imageURL } from '../api/client'
 import type { Library } from '../types'
 import { apiErrorMessage } from '../pages/adminLibraryPanelModel'
 
-type CoverItem = { id: string; title: string }
+type CoverItem = LibraryCoverItem
 type Props = { library: Library; onClose: () => void }
 
 export function LibraryCoverDialog({ library, onClose }: Props) {
@@ -40,8 +41,8 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
     setConfigError('')
     libraryAPI.cover(library.id).then((config) => {
       if (!live) return
-      const titles = new Map(config.items?.map((item) => [item.id, item.title]))
-      setSelected(config.media_ids.map((id) => ({ id, title: titles.get(id) ?? `已失效作品 (${id})` })))
+      const items = new Map(config.items?.map((item) => [item.id, item]))
+      setSelected(config.media_ids.map((id) => items.get(id) ?? { id, title: `已失效作品 (${id})`, poster_url: '' }))
       setConfigError(config.selection_error ?? '')
     }).catch((err: unknown) => {
       if (live) {
@@ -56,10 +57,9 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
     const controller = new AbortController()
     setLoading(true)
     setBrowseError('')
-    libraryAPI.browse(library.id, filter, controller.signal).then((result) => {
+    libraryAPI.coverCandidates(library.id, filter, controller.signal).then((result) => {
       if (controller.signal.aborted) return
-      const media = result.is_series ? result.series_cards.map((card) => card.rep) : result.items
-      setCandidates(media.map((item) => ({ id: item.id, title: item.title })))
+      setCandidates(result.items)
       setTotal(result.total)
     }).catch((err: unknown) => {
       if (!controller.signal.aborted) setBrowseError(apiErrorMessage(err, '作品列表加载失败'))
@@ -108,7 +108,7 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
 
   return (
     <dialog ref={dialog} aria-labelledby="library-cover-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose() }} className="m-auto w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-0 text-[var(--app-text)] backdrop:bg-black/50">
-      <div className="flex h-[min(680px,calc(100dvh-2rem))] flex-col">
+      <div className="flex h-[min(740px,calc(100dvh-2rem))] flex-col">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--app-border)] px-5 py-4">
           <div className="min-w-0">
             <h2 id="library-cover-title" className="text-lg font-semibold">设置入口封面</h2>
@@ -123,16 +123,23 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
               <input autoFocus aria-label="搜索库内作品" placeholder="搜索库内作品" className="input-base min-w-0 flex-1" value={query} onChange={(event) => setQuery(event.target.value)} />
               <button type="submit" className="btn-outline shrink-0 gap-1" disabled={loading}><Search size={15} />搜索</button>
             </form>
-            <p className="py-2 text-xs text-[var(--app-muted)]">点击作品加入组合；这里只选择当前媒体库的作品。</p>
+            <p className="py-2 text-xs text-[var(--app-muted)]">点击海报加入组合，最多 4 部。首张作品决定背景主色。</p>
             <div className="max-h-64 min-h-[120px] flex-1 overflow-y-auto md:max-h-none" aria-busy={loading}>
               {loading ? <p className="p-4 text-sm text-[var(--app-muted)]">正在加载作品…</p> : browseError ? (
                 <div className="p-3 text-sm"><p role="alert">{browseError}</p><button className="btn-outline mt-2" onClick={() => setFilter({ ...filter })}>重试</button></div>
-              ) : candidates.length === 0 ? <p className="p-4 text-sm text-[var(--app-muted)]">没有找到作品。</p> : candidates.map((item) => {
-                const picked = selected.some((choice) => choice.id === item.id)
-                return <button key={item.id} type="button" disabled={disabled || (!picked && selected.length >= 4)} aria-pressed={picked} onClick={() => changeSelection(picked ? selected.filter((choice) => choice.id !== item.id) : [...selected, item])} className={`mb-1 flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm transition-colors disabled:opacity-50 ${picked ? 'border-brand-500 bg-[var(--app-brand-soft)] text-[var(--app-brand-text)]' : 'border-transparent hover:bg-[var(--app-panel)]'}`}>
-                  <span className="min-w-0 break-words">{item.title}</span>{picked ? <Check size={16} className="shrink-0" /> : <Plus size={16} className="shrink-0 text-[var(--app-muted)]" />}
-                </button>
-              })}
+              ) : candidates.length === 0 ? <p className="p-4 text-sm text-[var(--app-muted)]">没有找到作品。</p> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-3">
+                {candidates.map((item) => {
+                  const index = selected.findIndex((choice) => choice.id === item.id)
+                  const picked = index >= 0
+                  return <button key={item.id} type="button" aria-label={item.title} title={item.selection_error || item.title} disabled={disabled || !!item.selection_error || !item.poster_url || (!picked && selected.length >= 4)} aria-pressed={picked} onClick={() => changeSelection(picked ? selected.filter((choice) => choice.id !== item.id) : [...selected, item])} className={`min-w-0 overflow-hidden rounded-lg border text-left transition-colors disabled:opacity-50 ${picked ? 'border-brand-500 bg-[var(--app-brand-soft)] text-[var(--app-brand-text)] ring-1 ring-brand-500' : 'border-[var(--app-border)] bg-[var(--app-panel)] hover:border-brand-500/60'}`}>
+                    <div className="relative aspect-[2/3] overflow-hidden bg-[var(--app-panel-soft)]">
+                      <CoverPoster item={item} />
+                      {!!item.poster_url && !item.selection_error && <span className={`absolute right-2 top-2 flex h-7 min-w-7 items-center justify-center gap-1 rounded-full px-1.5 text-xs font-semibold shadow-sm ${picked ? 'bg-brand-500 text-white' : 'bg-black/60 text-white'}`} aria-hidden="true">{picked ? <><Check size={12} />{index + 1}</> : <Plus size={14} />}</span>}
+                    </div>
+                    <span className="block min-h-12 px-2 py-2 text-xs font-medium leading-4"><span className="line-clamp-2 break-words">{item.title}</span></span>
+                  </button>
+                })}
+              </div>}
             </div>
             <div className="mt-2 flex shrink-0 items-center justify-between gap-2 text-xs text-[var(--app-muted)]">
               <span>第 {filter.page} 页 · 共 {total} 部</span>
@@ -142,14 +149,19 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
 
           <section className="flex min-h-0 shrink-0 flex-col rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3 md:overflow-y-auto">
             <div className="mb-2 flex items-center justify-between text-sm"><span className="font-medium">已选作品 · {selected.length}/4</span><button className="text-xs text-brand-500 disabled:opacity-50" disabled={disabled || !selected.length} onClick={() => changeSelection([])}>恢复自动</button></div>
-            <div className="shrink-0 space-y-1">
-              {selected.map((item, index) => <div key={item.id} className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] px-2 py-1.5 text-sm">
-                <span className="text-xs text-[var(--app-muted)]">{index + 1}</span><span className="min-w-0 flex-1 truncate" title={item.title}>{item.title}</span>
-                <button className="icon-button" aria-label={`上移 ${item.title}`} disabled={disabled || index === 0} onClick={() => move(index, -1)}><ArrowUp size={14} /></button>
-                <button className="icon-button" aria-label={`下移 ${item.title}`} disabled={disabled || index === selected.length - 1} onClick={() => move(index, 1)}><ArrowDown size={14} /></button>
-                <button className="icon-button" aria-label={`移除 ${item.title}`} disabled={disabled} onClick={() => changeSelection(selected.filter((choice) => choice.id !== item.id))}><X size={14} /></button>
+            <div className="grid shrink-0 grid-cols-2 gap-2">
+              {selected.map((item, index) => <div key={item.id} className="flex min-w-0 items-start gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-2 text-sm">
+                <span className="relative block aspect-[2/3] w-10 shrink-0 overflow-hidden rounded bg-[var(--app-panel-soft)]"><CoverPoster item={item} /></span>
+                <div className="min-w-0 flex-1">
+                  <span title={item.title}><span className="mb-1 block text-[10px] text-[var(--app-muted)]">{index + 1}{index === 0 ? ' · 背景取色' : ''}</span><span className="line-clamp-2 min-h-8 break-words text-xs">{item.title}</span></span>
+                  <div className="mt-1 flex items-center justify-between">
+                    <button className="rounded p-1 disabled:opacity-30" aria-label={`上移 ${item.title}`} disabled={disabled || index === 0} onClick={() => move(index, -1)}><ArrowUp size={14} /></button>
+                    <button className="rounded p-1 disabled:opacity-30" aria-label={`下移 ${item.title}`} disabled={disabled || index === selected.length - 1} onClick={() => move(index, 1)}><ArrowDown size={14} /></button>
+                    <button className="rounded p-1 disabled:opacity-30" aria-label={`移除 ${item.title}`} disabled={disabled} onClick={() => changeSelection(selected.filter((choice) => choice.id !== item.id))}><X size={14} /></button>
+                  </div>
+                </div>
               </div>)}
-              {!selected.length && <p className="py-3 text-sm text-[var(--app-muted)]">自动选择库内作品生成入口封面。</p>}
+              {!selected.length && <p className="col-span-2 py-3 text-sm text-[var(--app-muted)]">自动选择库内作品生成入口封面。</p>}
             </div>
             <div className="mt-3 flex aspect-video shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)]">
               {preview ? <img src={preview.url} alt="媒体库入口封面预览" className="h-full w-full object-contain" onError={() => { setPreview(null); setError('预览图片解码失败，请重新生成预览') }} /> : <div className="flex flex-col items-center gap-2 p-3 text-center text-sm text-[var(--app-muted)]">{busy === 'preview' ? <LoaderCircle className="animate-spin" size={24} /> : <Image size={24} />}<span>{busy === 'preview' ? '正在生成预览…' : '生成预览后可查看实际组合效果'}</span></div>}
@@ -169,4 +181,13 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
       </div>
     </dialog>
   )
+}
+
+function CoverPoster({ item }: { item: CoverItem }) {
+  const src = imageURL(item.poster_url, item.updated_at, { maxWidth: 320, quality: 82 })
+  const [failedURL, setFailedURL] = useState('')
+  if (!src || failedURL === src) {
+    return <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[10px] text-[var(--app-muted)]"><Image size={18} aria-hidden="true" /><span>{src ? '海报加载失败' : '暂无海报'}</span></span>
+  }
+  return <img src={src} alt={`${item.title}海报`} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain" onError={() => setFailedURL(src)} />
 }

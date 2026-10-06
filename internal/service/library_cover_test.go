@@ -52,6 +52,15 @@ func TestLibraryCoverSelectionPersistsOrderAndCanReset(t *testing.T) {
 	if err != nil || len(art) != 2 || art[0].MediaID != "two" || art[1].MediaID != "one" {
 		t.Fatalf("manual order: %#v err=%v", art, err)
 	}
+	_, items, err := e.LibraryCoverSelection(t.Context(), lib.ID, ids)
+	if err != nil || len(items) != len(art) {
+		t.Fatalf("saved poster metadata: %#v err=%v", items, err)
+	}
+	for i := range items {
+		if items[i].ID != ids[i] || items[i].PosterURL != art[i].URL || items[i].SelectionError != "" || items[i].UpdatedAt.IsZero() {
+			t.Fatalf("saved card must show rendered artwork in selection order: %#v", items[i])
+		}
+	}
 	for _, invalid := range [][]string{{"one", "one"}, {""}, {"missing"}, {"one", "two", "a", "b", "c"}} {
 		if err := e.SaveLibraryCoverSelection(t.Context(), lib.ID, invalid); !errors.Is(err, ErrLibraryCoverSelection) {
 			t.Fatalf("invalid selection %v accepted: %v", invalid, err)
@@ -96,6 +105,10 @@ func TestLibraryCoverSelectionRejectsForeignAndMissingPosters(t *testing.T) {
 			t.Fatalf("selection %s accepted: %v", id, err)
 		}
 	}
+	items, err := e.LibraryCoverCandidates(t.Context(), "movie", rows[1:])
+	if err != nil || len(items) != 1 || items[0].PosterURL != "" || items[0].SelectionError == "" {
+		t.Fatalf("missing poster must be explicit and cannot use a backdrop: %#v err=%v", items, err)
+	}
 }
 
 func TestLibraryCoverSelectionUsesCanonicalSeriesPoster(t *testing.T) {
@@ -114,9 +127,22 @@ func TestLibraryCoverSelectionUsesCanonicalSeriesPoster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	art, _, err := e.LibraryCoverSelection(t.Context(), lib.ID, []string{"episode-one"})
-	if err != nil || len(art) != 1 || art[0].URL != s.PosterURL {
+	art, items, err := e.LibraryCoverSelection(t.Context(), lib.ID, []string{"episode-one"})
+	if err != nil || len(art) != 1 || art[0].URL != s.PosterURL || len(items) != 1 || items[0].PosterURL != s.PosterURL || items[0].Title != s.Title {
 		t.Fatalf("canonical artwork: %#v err=%v", art, err)
+	}
+	var rows []model.Media
+	if err := e.repo.DB.Where("library_id = ?", lib.ID).Order("id").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := e.LibraryCoverCandidates(t.Context(), lib.Type, rows)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("series candidates: %#v err=%v", candidates, err)
+	}
+	for i := range candidates {
+		if candidates[i].ID != rows[i].ID || candidates[i].PosterURL != s.PosterURL || candidates[i].Title != s.Title {
+			t.Fatalf("candidate uses episode artwork instead of canonical series: %#v", candidates[i])
+		}
 	}
 	if _, _, err := e.LibraryCoverSelection(t.Context(), lib.ID, []string{"episode-one", "episode-two"}); !errors.Is(err, ErrLibraryCoverSelection) {
 		t.Fatalf("duplicate series accepted: %v", err)

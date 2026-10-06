@@ -186,7 +186,7 @@ func (e *EmbyService) libraryAsView(ctx context.Context, l *model.Library) map[s
 		collectionType = "music"
 	}
 	imageTags := map[string]string{}
-	primaryImageTag := e.FolderCoverTag(ctx, l.ID, "Primary")
+	primaryImageTag := e.FolderCoverTag(ctx, l.ID, "Primary", l.Name)
 	if primaryImageTag != "" {
 		imageTags["Primary"] = primaryImageTag
 	}
