@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -60,6 +61,14 @@ func TestLibraryCoverHTTPPreviewSaveAndPermissions(t *testing.T) {
 	if preview.Code != 200 || preview.Header().Get("Content-Type") != "image/png" || preview.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body)
 	}
+	cacheFiles, err := filepath.Glob(filepath.Join(cfg.Cache.CacheDir, "images", "variants", "folder-covers", "*.png"))
+	if err != nil || len(cacheFiles) != 1 {
+		t.Fatalf("preview did not cache one composition: files=%v err=%v", cacheFiles, err)
+	}
+	cacheBefore, err := os.Stat(cacheFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	lib, err := svc.Repo.Library.FindByID(t.Context(), "lib-1")
 	if err != nil || len(lib.CoverMediaIDs) != 0 {
 		t.Fatal("preview persisted draft")
@@ -108,6 +117,10 @@ func TestLibraryCoverHTTPPreviewSaveAndPermissions(t *testing.T) {
 	native := request("GET", "/api/libraries/lib-1/cover/image?maxWidth=960", "", admin)
 	if native.Code != 200 || !bytes.Equal(native.Body.Bytes(), preview.Body.Bytes()) || native.Header().Get("Cache-Control") != "private, no-cache" {
 		t.Fatalf("Web image differs from preview: status=%d", native.Code)
+	}
+	cacheAfter, err := os.Stat(cacheFiles[0])
+	if err != nil || !cacheAfter.ModTime().Equal(cacheBefore.ModTime()) {
+		t.Fatalf("preview, Web and Emby did not reuse the persisted composition: %v", err)
 	}
 	if err := svc.Repo.DB.Table("libraries").Where("id = ?", "lib-1").Update("name", "华语电影").Error; err != nil {
 		t.Fatal(err)

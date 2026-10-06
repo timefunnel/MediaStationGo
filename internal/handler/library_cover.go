@@ -177,15 +177,18 @@ func renderLibraryCover(ctx context.Context, svc *service.Container, title strin
 	if len(artworks) == 0 {
 		return nil, fmt.Errorf("媒体库没有可用于封面的作品海报")
 	}
-	images := make([]image.Image, 0, len(artworks))
-	for _, art := range artworks {
-		img, err := fetchEmbyFolderArtwork(ctx, svc, art.URL)
-		if err != nil {
-			return nil, fmt.Errorf("作品海报加载失败：%w", err)
+	tag := service.EmbyFolderCoverTag("", title, artworks)
+	return svc.ImageProxy.FetchFolderCover(ctx, tag, artworks, width, height, func() ([]byte, error) {
+		images := make([]image.Image, 0, len(artworks))
+		for _, art := range artworks {
+			img, err := fetchEmbyFolderArtwork(ctx, svc, art.URL)
+			if err != nil {
+				return nil, fmt.Errorf("作品海报加载失败：%w", err)
+			}
+			images = append(images, img)
 		}
-		images = append(images, img)
-	}
-	return buildEmbyFolderCoverGallery(images, title, width, height)
+		return buildEmbyFolderCoverGallery(images, title, width, height)
+	})
 }
 
 func writeLibraryCoverError(c *gin.Context, err error) {

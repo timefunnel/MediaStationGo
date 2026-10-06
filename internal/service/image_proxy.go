@@ -39,6 +39,8 @@ type ImageProxy struct {
 	variantCachePruning    bool
 	variantCacheLastPruned time.Time
 	variantFallback        imageVariantFallbackFunc
+	folderCoverMu          sync.Mutex
+	folderCoverFlights     map[string]*folderCoverFlight
 
 	// libraryRootsFn returns the configured media library roots so that
 	// sidecar poster/artwork files stored alongside media (under arbitrary
