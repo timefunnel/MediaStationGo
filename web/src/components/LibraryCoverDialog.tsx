@@ -124,19 +124,19 @@ export function LibraryCoverDialog({ library, onClose }: Props) {
               <button type="submit" className="btn-outline shrink-0 gap-1" disabled={loading}><Search size={15} />搜索</button>
             </form>
             <p className="py-2 text-xs text-[var(--app-muted)]">点击海报加入组合，最多 4 部。首张作品决定背景主色。</p>
-            <div className="max-h-64 min-h-[120px] flex-1 overflow-y-auto md:max-h-none" aria-busy={loading}>
+            <div className="max-h-96 min-h-[120px] flex-1 overflow-y-auto md:max-h-none" aria-busy={loading}>
               {loading ? <p className="p-4 text-sm text-[var(--app-muted)]">正在加载作品…</p> : browseError ? (
                 <div className="p-3 text-sm"><p role="alert">{browseError}</p><button className="btn-outline mt-2" onClick={() => setFilter({ ...filter })}>重试</button></div>
-              ) : candidates.length === 0 ? <p className="p-4 text-sm text-[var(--app-muted)]">没有找到作品。</p> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-3">
+              ) : candidates.length === 0 ? <p className="p-4 text-sm text-[var(--app-muted)]">没有找到作品。</p> : <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-3 lg:grid-cols-5">
                 {candidates.map((item) => {
                   const index = selected.findIndex((choice) => choice.id === item.id)
                   const picked = index >= 0
                   return <button key={item.id} type="button" aria-label={item.title} title={item.selection_error || item.title} disabled={disabled || !!item.selection_error || !item.poster_url || (!picked && selected.length >= 4)} aria-pressed={picked} onClick={() => changeSelection(picked ? selected.filter((choice) => choice.id !== item.id) : [...selected, item])} className={`min-w-0 overflow-hidden rounded-lg border text-left transition-colors disabled:opacity-50 ${picked ? 'border-brand-500 bg-[var(--app-brand-soft)] text-[var(--app-brand-text)] ring-1 ring-brand-500' : 'border-[var(--app-border)] bg-[var(--app-panel)] hover:border-brand-500/60'}`}>
                     <div className="relative aspect-[2/3] overflow-hidden bg-[var(--app-panel-soft)]">
                       <CoverPoster item={item} />
-                      {!!item.poster_url && !item.selection_error && <span className={`absolute right-2 top-2 flex h-7 min-w-7 items-center justify-center gap-1 rounded-full px-1.5 text-xs font-semibold shadow-sm ${picked ? 'bg-brand-500 text-white' : 'bg-black/60 text-white'}`} aria-hidden="true">{picked ? <><Check size={12} />{index + 1}</> : <Plus size={14} />}</span>}
+                      {!!item.poster_url && !item.selection_error && <span className={`absolute right-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-semibold shadow-sm ${picked ? 'bg-brand-500 text-white' : 'bg-black/60 text-white'}`} aria-hidden="true">{picked ? <><Check size={12} />{index + 1}</> : <Plus size={12} />}</span>}
                     </div>
-                    <span className="block min-h-12 px-2 py-2 text-xs font-medium leading-4"><span className="line-clamp-2 break-words">{item.title}</span></span>
+                    <span className="block truncate px-1.5 py-1.5 text-xs font-medium leading-4">{item.title}</span>
                   </button>
                 })}
               </div>}
