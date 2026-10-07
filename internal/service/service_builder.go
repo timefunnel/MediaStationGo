@@ -55,6 +55,7 @@ func (b *serviceContainerBuilder) initResourceImport() {
 		return
 	}
 	b.c.ResourceImport = service
+	service.SetNotifyChannels(b.c.NotifyChannels)
 	if b.c.PipelineMaintenance != nil && service != nil {
 		migrationClient, ok := service.client.(mediaMigrationPipelineClient)
 		if !ok {

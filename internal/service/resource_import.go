@@ -49,6 +49,7 @@ type ResourceImportService struct {
 	repos  *repository.Container
 	client resourcePipelineClient
 	ctx    context.Context
+	notify *NotifyChannelService
 
 	subscriptionFailureHandler    func(context.Context, model.ResourceImportJob) error
 	subscriptionCompletionHandler func(context.Context, model.ResourceImportJob) error
@@ -898,6 +899,11 @@ func (s *ResourceImportService) Create(ctx context.Context, userID string, libra
 			return ResourceImportTask{}, err
 		}
 	}
+	if status == ResourceImportStatusCompleted || status == ResourceImportStatusCompletedWithWarning {
+		if err := s.applyPipelineTask(ctx, &record, pipelineTask); err != nil {
+			return ResourceImportTask{}, err
+		}
+	}
 	s.schedule(record.ID)
 	return s.taskDTO(ctx, record, false)
 }
@@ -1356,9 +1362,12 @@ func (s *ResourceImportService) applyPipelineTask(ctx context.Context, job *mode
 	job.Status, job.Stage = status, stage
 	job.Message, job.PublicError, job.Error = safePipelineMessage(child.Message), safePipelineMessage(child.Error), child.Error
 	job.MediaID, job.MediaTitle, job.CancelRequested = strings.TrimSpace(child.MsgMediaID), strings.TrimSpace(child.MsgMediaTitle), child.CancelRequested
-	if (status == ResourceImportStatusCompleted || status == ResourceImportStatusCompletedWithWarning) && job.SubscriptionFollow && strings.TrimSpace(job.SubscriptionID) != "" && s.subscriptionCompletionHandler != nil {
-		if err := s.subscriptionCompletionHandler(ctx, *job); err != nil && s.log != nil {
-			s.log.Error("subscription follow completion notification failed", zap.String("job_id", job.ID), zap.String("subscription_id", job.SubscriptionID), zap.Error(err))
+	if status == ResourceImportStatusCompleted || status == ResourceImportStatusCompletedWithWarning {
+		if err := s.notifyImportCompleted(ctx, *job); err != nil {
+			if s.log != nil {
+				s.log.Error("resource import completion notification failed", zap.String("job_id", job.ID), zap.Error(err))
+			}
+			return err
 		}
 	}
 	if status == ResourceImportStatusFailed && job.SubscriptionFollow && strings.TrimSpace(job.SubscriptionID) != "" && s.subscriptionFailureHandler != nil {

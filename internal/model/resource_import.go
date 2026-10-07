@@ -62,4 +62,6 @@ type ResourceImportJob struct {
 	CancelRequested         bool       `gorm:"index;not null;default:false" json:"cancel_requested"`
 	StartedAt               *time.Time `json:"started_at,omitempty"`
 	FinishedAt              *time.Time `json:"finished_at,omitempty"`
+	// Records dispatch scheduling, not delivery success; preserved across retries.
+	CompletionNotificationQueuedAt *time.Time `json:"-"`
 }
