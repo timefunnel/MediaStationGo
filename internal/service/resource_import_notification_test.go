@@ -25,11 +25,11 @@ func TestResourceImportCompletionNotificationsSeparateSources(t *testing.T) {
 		events          string
 		wantTitle       string
 	}{
-		{name: "manual import", status: "completed", wantTitle: "MediaStationGo 入库完成"},
-		{name: "manual replenishment", follow: true, manualReplenish: true, status: "completed", wantTitle: "MediaStationGo 入库完成"},
+		{name: "manual import", status: "completed", wantTitle: "user-a-入库-Example"},
+		{name: "manual replenishment", follow: true, manualReplenish: true, status: "completed", wantTitle: "user-a-入库-Example"},
 		{name: "automatic follow", follow: true, status: "completed", wantTitle: "MediaStationGo 自动追更入库完成"},
 		{name: "automatic follow with warning", follow: true, status: "completed_with_warning", wantTitle: "MediaStationGo 自动追更入库完成"},
-		{name: "manual warning", status: "completed_with_warning", wantTitle: "MediaStationGo 入库完成"},
+		{name: "manual warning", status: "completed_with_warning", wantTitle: "user-a-入库-Example"},
 		{name: "manual replenishment with no new episodes", follow: true, manualReplenish: true, status: "completed", noMedia: true, noNewEpisodes: true},
 		{name: "completed without media", status: "completed", noMedia: true},
 		{name: "scanning", status: "running"},
@@ -75,6 +75,9 @@ func TestResourceImportCompletionNotificationsSeparateSources(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
+				if (!tt.follow || tt.manualReplenish) && (!strings.Contains(parts[2], "任务：Example\n") || strings.Contains(parts[2], "Scanner title")) {
+					t.Errorf("notification body used scanner title instead of task name: %s", parts[2])
+				}
 				messages <- parts[1]
 				_, _ = w.Write([]byte(`{"code":200,"message":"success"}`))
 			}))
@@ -92,7 +95,7 @@ func TestResourceImportCompletionNotificationsSeparateSources(t *testing.T) {
 			svc.SetNotifyChannels(notify)
 			subSvc := &SubscriptionService{repo: repos, notify: notify}
 			svc.SetSubscriptionCompletionHandler(subSvc.completeResourceImportSubscription)
-			child := resourcePipelineTask{Status: tt.status, Stage: tt.status, MsgMediaID: "mock-media", MsgMediaTitle: "Example"}
+			child := resourcePipelineTask{Status: tt.status, Stage: tt.status, MsgMediaID: "mock-media", MsgMediaTitle: "Scanner title"}
 			if tt.noMedia {
 				child.MsgMediaID = ""
 			}
@@ -121,6 +124,68 @@ func TestResourceImportCompletionNotificationsSeparateSources(t *testing.T) {
 			case title := <-messages:
 				t.Fatalf("unexpected or duplicate completion notification: %s", title)
 			case <-time.After(100 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestResourceImportCompletionNotificationTitlePreservesSelectedResource(t *testing.T) {
+	job := model.ResourceImportJob{
+		CandidateTitle: "  Selected-287-UC  ", MediaTitle: "selected 287 uc",
+		Status: ResourceImportStatusCompletedWithWarning, PublicError: "Enhancement failed",
+	}
+	event := resourceImportCompletedNotification(job, "  管理员  ")
+	if event.Title != "管理员-入库-Selected-287-UC" {
+		t.Fatalf("notification title=%q", event.Title)
+	}
+	if !strings.HasPrefix(event.Message, "任务：Selected-287-UC\n") || !strings.Contains(event.Message, job.PublicError) {
+		t.Fatalf("notification body=%q", event.Message)
+	}
+	if event.Type != EventLibraryIngest || event.Data["title"] != "Selected-287-UC" || event.Data["resource_title"] != "Selected-287-UC" {
+		t.Fatalf("notification event=%+v", event)
+	}
+}
+
+func TestResourceImportCompletionNotificationRejectsMissingTitleOrCreator(t *testing.T) {
+	for _, name := range []string{"missing task title", "missing creator", "creator lookup failure"} {
+		t.Run(name, func(t *testing.T) {
+			svc, repos, library, root, _, user := newResourceImportTestService(t, &fakeResourcePipeline{})
+			job := model.ResourceImportJob{
+				UserID: user.ID, LibraryID: library.ID, LibraryRootID: root.ID,
+				SearchSessionID: "mock-search", CandidateJSON: `{}`, CandidateTitle: "Selected-UC",
+				IdempotencyKey: "mock-title", Status: ResourceImportStatusCompleted,
+				Stage: "completed", MediaID: "mock-media", MediaTitle: "Scanner title",
+			}
+			wantError := "missing candidate_title"
+			switch name {
+			case "missing task title":
+				job.CandidateTitle = " "
+			case "missing creator":
+				job.UserID = "missing-user"
+				wantError = "creator is missing"
+			case "creator lookup failure":
+				wantError = "mock creator lookup failure"
+				if err := repos.DB.Callback().Query().Before("gorm:query").Register("test:reject_creator", func(tx *gorm.DB) {
+					if tx.Statement.Table == "users" {
+						tx.AddError(errors.New(wantError))
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repos.DB.Create(&job).Error; err != nil {
+				t.Fatal(err)
+			}
+			svc.SetNotifyChannels(NewNotifyChannelService(zap.NewNop(), repos))
+			if err := svc.notifyImportCompleted(t.Context(), job); err == nil || !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("notification error=%v, want %q", err, wantError)
+			}
+			var persisted model.ResourceImportJob
+			if err := repos.DB.First(&persisted, "id = ?", job.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if persisted.CompletionNotificationQueuedAt != nil {
+				t.Fatal("invalid notification claimed the completion before resolving its title and creator")
 			}
 		})
 	}
