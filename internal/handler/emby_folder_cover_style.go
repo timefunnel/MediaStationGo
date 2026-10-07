@@ -31,8 +31,9 @@ func embyFolderCoverPalette(src image.Image) (float64, float64) {
 	type colorBin struct {
 		weight float64
 		rgb    [3]float64
+		count  int
 	}
-	var bins [12]colorBin
+	var bins [24]colorBin
 	for y := 0; y < 48; y++ {
 		for x := 0; x < 32; x++ {
 			c := sample.RGBAAt(x, y)
@@ -40,12 +41,15 @@ func embyFolderCoverPalette(src image.Image) (float64, float64) {
 			hue, saturation := embyFolderCoverRGBHue(r, g, b)
 			hi := max(r, g, b)
 			// Dark pixels, whites and grays carry little usable chromatic identity.
-			if hi < 0.18 || saturation < 0.10 {
+			if hi < 0.18 || saturation < 0.18 || hi-min(r, g, b) < 0.08 {
 				continue
 			}
-			weight := saturation * math.Sqrt(hi)
-			index := int(math.Floor(hue*12+0.5)) % len(bins)
+			// Give a meaningful colored region more influence than a broad washed-out
+			// area (often skin, beige scenery or paper), without inventing a hue.
+			weight := saturation * saturation * saturation * math.Sqrt(hi)
+			index := int(math.Floor(hue*float64(len(bins))+0.5)) % len(bins)
 			bin := &bins[index]
+			bin.count++
 			bin.weight += weight
 			bin.rgb[0] += r * weight
 			bin.rgb[1] += g * weight
@@ -54,13 +58,19 @@ func embyFolderCoverPalette(src image.Image) (float64, float64) {
 	}
 	dominant, score := 0, 0.0
 	for i, bin := range bins {
-		value := bin.weight + 0.35*(bins[(i+11)%12].weight+bins[(i+1)%12].weight)
+		previous, next := bins[(i+len(bins)-1)%len(bins)], bins[(i+1)%len(bins)]
+		// Require a visible region, so isolated saturated pixels or a tiny logo
+		// cannot become the entire background palette.
+		if float64(bin.count+previous.count+next.count) < 0.04*32*48 {
+			continue
+		}
+		value := bin.weight + 0.35*(previous.weight+next.weight)
 		if value > score {
 			dominant, score = i, value
 		}
 	}
 	if score == 0 {
-		// An achromatic (or all-dark) image gets a neutral gray lighting palette.
+		// With no meaningful chromatic region, use neutral gray lighting.
 		return 0, 0
 	}
 	var rgb [3]float64
@@ -69,13 +79,13 @@ func embyFolderCoverPalette(src image.Image) (float64, float64) {
 		if offset == 0 {
 			coefficient = 1
 		}
-		bin := bins[(dominant+offset+12)%12]
+		bin := bins[(dominant+offset+len(bins))%len(bins)]
 		for channel := range rgb {
 			rgb[channel] += bin.rgb[channel] * coefficient / score
 		}
 	}
 	hue, saturation := embyFolderCoverRGBHue(rgb[0], rgb[1], rgb[2])
-	return hue, 0.25 + 0.17*saturation
+	return hue, 0.40 + 0.22*saturation
 }
 
 func embyFolderCoverRGBHue(r, g, b float64) (float64, float64) {

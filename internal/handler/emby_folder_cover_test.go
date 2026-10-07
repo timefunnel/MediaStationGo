@@ -173,7 +173,7 @@ func TestEmbyFolderCoverBackgroundUsesWholeFirstPosterAndStableLighting(t *testi
 	second := image.NewRGBA(image.Rect(0, 0, 40, 60))
 	draw.Draw(second, second.Bounds(), &image.Uniform{C: color.RGBA{0, 255, 0, 255}}, image.Point{}, draw.Src)
 	hue, saturation := embyFolderCoverPalette(first)
-	if hue > 0.05 && hue < 0.95 || saturation > 0.43 {
+	if hue > 0.05 && hue < 0.95 || saturation < 0.40 || saturation > 0.63 {
 		t.Fatalf("equal-area colors should select the stable red hue bin, not average into gray: h=%v s=%v", hue, saturation)
 	}
 	for _, width := range []int{320, 640} {

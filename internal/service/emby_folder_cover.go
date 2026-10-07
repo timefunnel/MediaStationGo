@@ -10,7 +10,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
-const embyFolderCoverTagVersion = "folder-cover-textured-wall-v9"
+const embyFolderCoverTagVersion = "folder-cover-chromatic-wall-v10"
 
 type EmbyFolderCoverArtwork struct {
 	MediaID   string

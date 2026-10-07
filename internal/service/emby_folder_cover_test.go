@@ -10,8 +10,8 @@ import (
 func TestEmbyFolderCoverTagChangesWithArtworkURL(t *testing.T) {
 	artwork := EmbyFolderCoverArtwork{MediaID: "movie", ImageType: "Primary", Tag: "movie", URL: "https://img.example/old.jpg"}
 	before := EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork})
-	if before == "aef5eedc1dca4b57d06f76369afafa23" {
-		t.Fatal("textured wall must invalidate the previous cover cache tag")
+	if before == "aef5eedc1dca4b57d06f76369afafa23" || before == "eb18e61a2671e7aa0947ec46911cfb95" {
+		t.Fatal("chromatic wall must invalidate previous cover cache tags, including v9")
 	}
 	if again := EmbyFolderCoverTag("library", "电影", []EmbyFolderCoverArtwork{artwork}); again != before {
 		t.Fatal("unchanged artwork must retain its cache tag")

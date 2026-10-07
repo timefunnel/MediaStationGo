@@ -157,7 +157,7 @@ func buildEmbyFolderCoverGallery(images []image.Image, title string, width, heig
 func drawEmbyFolderCoverBackground(dst *image.RGBA, src image.Image) {
 	hue, saturation := embyFolderCoverPalette(src)
 	dark := embyFolderCoverHSL(hue, saturation, 0.27)
-	light := embyFolderCoverHSL(hue+0.025, saturation*0.60, 0.62)
+	light := embyFolderCoverHSL(hue+0.025, saturation*0.80, 0.60)
 	bounds := dst.Bounds()
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		ny := (float64(y-bounds.Min.Y) + 0.5) / float64(bounds.Dy())
@@ -165,6 +165,10 @@ func drawEmbyFolderCoverBackground(dst *image.RGBA, src image.Image) {
 			nx := (float64(x-bounds.Min.X) + 0.5) / float64(bounds.Dx())
 			glow := 0.13 * math.Exp(-math.Pow((nx-0.27)/0.37, 2)-math.Pow((ny-0.22)/0.55, 2))
 			mix := min(1.0, max(0.0, 0.12+0.59*nx+0.19*(1-ny)+glow))
+			// A broad left shade keeps white titles readable even on yellow/green
+			// palettes; ease it out toward the artwork rather than desaturating it.
+			shade := min(1.0, max(0.0, (nx-0.40)/0.40))
+			shade = 0.67 + 0.33*shade*shade*(3-2*shade)
 			seed := uint32(x-bounds.Min.X)*0x9e3779b1 ^ uint32(y-bounds.Min.Y)*0x85ebca77
 			seed ^= seed >> 16
 			seed *= 0x7feb352d
@@ -172,7 +176,7 @@ func drawEmbyFolderCoverBackground(dst *image.RGBA, src image.Image) {
 			grain := float64(seed&255)/255*2.4 - 1.2
 			var rgb [3]uint8
 			for channel := range rgb {
-				v := (dark[channel]*(1-mix)+light[channel]*mix)*255 + grain
+				v := (dark[channel]*(1-mix)+light[channel]*mix)*255*shade + grain
 				rgb[channel] = uint8(math.Round(min(255.0, max(0.0, v))))
 			}
 			dst.SetRGBA(x, y, color.RGBA{rgb[0], rgb[1], rgb[2], 255})
