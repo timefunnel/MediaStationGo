@@ -136,6 +136,15 @@ func TestDanmakuBackendNegativeRecordMigrationAndExpiry(t *testing.T) {
 	}
 	row.Attempts = `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"}]`
 	row.UpdatedAt = time.Now()
+	if !rowNeedsAutomaticMatch(row) {
+		t.Fatal("pre-Youku negative record did not migrate")
+	}
+	row.Status = DanmakuStatusFailed
+	if !rowNeedsAutomaticMatch(row) {
+		t.Fatal("pre-Youku failure record did not migrate")
+	}
+	row.Status = DanmakuStatusUnmatched
+	row.Attempts = `[{"source":"danmaku_server","mode":"priority_v2","outcome":"evaluated"}]`
 	if rowNeedsAutomaticMatch(row) {
 		t.Fatal("fresh negative record re-queried upstream")
 	}
@@ -449,7 +458,7 @@ func TestDanmakuPayloadDoesNotRetryFreshBackendNegativeRecord(t *testing.T) {
 		Attempts: []DanmakuAttempt{
 			{Source: "dandanplay", Mode: "tmdb", Outcome: "error", Error: "upstream down"},
 		},
-	}, `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"error","error":"upstream down"}]`); err != nil {
+	}, `[{"source":"danmaku_server","mode":"priority_v2","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"error","error":"upstream down"}]`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -471,7 +480,7 @@ func TestDanmakuPayloadDoesNotRetryFreshBackendKeywordMiss(t *testing.T) {
 			{Source: "dandanplay", Mode: "tmdb", Outcome: "no_candidates"},
 			{Source: "dandanplay", Mode: "keyword", Outcome: "no_candidates"},
 		},
-	}, `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"no_candidates"},{"source":"dandanplay","mode":"keyword","outcome":"no_candidates"}]`); err != nil {
+	}, `[{"source":"danmaku_server","mode":"priority_v2","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"no_candidates"},{"source":"dandanplay","mode":"keyword","outcome":"no_candidates"}]`); err != nil {
 		t.Fatal(err)
 	}
 

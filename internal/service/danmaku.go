@@ -320,7 +320,7 @@ func (s *DanmakuService) Match(ctx context.Context, mediaID string) (DanmakuMatc
 	if err != nil {
 		// 回源失败也要落库，避免把「上游挂了」当成「这集没弹幕」从而反复重试。
 		failure := DanmakuMatchResult{Status: DanmakuStatusFailed, Attempts: []DanmakuAttempt{
-			{Source: "danmaku_server", Mode: "priority_v1", Outcome: "error", Error: err.Error()},
+			{Source: "danmaku_server", Mode: "priority_v2", Outcome: "error", Error: err.Error()},
 		}}
 		if storeErr := s.storeResult(ctx, mediaID, failure, encodeDanmakuAttempts(failure.Attempts)); storeErr != nil {
 			s.log.Warn("persist failed danmaku match", zap.String("media_id", mediaID), zap.Error(storeErr))
@@ -846,8 +846,8 @@ func rowNeedsAutomaticMatch(row *model.MediaDanmaku) bool {
 	if row.Status != DanmakuStatusUnmatched && row.Status != DanmakuStatusFailed {
 		return false
 	}
-	// 换用独立服务后，旧失败匹配记录允许按新源策略重试一次；之后未命中一天内复用。
-	if !rowAttemptedMode(row, "priority_v1") {
+	// 接入优酷后，旧版失败/未命中记录按新源策略重试一次；之后一天内复用。
+	if !rowAttemptedMode(row, "priority_v2") {
 		return true
 	}
 	return time.Since(row.UpdatedAt) >= 24*time.Hour
