@@ -41,7 +41,9 @@ func (e *EmbyService) ensureEmbyKeys(ctx context.Context, scope *gorm.DB) error 
 		q := scope.WithContext(ctx).Select("media.id").Where("emby_key_version <> ? OR emby_series_key IS NULL OR emby_series_key = '' OR emby_list_key IS NULL OR emby_list_key = '' OR emby_version_key IS NULL OR emby_version_key = '' OR COALESCE(emby_config_key, '') <> ?", repository.EmbyKeyVersion, e.embyBrowseConfigKey())
 		q.Statement.ConnPool = tx.Statement.ConnPool
 		if tx.Dialector.Name() == "postgres" {
-			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+			// Only media identities are repaired. An unqualified lock also reaches
+			// joined subqueries, which PostgreSQL rejects when they use GROUP BY.
+			q = q.Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: clause.CurrentTable}})
 		}
 		if err := q.Limit(501).Find(&stale).Error; err != nil {
 			return err

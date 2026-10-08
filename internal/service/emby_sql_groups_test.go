@@ -3,13 +3,80 @@ package service
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ShukeBta/MediaStationGo/internal/database"
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func TestEnsureEmbyKeysPostgresLocksOnlyMediaWithGroupedResumeJoin(t *testing.T) {
+	// Use PostgreSQL's SQL builder without executing its queries against the
+	// SQLite test connection. The transaction still runs through the real path.
+	svc := newTestEmbyService(t)
+	conn, err := svc.repo.DB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: conn}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc = NewEmbyService(nil, svc.log, repository.New(db))
+	scope := db.WithContext(t.Context()).Model(&model.Media{}).
+		Where("media.library_id = ?", "visible-library").
+		Joins(`JOIN (
+			SELECT ph.media_id, MAX(ph.watched_at) AS watched_at
+			FROM playback_histories ph
+			WHERE ph.user_id = ? AND ph.completed = ? AND ph.position_ms > 0
+			GROUP BY ph.media_id
+		) AS resume ON resume.media_id = media.id`, "viewer", false)
+	var queries []string
+	var repairVars []any
+	if err := db.Callback().Query().After("gorm:query").Register("test:scoped-emby-key-lock", func(tx *gorm.DB) {
+		queries = append(queries, tx.Statement.SQL.String())
+		repairVars = append([]any(nil), tx.Statement.Vars...)
+		if tx.Statement.ConnPool == conn {
+			t.Error("key repair query is not bound to its transaction")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ensureEmbyKeys(t.Context(), scope); err != nil {
+		t.Fatalf("repair scoped identities: %v", err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("repair queries = %d, want one stale-row query", len(queries))
+	}
+	for _, required := range []string{
+		"SELECT media.id",
+		"GROUP BY ph.media_id",
+		"ph.user_id = $1 AND ph.completed = $2",
+		"media.library_id = $3",
+		"emby_key_version <>",
+		"LIMIT $6",
+		`FOR UPDATE OF "media"`,
+	} {
+		if !strings.Contains(queries[0], required) {
+			t.Errorf("repair query missing %q:\n%s", required, queries[0])
+		}
+	}
+	wantVars := []any{"viewer", false, "visible-library", repository.EmbyKeyVersion, svc.embyBrowseConfigKey(), 501}
+	if !reflect.DeepEqual(repairVars, wantVars) {
+		t.Fatalf("repair arguments = %#v, want %#v", repairVars, wantVars)
+	}
+	if _, locked := scope.Statement.Clauses["FOR"]; locked || scope.Statement.ConnPool != conn {
+		t.Fatal("key repair changed the caller's read scope")
+	}
+}
 
 func TestEmbySQLLatestOnlyLoadsSelectedGroups(t *testing.T) {
 	e, lib := embyProjectionFixture(t, 17, 3)
