@@ -90,7 +90,14 @@ func newDanmakuTestService(t *testing.T) (*DanmakuService, *gorm.DB) {
 	if err := db.AutoMigrate(&model.MediaDanmaku{}, &model.Media{}); err != nil {
 		t.Fatal(err)
 	}
-	return NewDanmakuService(zap.NewNop(), repository.New(db)), db
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	svc := NewDanmakuService(zap.NewNop(), repository.New(db))
+	t.Cleanup(svc.Close)
+	return svc, db
 }
 
 func matchedResult() DanmakuMatchResult {

@@ -50,6 +50,12 @@ func embyPlaybackInfoHandler(svc *service.Container) gin.HandlerFunc {
 		}
 		embyAttachRequestTokenToMediaSources(c, out)
 		embyLogSubtitleDeliveryAuth(c, svc, out)
+		if req.IsPlayback {
+			if sources, ok := out["MediaSources"].([]map[string]any); ok && len(sources) > 0 {
+				mediaID, _ := sources[0]["Id"].(string)
+				embyPreparePlaybackDanmaku(c, svc, mediaID)
+			}
+		}
 		c.JSON(http.StatusOK, out)
 	}
 }
@@ -563,6 +569,7 @@ func embyVideoStreamHandler(svc *service.Container) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
+			embyPreparePlaybackDanmaku(c, svc, mediaID)
 		}
 		// 直接调用 Stream service 写入 response。
 		// 此前这里把所有错误一律吞成 404：云盘 Cookie 过期、直链解析失败、
@@ -583,6 +590,19 @@ func embyVideoStreamHandler(svc *service.Container) gin.HandlerFunc {
 			}
 		}
 	}
+}
+
+// 只为 SenPlayer / Windows 播放器起播准备弹幕，避免无弹幕客户端/HEAD 探测增加调用。
+func embyPreparePlaybackDanmaku(c *gin.Context, svc *service.Container, mediaID string) {
+	if svc == nil || svc.Danmaku == nil || c.Request.Method == http.MethodHead {
+		return
+	}
+	client := strings.ToLower(strings.TrimSpace(embyClientInfoFromRequest(c).Client))
+	if client != "senplayer" && !strings.HasPrefix(client, "senplayer/") &&
+		client != "mediastation windows" && !strings.HasPrefix(client, "mediastationgowindows/") {
+		return
+	}
+	svc.Danmaku.PrepareForPlayback(mediaID)
 }
 
 func embySubtitleStreamHandler(svc *service.Container) gin.HandlerFunc {

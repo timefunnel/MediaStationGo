@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -94,6 +95,9 @@ func (b *serviceContainerBuilder) initDanmakuBackend() {
 		return
 	}
 	b.c.Danmaku.SetBackendClient(client)
+	if b.cfg.Danmaku.TimeoutSeconds > 0 {
+		b.c.Danmaku.preparation.timeout = time.Duration(b.cfg.Danmaku.TimeoutSeconds) * time.Second
+	}
 }
 
 func (b *serviceContainerBuilder) recoverResourceImports() {

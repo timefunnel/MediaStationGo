@@ -181,6 +181,9 @@ func (c *Container) Close() {
 	if c.stopCancel != nil {
 		c.stopCancel()
 	}
+	if c.Danmaku != nil {
+		c.Danmaku.Close()
+	}
 	if c.Scheduler != nil {
 		c.Scheduler.Stop()
 	}

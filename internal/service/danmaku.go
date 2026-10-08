@@ -234,6 +234,7 @@ type DanmakuService struct {
 	backend        danmakuBackendClient
 	autoMatchMu    sync.Mutex
 	autoMatchLocks map[string]*danmakuMatchLock
+	preparation    danmakuPreparation
 }
 
 func NewDanmakuService(log *zap.Logger, repos *repository.Container) *DanmakuService {
@@ -244,6 +245,7 @@ func NewDanmakuService(log *zap.Logger, repos *repository.Container) *DanmakuSer
 		log:            log,
 		repos:          repos,
 		autoMatchLocks: make(map[string]*danmakuMatchLock),
+		preparation:    newDanmakuPreparation(),
 	}
 }
 
@@ -397,6 +399,8 @@ func (s *DanmakuService) SetManual(ctx context.Context, mediaID, provider, episo
 	if err := validateDanmakuOffset(offsetSeconds); err != nil {
 		return nil, err
 	}
+	unlock := s.lockAutoMatch(mediaID)
+	defer unlock()
 	var row model.MediaDanmaku
 	err := s.repos.DB.WithContext(ctx).Where("media_id = ?", mediaID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -413,6 +417,7 @@ func (s *DanmakuService) SetManual(ctx context.Context, mediaID, provider, episo
 		if err := s.repos.DB.WithContext(ctx).Create(&row).Error; err != nil {
 			return nil, err
 		}
+		s.invalidatePreparation(mediaID)
 		return &row, nil
 	}
 	if err != nil {
@@ -434,6 +439,7 @@ func (s *DanmakuService) SetManual(ctx context.Context, mediaID, provider, episo
 	if err := s.repos.DB.WithContext(ctx).Save(&row).Error; err != nil {
 		return nil, err
 	}
+	s.invalidatePreparation(mediaID)
 	return s.Association(ctx, mediaID)
 }
 
@@ -467,6 +473,8 @@ func (s *DanmakuService) ImportLocal(ctx context.Context, mediaID, content, form
 		return nil, DanmakuPayload{}, fmt.Errorf("%w: title is too long", ErrDanmakuInvalidInput)
 	}
 
+	unlock := s.lockAutoMatch(mediaID)
+	defer unlock()
 	existing, err := s.Association(ctx, mediaID)
 	if err != nil {
 		return nil, DanmakuPayload{}, err
@@ -509,6 +517,7 @@ func (s *DanmakuService) ImportLocal(ctx context.Context, mediaID, content, form
 	} else if err := s.repos.DB.WithContext(ctx).Save(&row).Error; err != nil {
 		return nil, DanmakuPayload{}, err
 	}
+	s.invalidatePreparation(mediaID)
 	saved, err := s.Association(ctx, mediaID)
 	if err != nil {
 		return nil, DanmakuPayload{}, err
@@ -549,6 +558,8 @@ func (s *DanmakuService) SetOffset(ctx context.Context, mediaID string, offsetSe
 	if err := validateDanmakuOffset(offsetSeconds); err != nil {
 		return nil, err
 	}
+	unlock := s.lockAutoMatch(mediaID)
+	defer unlock()
 	row, err := s.Association(ctx, mediaID)
 	if err != nil {
 		return nil, err
@@ -559,6 +570,7 @@ func (s *DanmakuService) SetOffset(ctx context.Context, mediaID string, offsetSe
 	if err := s.repos.DB.WithContext(ctx).Model(row).Update("offset_seconds", offsetSeconds).Error; err != nil {
 		return nil, err
 	}
+	s.invalidatePreparation(mediaID)
 	return s.Association(ctx, mediaID)
 }
 
@@ -567,7 +579,14 @@ func (s *DanmakuService) Clear(ctx context.Context, mediaID string) error {
 	if mediaID == "" {
 		return fmt.Errorf("%w: media id is required", ErrDanmakuInvalidInput)
 	}
-	return s.repos.DB.WithContext(ctx).Where("media_id = ?", mediaID).Delete(&model.MediaDanmaku{}).Error
+	unlock := s.lockAutoMatch(mediaID)
+	defer unlock()
+	// 关联按 media_id 唯一；保留软删除行会使清除后的重新匹配插入失败。
+	if err := s.repos.DB.WithContext(ctx).Unscoped().Where("media_id = ?", mediaID).Delete(&model.MediaDanmaku{}).Error; err != nil {
+		return err
+	}
+	s.invalidatePreparation(mediaID)
+	return nil
 }
 
 // PrewarmSeason 触发一次整季预热。
@@ -668,9 +687,8 @@ func (s *DanmakuService) PrewarmTask(ctx context.Context, taskID string) (Danmak
 	return task, nil
 }
 
-// Payload 返回可直接渲染的弹幕。没有本地关联时同步做一次 TMDB 集搜索，确保
-// 先于视频直链到达的播放器请求也能在同一个响应里拿到弹幕。
-func (s *DanmakuService) Payload(ctx context.Context, mediaID string, options DanmakuOptions) (DanmakuPayload, error) {
+// loadPayload 复用已有的精确匹配及后端缓存链路；准备任务和客户端请求不另建来源。
+func (s *DanmakuService) loadPayload(ctx context.Context, mediaID string, options DanmakuOptions) (DanmakuPayload, error) {
 	mediaID = strings.TrimSpace(mediaID)
 	if mediaID == "" {
 		return DanmakuPayload{}, fmt.Errorf("%w: media id is required", ErrDanmakuInvalidInput)
