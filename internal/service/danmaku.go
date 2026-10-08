@@ -172,8 +172,9 @@ type DanmakuParseRequest struct {
 
 // DanmakuPrewarmEpisode 是整季预热里的一个分集。
 type DanmakuPrewarmEpisode struct {
-	MediaID    string `json:"media_id"`
-	EpisodeKey string `json:"episode_key,omitempty"`
+	MediaID    string         `json:"media_id"`
+	EpisodeKey string         `json:"episode_key,omitempty"`
+	Target     *DanmakuTarget `json:"target,omitempty"`
 }
 
 // DanmakuPrewarmDetail 是一集的预热结果（失败必须能被看见）。
@@ -205,7 +206,7 @@ type DanmakuPrewarmTask struct {
 	UpdatedAt      float64                `json:"updated_at,omitempty"`
 }
 
-type danmakuPipelineClient interface {
+type danmakuBackendClient interface {
 	MatchDanmaku(context.Context, string) (DanmakuMatchResult, error)
 	FetchDanmaku(context.Context, DanmakuFetchRequest) (DanmakuPayload, error)
 	ParseDanmaku(context.Context, DanmakuParseRequest) (DanmakuPayload, error)
@@ -230,7 +231,7 @@ type DanmakuPrewarmRequest struct {
 type DanmakuService struct {
 	log            *zap.Logger
 	repos          *repository.Container
-	pipeline       danmakuPipelineClient
+	backend        danmakuBackendClient
 	autoMatchMu    sync.Mutex
 	autoMatchLocks map[string]*danmakuMatchLock
 }
@@ -246,12 +247,12 @@ func NewDanmakuService(log *zap.Logger, repos *repository.Container) *DanmakuSer
 	}
 }
 
-func (s *DanmakuService) SetPipelineClient(client danmakuPipelineClient) {
-	s.pipeline = client
+func (s *DanmakuService) SetBackendClient(client danmakuBackendClient) {
+	s.backend = client
 }
 
 func (s *DanmakuService) Available() bool {
-	return s != nil && s.pipeline != nil
+	return s != nil && s.backend != nil
 }
 
 func (s *DanmakuService) Association(ctx context.Context, mediaID string) (*model.MediaDanmaku, error) {
@@ -315,10 +316,13 @@ func (s *DanmakuService) Match(ctx context.Context, mediaID string) (DanmakuMatc
 	if existing != nil && !rowNeedsAutomaticMatch(existing) {
 		return matchResultFromRow(existing), nil
 	}
-	result, err := s.pipeline.MatchDanmaku(ctx, mediaID)
+	result, err := s.backend.MatchDanmaku(ctx, mediaID)
 	if err != nil {
 		// 回源失败也要落库，避免把「上游挂了」当成「这集没弹幕」从而反复重试。
-		if storeErr := s.storeResult(ctx, mediaID, DanmakuMatchResult{Status: DanmakuStatusFailed}, ""); storeErr != nil {
+		failure := DanmakuMatchResult{Status: DanmakuStatusFailed, Attempts: []DanmakuAttempt{
+			{Source: "danmaku_server", Mode: "priority_v1", Outcome: "error", Error: err.Error()},
+		}}
+		if storeErr := s.storeResult(ctx, mediaID, failure, encodeDanmakuAttempts(failure.Attempts)); storeErr != nil {
 			s.log.Warn("persist failed danmaku match", zap.String("media_id", mediaID), zap.Error(storeErr))
 		}
 		if errors.Is(err, ErrDanmakuUnavailable) {
@@ -435,7 +439,7 @@ func (s *DanmakuService) SetManual(ctx context.Context, mediaID, provider, episo
 
 // ImportLocal 保存用户导入的本地弹幕文件（B 站 XML / 弹弹play JSON）。
 //
-// 先让 media-pipeline 解析一遍再落库：格式不对、内容为空、文件过大都在这里如实失败，
+// 先让 独立弹幕服务 解析一遍再落库：格式不对、内容为空、文件过大都在这里如实失败，
 // 而不是先存下来、等到播放时才暴露。归一化仍由管线负责，所以这里只保存**原文**。
 func (s *DanmakuService) ImportLocal(ctx context.Context, mediaID, content, format, title string) (*model.MediaDanmaku, DanmakuPayload, error) {
 	mediaID = strings.TrimSpace(mediaID)
@@ -471,7 +475,7 @@ func (s *DanmakuService) ImportLocal(ctx context.Context, mediaID, content, form
 	if existing != nil {
 		offset = existing.OffsetSeconds
 	}
-	payload, err := s.pipeline.ParseDanmaku(ctx, DanmakuParseRequest{
+	payload, err := s.backend.ParseDanmaku(ctx, DanmakuParseRequest{
 		Content:       content,
 		Format:        format,
 		OffsetSeconds: offset,
@@ -598,7 +602,7 @@ func (s *DanmakuService) PrewarmSeason(ctx context.Context, mediaID string, seas
 	if len(episodes) == 0 {
 		return DanmakuPrewarmTask{}, fmt.Errorf("%w: no episodes found for season %d", ErrDanmakuInvalidInput, season)
 	}
-	task, err := s.pipeline.StartDanmakuPrewarm(ctx, DanmakuPrewarmRequest{
+	task, err := s.backend.StartDanmakuPrewarm(ctx, DanmakuPrewarmRequest{
 		OwnerID:  mediaID,
 		MediaID:  mediaID,
 		Season:   season,
@@ -632,9 +636,11 @@ func (s *DanmakuService) seasonEpisodes(ctx context.Context, media model.Media, 
 	}
 	episodes := make([]DanmakuPrewarmEpisode, 0, len(rows))
 	for _, row := range rows {
+		target := danmakuTargetFromMedia(row)
 		episodes = append(episodes, DanmakuPrewarmEpisode{
 			MediaID:    row.ID,
 			EpisodeKey: fmt.Sprintf("S%02dE%02d", row.SeasonNum, row.EpisodeNum),
+			Target:     &target,
 		})
 	}
 	return episodes, nil
@@ -648,7 +654,7 @@ func (s *DanmakuService) PrewarmTask(ctx context.Context, taskID string) (Danmak
 	if !s.Available() {
 		return DanmakuPrewarmTask{}, ErrDanmakuUnavailable
 	}
-	task, err := s.pipeline.GetDanmakuPrewarm(ctx, taskID)
+	task, err := s.backend.GetDanmakuPrewarm(ctx, taskID)
 	if err != nil {
 		var pipelineErr *resourcePipelineError
 		if errors.As(err, &pipelineErr) && pipelineErr.StatusCode == 404 {
@@ -692,6 +698,9 @@ func (s *DanmakuService) Payload(ctx context.Context, mediaID string, options Da
 		}
 	}
 	if !rowServable(row) {
+		if row != nil && row.Status == DanmakuStatusFailed {
+			return DanmakuPayload{}, fmt.Errorf("%w: %s", ErrDanmakuUnavailable, rowAttempts(row))
+		}
 		return DanmakuPayload{}, fmt.Errorf("%w: %s", ErrDanmakuUnmatched, rowAttempts(row))
 	}
 	offset := row.OffsetSeconds
@@ -701,7 +710,7 @@ func (s *DanmakuService) Payload(ctx context.Context, mediaID string, options Da
 	if row.Provider == DanmakuProviderLocal {
 		return s.localPayload(ctx, mediaID, row, options, offset)
 	}
-	payload, err := s.pipeline.FetchDanmaku(ctx, DanmakuFetchRequest{
+	payload, err := s.backend.FetchDanmaku(ctx, DanmakuFetchRequest{
 		MediaID:              mediaID,
 		EpisodeID:            row.EpisodeID,
 		Source:               row.Provider,
@@ -728,7 +737,7 @@ func (s *DanmakuService) Payload(ctx context.Context, mediaID string, options Da
 // 不做本地缓存：偏移和 ch_convert 都是请求级参数，缓存住任何一份都会在下一次
 // 参数变化时给出错误结果；管线侧只有纯解析，开销可接受。
 func (s *DanmakuService) localPayload(ctx context.Context, mediaID string, row *model.MediaDanmaku, options DanmakuOptions, offset float64) (DanmakuPayload, error) {
-	payload, err := s.pipeline.ParseDanmaku(ctx, DanmakuParseRequest{
+	payload, err := s.backend.ParseDanmaku(ctx, DanmakuParseRequest{
 		Content:       row.LocalContent,
 		Format:        row.LocalFormat,
 		OffsetSeconds: offset,
@@ -830,35 +839,18 @@ func rowAttemptedMode(row *model.MediaDanmaku, mode string) bool {
 	return false
 }
 
-func rowAttemptedOutcome(row *model.MediaDanmaku, mode, outcome string) bool {
-	mode = strings.TrimSpace(mode)
-	outcome = strings.TrimSpace(outcome)
-	for _, attempt := range decodeDanmakuAttempts(rowAttempts(row)) {
-		if strings.EqualFold(strings.TrimSpace(attempt.Mode), mode) &&
-			strings.EqualFold(strings.TrimSpace(attempt.Outcome), outcome) {
-			return true
-		}
-	}
-	return false
-}
-
 func rowNeedsAutomaticMatch(row *model.MediaDanmaku) bool {
 	if row == nil {
 		return true
 	}
-	if row.Status != DanmakuStatusUnmatched {
+	if row.Status != DanmakuStatusUnmatched && row.Status != DanmakuStatusFailed {
 		return false
 	}
-	// 已发布的 TMDB-only 版本可能已经持久化 no_candidates 或 ambiguous。只允许这些
-	// 明确无法得到唯一节目编号且尚未尝试 keyword 的记录迁移一次；错误不能被掩盖。
-	if (rowAttemptedOutcome(row, "tmdb", "no_candidates") ||
-		rowAttemptedOutcome(row, "tmdb", "ambiguous")) && !rowAttemptedMode(row, "keyword") {
+	// 换用独立服务后，旧失败匹配记录允许按新源策略重试一次；之后未命中一天内复用。
+	if !rowAttemptedMode(row, "priority_v1") {
 		return true
 	}
-	if rowAttemptedMode(row, "tmdb") || row.MatchMode == "tmdb" {
-		return false
-	}
-	return row.MatchMode == "hash" || rowAttemptedMode(row, "hash")
+	return time.Since(row.UpdatedAt) >= 24*time.Hour
 }
 
 // DanmakuXML 把归一化弹幕转成 B 站 XML，用于 Emby 兼容端点与导出。

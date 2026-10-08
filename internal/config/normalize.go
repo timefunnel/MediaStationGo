@@ -80,6 +80,9 @@ func (c *Config) normalize() error {
 		c.Cache.EmbySeriesTTLSeconds = 60 * 60
 	}
 	c.Search.Backend = strings.ToLower(strings.TrimSpace(c.Search.Backend))
+	if err := c.Danmaku.validate(); err != nil {
+		return err
+	}
 	if c.Search.Index == "" {
 		c.Search.Index = "mediastation_media"
 	}

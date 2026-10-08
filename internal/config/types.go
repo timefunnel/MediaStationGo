@@ -16,6 +16,15 @@ type Config struct {
 	Organizer      OrganizerConfig      `mapstructure:"organizer"`
 	License        LicenseConfig        `mapstructure:"license"`
 	ResourceImport ResourceImportConfig `mapstructure:"resource_import"`
+	Danmaku        DanmakuConfig        `mapstructure:"danmaku"`
+}
+
+// DanmakuConfig configures the independent danmaku server, not media-pipeline.
+type DanmakuConfig struct {
+	Enabled        bool   `mapstructure:"enabled"`
+	URL            string `mapstructure:"url"`
+	Token          string `mapstructure:"token"`
+	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
 }
 
 // ResourceImportConfig configures the trusted media-pipeline bridge.

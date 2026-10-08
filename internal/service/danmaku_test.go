@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"go.uber.org/zap"
@@ -117,10 +118,55 @@ func TestDanmakuUnavailableIsNotSilentlyEmptied(t *testing.T) {
 	}
 }
 
+func TestDanmakuBackendDoesNotDependOnResourceImport(t *testing.T) {
+	svc, _ := newDanmakuTestService(t)
+	builder := serviceContainerBuilder{cfg: &config.Config{Danmaku: config.DanmakuConfig{
+		Enabled: true, URL: "http://127.0.0.1:9322", Token: "test-token-16-chars",
+	}}, log: zap.NewNop(), repos: svc.repos, c: &Container{Danmaku: svc}}
+	builder.initDanmakuBackend()
+	if !svc.Available() || builder.c.ResourceImport != nil {
+		t.Fatal("independent backend requires resource_import")
+	}
+}
+
+func TestDanmakuBackendNegativeRecordMigrationAndExpiry(t *testing.T) {
+	row := &model.MediaDanmaku{Status: DanmakuStatusUnmatched}
+	if !rowNeedsAutomaticMatch(row) {
+		t.Fatal("old negative record did not migrate")
+	}
+	row.Attempts = `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"}]`
+	row.UpdatedAt = time.Now()
+	if rowNeedsAutomaticMatch(row) {
+		t.Fatal("fresh negative record re-queried upstream")
+	}
+	row.UpdatedAt = time.Now().Add(-25 * time.Hour)
+	if !rowNeedsAutomaticMatch(row) {
+		t.Fatal("expired negative record cannot retry")
+	}
+	row.Status = DanmakuStatusMatched
+	if rowNeedsAutomaticMatch(row) {
+		t.Fatal("matched association was changed")
+	}
+}
+
+func TestDanmakuBackendFailureRemainsFailureOnRepeatedPlayback(t *testing.T) {
+	svc, _ := newDanmakuTestService(t)
+	backend := &fakeDanmakuPipeline{matchErr: errors.New("source network failed")}
+	svc.SetBackendClient(backend)
+	for range 2 {
+		if _, err := svc.Payload(t.Context(), "media-1", DanmakuOptions{}); !errors.Is(err, ErrDanmakuUnavailable) {
+			t.Fatalf("source error misreported as no match: %v", err)
+		}
+	}
+	if backend.matchCalls != 1 {
+		t.Fatalf("failed matching re-queried upstream %d times", backend.matchCalls)
+	}
+}
+
 func TestDanmakuMatchPersistsAssociationAndShift(t *testing.T) {
 	svc, db := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult()}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	result, err := svc.Match(t.Context(), "media-1")
 	if err != nil {
@@ -150,7 +196,7 @@ func TestDanmakuMatchPersistsAssociationAndShift(t *testing.T) {
 func TestDanmakuManualAssociationSurvivesRematch(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult()}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	if _, err := svc.SetManual(t.Context(), "media-1", "dandanplay", "111", "手动番剧", "手动第1话", -1.5); err != nil {
 		t.Fatal(err)
@@ -169,7 +215,7 @@ func TestDanmakuManualAssociationSurvivesRematch(t *testing.T) {
 
 func TestDanmakuMatchFailureIsPersistedAndReported(t *testing.T) {
 	svc, db := newDanmakuTestService(t)
-	svc.SetPipelineClient(&fakeDanmakuPipeline{matchErr: errors.New("upstream down")})
+	svc.SetBackendClient(&fakeDanmakuPipeline{matchErr: errors.New("upstream down")})
 
 	if _, err := svc.Match(t.Context(), "media-1"); !errors.Is(err, ErrDanmakuUnavailable) {
 		t.Fatalf("Match error = %v, want wrapped ErrDanmakuUnavailable", err)
@@ -185,7 +231,7 @@ func TestDanmakuMatchFailureIsPersistedAndReported(t *testing.T) {
 
 func TestDanmakuUnmatchedIsReportedWithAttempts(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
-	svc.SetPipelineClient(&fakeDanmakuPipeline{matchResult: DanmakuMatchResult{
+	svc.SetBackendClient(&fakeDanmakuPipeline{matchResult: DanmakuMatchResult{
 		Matched: false,
 		Attempts: []DanmakuAttempt{
 			{Source: "dandanplay", Mode: "tmdb", Outcome: "no_candidates"},
@@ -215,7 +261,7 @@ func TestDanmakuPayloadAppliesProviderShiftAndUserOffset(t *testing.T) {
 			},
 		},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	payload, err := svc.Payload(t.Context(), "media-1", DanmakuOptions{ChConvert: 1})
 	if err != nil {
@@ -239,7 +285,7 @@ func TestDanmakuPayloadAppliesProviderShiftAndUserOffset(t *testing.T) {
 func TestDanmakuOffsetOverrideAndClear(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult(), payload: DanmakuPayload{EpisodeID: "95410010"}}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	if _, err := svc.Payload(t.Context(), "media-1", DanmakuOptions{OffsetSeconds: -3.5}); err != nil {
 		t.Fatal(err)
@@ -281,7 +327,7 @@ func TestDanmakuPayloadWithoutAssociationMatchesTMDBAndReturnsPayload(t *testing
 			Comments: []DanmakuComment{{CID: "1", M: "首播可见", Time: 1, Mode: 1}},
 		},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	payload, err := svc.Payload(t.Context(), "media-1", DanmakuOptions{})
 
@@ -302,7 +348,7 @@ func TestDanmakuPayloadRetriesLegacyHashOnlyUnmatchedOnce(t *testing.T) {
 		matchResult: matchedResult(),
 		payload:     DanmakuPayload{Source: "dandanplay", EpisodeID: "95410010"},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if err := svc.storeResult(t.Context(), "media-1", DanmakuMatchResult{
 		Matched:   false,
 		MatchMode: "hash",
@@ -339,7 +385,7 @@ func TestDanmakuPayloadRetriesStoredTMDBNoCandidatesOnceForKeywordMigration(t *t
 		matchResult: keywordResult,
 		payload:     DanmakuPayload{Source: "dandanplay", EpisodeID: "180050148"},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if err := svc.storeResult(t.Context(), "media-1", DanmakuMatchResult{
 		Matched: false,
 		Attempts: []DanmakuAttempt{
@@ -373,7 +419,7 @@ func TestDanmakuPayloadRetriesStoredTMDBAmbiguousOnceForDisambiguation(t *testin
 		matchResult: keywordResult,
 		payload:     DanmakuPayload{Source: "dandanplay", EpisodeID: "180050148"},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if err := svc.storeResult(t.Context(), "media-1", DanmakuMatchResult{
 		Matched: false,
 		Attempts: []DanmakuAttempt{
@@ -394,16 +440,16 @@ func TestDanmakuPayloadRetriesStoredTMDBAmbiguousOnceForDisambiguation(t *testin
 	}
 }
 
-func TestDanmakuPayloadDoesNotRetryStoredTMDBError(t *testing.T) {
+func TestDanmakuPayloadDoesNotRetryFreshBackendNegativeRecord(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult()}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if err := svc.storeResult(t.Context(), "media-1", DanmakuMatchResult{
 		Matched: false,
 		Attempts: []DanmakuAttempt{
 			{Source: "dandanplay", Mode: "tmdb", Outcome: "error", Error: "upstream down"},
 		},
-	}, `[{"source":"dandanplay","mode":"tmdb","outcome":"error","error":"upstream down"}]`); err != nil {
+	}, `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"error","error":"upstream down"}]`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,17 +461,17 @@ func TestDanmakuPayloadDoesNotRetryStoredTMDBError(t *testing.T) {
 	}
 }
 
-func TestDanmakuPayloadDoesNotRetryStoredKeywordUnmatched(t *testing.T) {
+func TestDanmakuPayloadDoesNotRetryFreshBackendKeywordMiss(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult()}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if err := svc.storeResult(t.Context(), "media-1", DanmakuMatchResult{
 		Matched: false,
 		Attempts: []DanmakuAttempt{
 			{Source: "dandanplay", Mode: "tmdb", Outcome: "no_candidates"},
 			{Source: "dandanplay", Mode: "keyword", Outcome: "no_candidates"},
 		},
-	}, `[{"source":"dandanplay","mode":"tmdb","outcome":"no_candidates"},{"source":"dandanplay","mode":"keyword","outcome":"no_candidates"}]`); err != nil {
+	}, `[{"source":"danmaku_server","mode":"priority_v1","outcome":"evaluated"},{"source":"dandanplay","mode":"tmdb","outcome":"no_candidates"},{"source":"dandanplay","mode":"keyword","outcome":"no_candidates"}]`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -440,7 +486,7 @@ func TestDanmakuPayloadDoesNotRetryStoredKeywordUnmatched(t *testing.T) {
 func TestDanmakuPrewarmResolvesSeasonEpisodes(t *testing.T) {
 	svc, db := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	seed := []model.Media{
 		{Title: "作品", Path: "/media/1.mkv", LibraryID: "lib-1", SeriesID: "series-1", SeasonNum: 1, EpisodeNum: 1},
@@ -484,7 +530,7 @@ func TestDanmakuPrewarmResolvesSeasonEpisodes(t *testing.T) {
 
 func TestDanmakuPrewarmReportsInvalidInputInsteadOfGuessing(t *testing.T) {
 	svc, db := newDanmakuTestService(t)
-	svc.SetPipelineClient(&fakeDanmakuPipeline{})
+	svc.SetBackendClient(&fakeDanmakuPipeline{})
 
 	media := model.Media{Title: "电影", Path: "/media/movie.mkv", LibraryID: "lib-1"}
 	if err := db.Create(&media).Error; err != nil {
@@ -511,14 +557,14 @@ func TestDanmakuPrewarmUnavailableWithoutPipeline(t *testing.T) {
 
 func TestDanmakuPrewarmTaskForwardsPipeline404AsNotFound(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
-	svc.SetPipelineClient(&fakeDanmakuPipeline{
+	svc.SetBackendClient(&fakeDanmakuPipeline{
 		prewarmGetErr: &resourcePipelineError{StatusCode: 404, Code: "danmaku_prewarm_not_found", Message: "not found"},
 	})
 	if _, err := svc.PrewarmTask(t.Context(), "task-404"); !errors.Is(err, ErrDanmakuPrewarmNotFound) {
 		t.Fatalf("error = %v, want ErrDanmakuPrewarmNotFound", err)
 	}
 
-	svc.SetPipelineClient(&fakeDanmakuPipeline{
+	svc.SetBackendClient(&fakeDanmakuPipeline{
 		prewarmGet: DanmakuPrewarmTask{TaskID: "task-2", Status: "running", Processed: 2, Total: 5},
 	})
 	task, err := svc.PrewarmTask(t.Context(), "task-2")
@@ -533,7 +579,7 @@ func TestDanmakuPrewarmTaskForwardsPipeline404AsNotFound(t *testing.T) {
 func TestDanmakuOffsetIsValidatedBeforeItReachesThePipeline(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{matchResult: matchedResult(), payload: DanmakuPayload{EpisodeID: "95410010"}}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	// 手动指定、单独调偏移、单次覆盖三条路径都要在本地拦下越界值，
 	// 否则管线会用 400 拒绝，而调用方只会看到一个笼统的 503。
@@ -578,7 +624,11 @@ func TestDanmakuXMLIsEscapedAndUsesBilibiliShape(t *testing.T) {
 	}
 }
 
-func TestDanmakuPipelineHTTPContract(t *testing.T) {
+func TestDanmakuBackendHTTPContract(t *testing.T) {
+	svc, db := newDanmakuTestService(t)
+	if err := db.Create(&model.Media{Base: model.Base{ID: "media-1"}, Title: "爱情公寓", OriginalName: "iPartment", TMDbID: 68809, SeasonNum: 4, EpisodeNum: 16, Year: 2009, Path: "/test/private.mkv"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -596,11 +646,7 @@ func TestDanmakuPipelineHTTPContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := newResourcePipelineHTTPClient(config.ResourceImportConfig{
-		PipelineURL:          server.URL,
-		PipelineToken:        "token",
-		SearchTimeoutSeconds: 5,
-	})
+	client, err := newDanmakuHTTPClient(config.DanmakuConfig{URL: server.URL, Token: "token", TimeoutSeconds: 5}, svc.repos)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,6 +670,10 @@ func TestDanmakuPipelineHTTPContract(t *testing.T) {
 	}
 	if bodies[0]["__path"] != "/v1/danmaku/match" || bodies[0]["__auth"] != "Bearer token" {
 		t.Fatalf("unexpected first request: %+v", bodies[0])
+	}
+	target := bodies[0]["target"].(map[string]any)
+	if target["title"] != "爱情公寓" || target["tmdb_id"] != "68809" || target["season"] != float64(4) || target["episode"] != float64(16) || target["path"] != nil {
+		t.Fatalf("identified metadata contract: %+v", target)
 	}
 	if bodies[1]["ch_convert"] != float64(2) || bodies[1]["episode_id"] != "7" {
 		t.Fatalf("fetch request did not carry ch_convert/episode_id: %+v", bodies[1])
@@ -651,11 +701,7 @@ func TestDanmakuParsePipelineHTTPContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := newResourcePipelineHTTPClient(config.ResourceImportConfig{
-		PipelineURL:          server.URL,
-		PipelineToken:        "token",
-		SearchTimeoutSeconds: 5,
-	})
+	client, err := newDanmakuHTTPClient(config.DanmakuConfig{URL: server.URL, Token: "token", TimeoutSeconds: 5}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +743,7 @@ func TestDanmakuImportLocalStoresFileAndServesItThroughThePipeline(t *testing.T)
 		Total:    1,
 		Comments: []DanmakuComment{{CID: "101", P: "1.5,1,25,16777215,1700000000,0,abc,101", M: "本地弹幕", Time: 1.5, Mode: 1}},
 	}}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	row, payload, err := svc.ImportLocal(t.Context(), "media-1", localXML, "", "某番 第1话")
 	if err != nil {
@@ -794,7 +840,7 @@ func TestDanmakuImportLocalRejectsBadFilesWithoutStoringThem(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			svc, db := newDanmakuTestService(t)
-			svc.SetPipelineClient(testCase.client)
+			svc.SetBackendClient(testCase.client)
 			_, _, err := svc.ImportLocal(t.Context(), "media-1", testCase.body, "", "")
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("ImportLocal error = %v, want %v", err, testCase.want)
@@ -813,7 +859,7 @@ func TestDanmakuImportLocalRejectsBadFilesWithoutStoringThem(t *testing.T) {
 func TestDanmakuImportLocalEnforcesSizeLimitItself(t *testing.T) {
 	svc, _ := newDanmakuTestService(t)
 	pipeline := &fakeDanmakuPipeline{}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 
 	oversized := strings.Repeat("a", DanmakuMaxImportBytes+1)
 	if _, _, err := svc.ImportLocal(t.Context(), "media-1", oversized, "", ""); !errors.Is(err, ErrDanmakuFileTooLarge) {
@@ -830,7 +876,7 @@ func TestDanmakuLocalImportSurvivesMatchAndIsReplacedByManualAssociation(t *test
 		matchResult:  matchedResult(),
 		parsePayload: DanmakuPayload{Source: DanmakuProviderLocal, Format: "dandanplay-json", Count: 2},
 	}
-	svc.SetPipelineClient(pipeline)
+	svc.SetBackendClient(pipeline)
 	if _, _, err := svc.ImportLocal(t.Context(), "media-1", `{"comments":[]}`, "", ""); err != nil {
 		t.Fatal(err)
 	}

@@ -102,7 +102,7 @@ func newDanmakuHandlerContainer(t *testing.T, pipeline *stubDanmakuPipeline) *se
 	}
 	danmaku := service.NewDanmakuService(zap.NewNop(), repository.New(db))
 	if pipeline != nil {
-		danmaku.SetPipelineClient(pipeline)
+		danmaku.SetBackendClient(pipeline)
 	}
 	return &service.Container{Danmaku: danmaku}
 }

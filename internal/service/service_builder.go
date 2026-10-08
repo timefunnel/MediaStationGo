@@ -41,6 +41,7 @@ func newServiceContainer(cfg *config.Config, log *zap.Logger, repos *repository.
 	builder.initImageProxy()
 	builder.attachRuntimeContext()
 	builder.initResourceImport()
+	builder.initDanmakuBackend()
 	builder.recoverPipelineIngest()
 	builder.recoverResourceImports()
 	return builder.c
@@ -76,21 +77,23 @@ func (b *serviceContainerBuilder) initResourceImport() {
 			b.c.Subtitle.SetPipelineClient(subtitleClient)
 		}
 	}
-	if b.c.Danmaku != nil && service != nil {
-		danmakuClient, ok := service.client.(danmakuPipelineClient)
-		if !ok {
-			if b.log != nil {
-				b.log.Error("resource pipeline client does not support danmaku operations")
-			}
-		} else {
-			b.c.Danmaku.SetPipelineClient(danmakuClient)
-		}
-	}
 	if b.c.Subscription != nil {
 		b.c.Subscription.SetResourceImport(service)
 		service.SetSubscriptionFailureHandler(b.c.Subscription.handleResourceImportSubscriptionFailure)
 		service.SetSubscriptionCompletionHandler(b.c.Subscription.completeResourceImportSubscription)
 	}
+}
+
+func (b *serviceContainerBuilder) initDanmakuBackend() {
+	if !b.cfg.Danmaku.Enabled || b.c.Danmaku == nil {
+		return
+	}
+	client, err := newDanmakuHTTPClient(b.cfg.Danmaku, b.repos)
+	if err != nil {
+		b.log.Error("danmaku server initialization failed", zap.Error(err))
+		return
+	}
+	b.c.Danmaku.SetBackendClient(client)
 }
 
 func (b *serviceContainerBuilder) recoverResourceImports() {

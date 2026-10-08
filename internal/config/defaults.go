@@ -136,4 +136,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("resource_import.poll_seconds", 5)
 	v.SetDefault("resource_import.search_timeout_seconds", 30)
 	v.SetDefault("resource_import.bt4g_search_timeout_seconds", 70)
+	v.SetDefault("danmaku.enabled", false)
+	v.SetDefault("danmaku.url", "")
+	v.SetDefault("danmaku.token", "")
+	v.SetDefault("danmaku.timeout_seconds", 120)
 }
