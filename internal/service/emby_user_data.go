@@ -8,26 +8,83 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
 // SetFavorite 把 mediaID 标为 userID 的收藏。
 func (e *EmbyService) SetFavorite(ctx context.Context, userID, mediaID string, favorite bool) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(mediaID) == "" {
+		return errors.New("missing user or media")
+	}
+	if _, found, err := e.FavoriteUserData(ctx, userID, mediaID); err != nil {
+		return err
+	} else if !found {
+		return gorm.ErrRecordNotFound
+	}
+	var err error
 	if favorite {
-		var f model.Favorite
-		err := e.repo.DB.WithContext(ctx).
-			Where("user_id = ? AND media_id = ?", userID, mediaID).First(&f).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return e.repo.DB.WithContext(ctx).Create(&model.Favorite{
-				UserID: userID, MediaID: mediaID,
-			}).Error
-		}
+		// The unique key also covers soft-deleted rows. Restore that same row
+		// when favoriting again instead of creating a conflicting second row.
+		err = e.repo.DB.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "media_id"}},
+			DoUpdates: clause.Assignments(map[string]any{"deleted_at": nil, "updated_at": time.Now()}),
+		}).Create(&model.Favorite{UserID: userID, MediaID: mediaID}).Error
+	} else {
+		err = e.repo.DB.WithContext(ctx).
+			Where("user_id = ? AND media_id = ?", userID, mediaID).
+			Delete(&model.Favorite{}).Error
+	}
+	if err != nil {
 		return err
 	}
-	return e.repo.DB.WithContext(ctx).
-		Where("user_id = ? AND media_id = ?", userID, mediaID).
-		Delete(&model.Favorite{}).Error
+	if e.cache != nil {
+		e.cache.BumpRevision(ctx, embyFavoriteCacheDomain(userID))
+	}
+	return nil
+}
+
+// FavoriteUserData supports the same physical and aggregate item identities
+// as Item, without loading playback sources to answer a favorite action.
+func (e *EmbyService) FavoriteUserData(ctx context.Context, userID, itemID string) (map[string]any, bool, error) {
+	userData, found, err := e.MediaUserData(ctx, userID, itemID)
+	if err != nil || found {
+		return userData, found, err
+	}
+	group, found, err := e.findSeriesGroup(ctx, itemID, userID)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	item, err := e.seriesItemWithFavorites(ctx, group, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	return item["UserData"].(map[string]any), true, nil
+}
+
+// Read favorites by public item ID in one query. Aggregate series keep their
+// own favorite row; their episodes have independent user state.
+func (e *EmbyService) attachItemFavorites(ctx context.Context, userID string, items []map[string]any) error {
+	if strings.TrimSpace(userID) == "" || len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item["Id"].(string))
+	}
+	var favorites []model.Favorite
+	if err := e.repo.DB.WithContext(ctx).Select("media_id").Where("user_id = ? AND media_id IN ?", userID, ids).Find(&favorites).Error; err != nil {
+		return err
+	}
+	byID := make(map[string]bool, len(favorites))
+	for _, favorite := range favorites {
+		byID[favorite.MediaID] = true
+	}
+	for _, item := range items {
+		item["UserData"].(map[string]any)["IsFavorite"] = byID[item["Id"].(string)]
+	}
+	return nil
 }
 
 // MarkPlayed 把 mediaID 标为已看（写一个 100% 进度的 history 行）。

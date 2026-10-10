@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
@@ -110,15 +111,23 @@ func embyFavoriteHandler(svc *service.Container, fav bool) gin.HandlerFunc {
 			return
 		}
 		if err := svc.Emby.SetFavorite(c.Request.Context(), uid, mid, fav); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				embyError(c, http.StatusNotFound, "item not found")
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		out, _ := svc.Emby.Item(c.Request.Context(), mid, uid)
-		if out != nil {
-			c.JSON(http.StatusOK, out["UserData"])
+		userData, found, err := svc.Emby.FavoriteUserData(c.Request.Context(), uid, mid)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"IsFavorite": fav})
+		if !found {
+			embyError(c, http.StatusNotFound, "item not found")
+			return
+		}
+		c.JSON(http.StatusOK, userData)
 	}
 }
 

@@ -27,9 +27,9 @@ type embyReadCacheFlight struct {
 // embyItemsCacheSchemaVersion changes whenever an Items page's public-card
 // semantics change. It prevents a Redis-enabled deployment from returning a
 // page cached with an older pagination contract after an application upgrade.
-const embyItemsCacheSchemaVersion = "v4"
+const embyItemsCacheSchemaVersion = "v5"
 
-func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
+func (e *EmbyService) embyItemsCacheKey(ctx context.Context, kind string, p ItemsParams) string {
 	includeTypes := append([]string(nil), p.IncludeItemTypes...)
 	filters := append([]string(nil), p.Filters...)
 	ids := append([]string(nil), p.IDs...)
@@ -46,6 +46,7 @@ func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
 		kind,
 		embyItemsCacheSchemaVersion,
 		p.UserID,
+		strconv.FormatUint(e.userFavoriteCacheRevision(ctx, p.UserID), 10),
 		strconv.FormatUint(e.userVisibilityVersion(p.UserID), 10),
 		p.ParentID,
 		strings.Join(ids, ","),
@@ -66,15 +67,28 @@ func (e *EmbyService) embyItemsCacheKey(kind string, p ItemsParams) string {
 	return "media:emby:" + hex.EncodeToString(sum[:])
 }
 
-func (e *EmbyService) embyLatestCacheKey(userID, parentID string, limit int) string {
+func (e *EmbyService) embyLatestCacheKey(ctx context.Context, userID, parentID string, limit int) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		"latest",
+		embyItemsCacheSchemaVersion,
 		userID,
+		strconv.FormatUint(e.userFavoriteCacheRevision(ctx, userID), 10),
 		strconv.FormatUint(e.userVisibilityVersion(userID), 10),
 		parentID,
 		strconv.Itoa(limit),
 	}, "|")))
 	return "media:emby:" + hex.EncodeToString(sum[:])
+}
+
+func embyFavoriteCacheDomain(userID string) string {
+	return "emby:favorites:" + userID
+}
+
+func (e *EmbyService) userFavoriteCacheRevision(ctx context.Context, userID string) uint64 {
+	if e == nil || e.cache == nil || strings.TrimSpace(userID) == "" {
+		return 0
+	}
+	return e.cache.Revision(ctx, embyFavoriteCacheDomain(userID))
 }
 
 func (e *EmbyService) beginEmbyReadCacheFill(key string) (*embyReadCacheFlight, bool) {
@@ -133,8 +147,8 @@ func (e *EmbyService) embyMediaCacheTTL() time.Duration {
 	return time.Duration(e.mediaCacheTTLSeconds()) * time.Second
 }
 
-// standardSeriesPage is immutable until the media or the user's visibility
-// changes. Dynamic searches and per-user state keep the short general TTL.
+// Standard series pages use revisioned keys for media, visibility and
+// favorites. Filtered pages keep the short general TTL.
 func (e *EmbyService) standardSeriesPage(p ItemsParams) bool {
 	return len(p.IDs) == 0 && len(p.PersonIDs) == 0 && len(p.GenreIDs) == 0 && len(p.Genres) == 0 &&
 		strings.TrimSpace(p.SearchTerm) == "" && strings.TrimSpace(p.NameStartsWith) == "" && len(p.Filters) == 0
@@ -151,7 +165,7 @@ func (e *EmbyService) embySeriesCacheTTL(p ItemsParams) time.Duration {
 }
 
 func (e *EmbyService) embySeriesCacheKey(ctx context.Context, p ItemsParams) string {
-	key := e.embyItemsCacheKey("series", p)
+	key := e.embyItemsCacheKey(ctx, "series", p)
 	if !e.standardSeriesPage(p) || e == nil || e.cache == nil {
 		return key
 	}

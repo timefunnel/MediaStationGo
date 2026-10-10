@@ -10,7 +10,7 @@ import (
 )
 
 func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
-	cacheKey := e.embyItemsCacheKey("items", p)
+	cacheKey := e.embyItemsCacheKey(ctx, "items", p)
 	var cached embyItemsCacheValue
 	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
 		return map[string]any{"Items": cached.Items, "TotalRecordCount": cached.TotalRecordCount, "StartIndex": cached.StartIndex}, nil
@@ -38,16 +38,26 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	q := e.repo.DB.WithContext(ctx).Model(&model.Media{}).
 		Omit("search_pinyin", "search_initials")
 	q = e.applyUserMediaVisibility(ctx, q, p.UserID)
-	groupSeries := p.ParentID == "" && embyHasMediaSearch(p) && containsItemType(p.IncludeItemTypes, "Series") && !containsItemType(p.IncludeItemTypes, "Episode")
+	favoriteFilter := containsEmbyFilter(p.Filters, "IsFavorite")
+	groupSeries := (embyHasMediaSearch(p) && p.ParentID == "" || favoriteFilter) && containsItemType(p.IncludeItemTypes, "Series") && !containsItemType(p.IncludeItemTypes, "Episode")
 	if p.ParentID != "" {
 		q = q.Where("library_id IN ? OR series_id = ?", e.mergedLibraryIDs(ctx, p.ParentID), p.ParentID)
 	}
 	q = applyEmbyMediaSearch(q, p)
-	if containsEmbyFilter(p.Filters, "IsFavorite") {
+	keysReady := false
+	if favoriteFilter {
 		if strings.TrimSpace(p.UserID) == "" {
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": int64(0), "StartIndex": p.StartIndex}, nil
 		}
-		q = q.Joins("JOIN favorites ON favorites.media_id = media.id AND favorites.user_id = ? AND favorites.deleted_at IS NULL", p.UserID)
+		favoriteID := "media.id"
+		if groupSeries {
+			if err := e.ensureEmbyKeys(ctx, q); err != nil {
+				return nil, err
+			}
+			keysReady = true
+			favoriteID = "CASE WHEN media.season_num > 0 OR media.episode_num > 0 OR COALESCE(media.part_group_key, '') <> '' THEN media.emby_list_key ELSE media.id END"
+		}
+		q = q.Where("EXISTS (SELECT 1 FROM favorites f WHERE f.media_id = ("+favoriteID+") AND f.user_id = ? AND f.deleted_at IS NULL)", p.UserID)
 	}
 	resumeFilter := containsEmbyFilter(p.Filters, "IsResumable")
 	if resumeFilter {
@@ -120,7 +130,7 @@ func (e *EmbyService) mediaItems(ctx context.Context, p ItemsParams) (map[string
 	}
 
 	collapseVersions := e.shouldCollapseMediaVersions(ctx, p)
-	if collapseVersions || hasEmbyGenreFilter(p) {
+	if (collapseVersions || hasEmbyGenreFilter(p)) && !keysReady {
 		if err := e.ensureEmbyKeys(ctx, q); err != nil {
 			return nil, err
 		}
@@ -259,7 +269,9 @@ func (e *EmbyService) payloadsForMediaRows(ctx context.Context, rows []model.Med
 		}
 		var favs []model.Favorite
 		favQuery := e.repo.DB.WithContext(ctx).Where("user_id = ?", userID).Where("media_id IN ?", mediaIDs)
-		_ = favQuery.Find(&favs).Error
+		if err := favQuery.Find(&favs).Error; err != nil {
+			return nil, err
+		}
 		for _, f := range favs {
 			userFavs[f.MediaID] = true
 		}

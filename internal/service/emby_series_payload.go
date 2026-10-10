@@ -1,5 +1,15 @@
 package service
 
+import "context"
+
+func (e *EmbyService) seriesItemWithFavorites(ctx context.Context, group embySeriesGroup, userID string) (map[string]any, error) {
+	item := e.seriesPayload(group)
+	if err := e.attachItemFavorites(ctx, userID, []map[string]any{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
 func (e *EmbyService) seriesPayload(group embySeriesGroup) map[string]any {
 	return e.seriesCardPayload(group, len(group.Episodes), len(e.seasonsForSeries(group)))
 }

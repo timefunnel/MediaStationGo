@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/model"
+	"gorm.io/gorm"
 )
 
 const embyResumeItemsLimit = 10
@@ -43,7 +45,7 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 		if series, ok, err := e.findSeriesGroup(ctx, mediaID, userID); err != nil {
 			return nil, err
 		} else if ok {
-			return e.seriesPayload(series), nil
+			return e.seriesItemWithFavorites(ctx, series, userID)
 		}
 	}
 	m, err := e.repo.Media.FindByID(ctx, mediaID)
@@ -54,7 +56,7 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 		if series, ok, err := e.findSeriesGroup(ctx, mediaID, userID); err != nil {
 			return nil, err
 		} else if ok {
-			return e.seriesPayload(series), nil
+			return e.seriesItemWithFavorites(ctx, series, userID)
 		}
 		return nil, nil
 	}
@@ -73,6 +75,8 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 		ferr := e.repo.DB.WithContext(ctx).Where("user_id = ? AND media_id = ?", userID, mediaID).First(&f).Error
 		if ferr == nil {
 			fav = true
+		} else if !errors.Is(ferr, gorm.ErrRecordNotFound) {
+			return nil, ferr
 		}
 		var h model.PlaybackHistory
 		herr := e.repo.DB.WithContext(ctx).Where("user_id = ? AND media_id = ?", userID, mediaID).
@@ -80,6 +84,8 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 		if herr == nil {
 			pos = h.PositionMs
 			watchedAt = h.WatchedAt
+		} else if !errors.Is(herr, gorm.ErrRecordNotFound) {
+			return nil, herr
 		}
 	}
 	item := e.itemPayload(ctx, m, fav, pos, watchedAt)
@@ -101,7 +107,7 @@ func (e *EmbyService) LatestItems(ctx context.Context, userID, parentID string, 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	cacheKey := e.embyLatestCacheKey(userID, parentID, limit)
+	cacheKey := e.embyLatestCacheKey(ctx, userID, parentID, limit)
 	var cached embyLatestCacheValue
 	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
 		return cached.Items, nil

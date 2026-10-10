@@ -48,7 +48,7 @@ func (e *EmbyService) libraryHasMultipartContent(ctx context.Context, libraryID 
 // 与 mediaItems 的区别: 后者会把剧集结构行当散装 Episode 漏出;这里改为聚合成
 // Series,从根本上消除「电影库里整部剧被拆成单集」的现象。
 func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map[string]any, error) {
-	cacheKey := e.embyItemsCacheKey("movie-library", p)
+	cacheKey := e.embyItemsCacheKey(ctx, "movie-library", p)
 	var cached embyItemsCacheValue
 	if e.cache != nil && e.cache.GetJSON(ctx, cacheKey, &cached) {
 		return map[string]any{"Items": cached.Items, "TotalRecordCount": int(cached.TotalRecordCount), "StartIndex": cached.StartIndex}, nil
@@ -89,8 +89,15 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	queryOrder := embyMovieLibraryOrderSQL(p)
 	includeSeries := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Series") || hasMultipart
 	includeMovies := len(p.IncludeItemTypes) == 0 || containsItemType(p.IncludeItemTypes, "Movie")
+	if includeSeries && containsEmbyFilter(p.Filters, "IsFavorite") {
+		scope := e.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("library_id IN ?", libIDs)
+		scope = e.applyUserMediaVisibility(ctx, scope, p.UserID)
+		if err := e.ensureEmbyKeys(ctx, scope); err != nil {
+			return nil, err
+		}
+	}
 	recordStage("library_checks", stageStarted)
-	apply := func(q *gorm.DB) *gorm.DB {
+	apply := func(q *gorm.DB, favoriteID string) *gorm.DB {
 		q = e.applyUserMediaVisibility(ctx, q, p.UserID)
 		q = q.Where("library_id IN ?", libIDs)
 		q = applyEmbyMediaSearch(q, p)
@@ -98,7 +105,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 			if strings.TrimSpace(p.UserID) == "" {
 				return nil
 			}
-			q = q.Joins("JOIN favorites ON favorites.media_id = media.id AND favorites.user_id = ? AND favorites.deleted_at IS NULL", p.UserID)
+			q = q.Where("EXISTS (SELECT 1 FROM favorites f WHERE f.media_id = "+favoriteID+" AND f.user_id = ? AND f.deleted_at IS NULL)", p.UserID)
 		}
 		return q
 	}
@@ -108,7 +115,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	var episodicRows []model.Media
 	stageStarted = time.Now()
 	if includeSeries && clause != "" {
-		epQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
+		epQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}), "media.emby_list_key")
 		if epQ == nil {
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 		}
@@ -126,7 +133,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 		return nil, err
 	}
 	if includeSeries && hasMultipart {
-		multipartQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
+		multipartQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}), "media.emby_list_key")
 		if multipartQ == nil {
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 		}
@@ -146,7 +153,7 @@ func (e *EmbyService) movieLibraryItems(ctx context.Context, p ItemsParams) (map
 	movieTotal := 0
 	stageStarted = time.Now()
 	if includeMovies {
-		movieQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}))
+		movieQ := apply(e.repo.DB.WithContext(ctx).Model(&model.Media{}), "media.id")
 		if movieQ == nil {
 			return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": 0, "StartIndex": p.StartIndex}, nil
 		}
@@ -319,6 +326,9 @@ func (e *EmbyService) movieLibraryPayloads(ctx context.Context, p ItemsParams, e
 			items = append(items, movieItems[movieIndex])
 			movieIndex++
 		}
+	}
+	if err := e.attachItemFavorites(ctx, p.UserID, items); err != nil {
+		return nil, err
 	}
 	return items, nil
 }

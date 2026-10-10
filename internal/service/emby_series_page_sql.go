@@ -91,14 +91,14 @@ func (e *EmbyService) seriesPageSQLMode(ctx context.Context, libraryID string, p
 		q = q.Where("library_id IN ?", e.mergedLibraryIDs(ctx, libraryID))
 	}
 	q = applyEmbyMediaSearch(q, p)
+	if err := e.ensureEmbyKeys(ctx, q); err != nil {
+		return nil, err
+	}
 	if containsEmbyFilter(p.Filters, "IsFavorite") {
 		if strings.TrimSpace(p.UserID) == "" {
 			return emptyItemsEnvelope(p.StartIndex), nil
 		}
-		q = q.Where("EXISTS (SELECT 1 FROM favorites f WHERE f.media_id = media.id AND f.user_id = ? AND f.deleted_at IS NULL)", p.UserID)
-	}
-	if err := e.ensureEmbyKeys(ctx, q); err != nil {
-		return nil, err
+		q = q.Where("EXISTS (SELECT 1 FROM favorites f WHERE f.media_id = media."+keyColumn+" AND f.user_id = ? AND f.deleted_at IS NULL)", p.UserID)
 	}
 	q = applyEmbyBrowseGenres(q, p)
 	if p.StartIndex < 0 {
@@ -180,7 +180,7 @@ SELECT group_key, episode_count, total_record_count FROM ranked ORDER BY `
 		}
 		return map[string]any{"Items": []map[string]any{}, "TotalRecordCount": int(total), "StartIndex": p.StartIndex}, nil
 	}
-	items, err := e.seriesCardsSQL(ctx, q, page, keyColumn, anchorOrder, latest)
+	items, err := e.seriesCardsSQL(ctx, q, page, keyColumn, anchorOrder, latest, p.UserID)
 	if err != nil {
 		return nil, err
 	}

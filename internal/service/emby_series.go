@@ -74,6 +74,22 @@ func (e *EmbyService) findSeriesGroup(ctx context.Context, id, userID string) (e
 		if series, err := e.repo.Series.FindByID(ctx, id); err != nil {
 			return embySeriesGroup{}, false, err
 		} else if series != nil {
+			lib, err := e.repo.Library.FindByID(ctx, series.LibraryID)
+			if err != nil {
+				return embySeriesGroup{}, false, err
+			}
+			if lib == nil || !e.libraryVisibleFromCachedVisibility(*lib, e.mediaVisibility(ctx, userID)) {
+				return embySeriesGroup{}, false, nil
+			}
+			// A persisted series cannot bypass media-level visibility when all
+			// of its episodes were filtered out (for example by NSFW policy).
+			var episodeCount int64
+			if err := e.repo.DB.WithContext(ctx).Model(&model.Media{}).Where("series_id = ?", id).Count(&episodeCount).Error; err != nil {
+				return embySeriesGroup{}, false, err
+			}
+			if episodeCount > 0 {
+				return embySeriesGroup{}, false, nil
+			}
 			return embySeriesGroup{
 				ID:          series.ID,
 				LibraryID:   series.LibraryID,

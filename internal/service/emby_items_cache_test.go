@@ -72,21 +72,21 @@ func TestEmbyReadCacheFlightWaiterReadsOwnerCache(t *testing.T) {
 func TestInvalidateUserVisibilityChangesEmbyReadCacheKeys(t *testing.T) {
 	svc := NewEmbyService(&config.Config{}, zap.NewNop(), nil)
 	params := ItemsParams{UserID: "viewer", Limit: 20}
-	itemsBefore := svc.embyItemsCacheKey("items", params)
-	latestBefore := svc.embyLatestCacheKey("viewer", "", 20)
+	itemsBefore := svc.embyItemsCacheKey(t.Context(), "items", params)
+	latestBefore := svc.embyLatestCacheKey(t.Context(), "viewer", "", 20)
 	svc.InvalidateUserVisibility("viewer")
-	if itemsAfter := svc.embyItemsCacheKey("items", params); itemsAfter == itemsBefore {
+	if itemsAfter := svc.embyItemsCacheKey(t.Context(), "items", params); itemsAfter == itemsBefore {
 		t.Fatal("items cache key must change immediately after a visibility update")
 	}
-	if latestAfter := svc.embyLatestCacheKey("viewer", "", 20); latestAfter == latestBefore {
+	if latestAfter := svc.embyLatestCacheKey(t.Context(), "viewer", "", 20); latestAfter == latestBefore {
 		t.Fatal("latest cache key must change immediately after a visibility update")
 	}
 }
 
 func TestEmbyItemsCacheKeySeparatesMediaSourcePayloads(t *testing.T) {
 	svc := NewEmbyService(&config.Config{}, zap.NewNop(), nil)
-	full := svc.embyItemsCacheKey("items", ItemsParams{Limit: 20})
-	light := svc.embyItemsCacheKey("items", ItemsParams{Limit: 20, OmitMediaSources: true})
+	full := svc.embyItemsCacheKey(t.Context(), "items", ItemsParams{Limit: 20})
+	light := svc.embyItemsCacheKey(t.Context(), "items", ItemsParams{Limit: 20, OmitMediaSources: true})
 	if full == light {
 		t.Fatal("full and lightweight item payloads must not share a cache key")
 	}

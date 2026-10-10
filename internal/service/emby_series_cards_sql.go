@@ -51,7 +51,7 @@ func (t embySQLTime) Value() (driver.Value, error) { return t.Time, nil }
 
 // All episode-level work remains in the database. The result consists of one
 // metadata row per card and its distinct genres, not thousands of Media objects.
-func (e *EmbyService) seriesCardsSQL(ctx context.Context, scope *gorm.DB, keys []embySeriesPageKey, keyColumn, order string, latest bool) ([]map[string]any, error) {
+func (e *EmbyService) seriesCardsSQL(ctx context.Context, scope *gorm.DB, keys []embySeriesPageKey, keyColumn, order string, latest bool, userID string) ([]map[string]any, error) {
 	ids := make([]string, len(keys))
 	for i := range keys {
 		ids[i] = keys[i].GroupKey
@@ -164,6 +164,9 @@ SELECT group_key,name FROM unique_names WHERE occurrence=1 ORDER BY group_key,rn
 			return nil, fmt.Errorf("Emby group %q changed membership during pagination", key.GroupKey)
 		}
 		out = append(out, items[key.GroupKey])
+	}
+	if err := e.attachItemFavorites(ctx, userID, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

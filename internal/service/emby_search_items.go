@@ -43,7 +43,7 @@ func (e *EmbyService) payloadsForSearchRows(ctx context.Context, rows []model.Me
 		if err := scope.Session(&gorm.Session{}).Select("emby_list_key AS group_key, COUNT(*) AS episode_count").Group("emby_list_key").Scan(&keys).Error; err != nil {
 			return nil, err
 		}
-		items, err := e.seriesCardsSQL(ctx, scope, keys, "emby_list_key", embySeriesAnchorOrder, false)
+		items, err := e.seriesCardsSQL(ctx, scope, keys, "emby_list_key", embySeriesAnchorOrder, false, p.UserID)
 		if err != nil {
 			return nil, err
 		}
