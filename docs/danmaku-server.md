@@ -18,16 +18,16 @@ danmaku:
 
 独立服务源码、运行配置、固定第三方版本与许可说明见 media-pipeline 仓库的 `danmaku-server/README.md`。发布需要两个仓库的精确提交和两个独立镜像；仅验证或提交不等于正式发布。
 
-## 起播并行准备（SenPlayer / Windows）
+## 按需获取（取消起播预热）
 
-MSG 在已鉴权、已确认媒体来源的 `PlaybackInfo?IsPlayback=true` 请求，以及视频 GET 请求时，后台启动当前媒体的准确匹配和整集弹幕抓取。只识别现有客户端标识 `SenPlayer` / `MediaStation Windows` 及其对应 UA；详情查询、HEAD 探测和其他客户端不会触发。Windows 客户端已有起播标志和 `with_related=true` 弹幕请求，不需要重新打包。不会读取云盘文件、预取其他集或改变匹配优先级。
+MSG 不再由 `PlaybackInfo` 请求（包括 `IsPlayback=true`）或视频 GET/HEAD 请求自动启动弹幕匹配、抓取。SenPlayer 和 Windows 均适用；只取消服务端起播预热，不取消播放器实际弹幕请求，Windows 客户端无需源码改动或重新打包。显式手动整季预热入口保留。
 
-视频响应不等待弹幕任务。SenPlayer 的 XML 和 Windows 的 JSON 弹幕请求（`with_related=true, ch_convert=0`，无请求级偏移）共享同一个任务：已完成直接交接，未完成只等剩余时间。不同媒体或不同弹幕参数不混用结果；已有关联、手动匹配、本地导入和后端持久缓存仍复用原链路。
+SenPlayer 请求 XML 弹幕、Windows 请求 JSON 弹幕时，才按需匹配和获取内容；已有媒体关联、手动匹配、本地导入和独立后端持久缓存仍复用原链路，不读取云盘文件，不改变源优先级。相同媒体、相同参数的并发弹幕请求共享在途任务，不同媒体或参数不混用结果；视频响应不等待弹幕任务。
 
-全局最多 3 个准备/取弹幕任务同时运行；后台提前准备不排队，忙时明确记录 skipped，播放器真正请求时仍可排队等待。任务及交接记录最多 64 个，超过上限明确报不可用，不创建无界 goroutine。准备总超时复用 `danmaku.timeout_seconds`（默认 120 秒，含排队、匹配、取弹幕），服务关闭会取消并回收任务；单个播放器断开只取消自身等待。
+按需取弹幕仍最多 3 个任务同时运行，超出并发时排队等待；任务记录最多 64 个，超过上限明确报不可用，不创建无界 goroutine。总超时复用 `danmaku.timeout_seconds`（默认 120 秒，含排队、匹配、取弹幕），服务关闭会取消并回收任务；单个播放器断开只取消自身等待。
 
-起播准备成功的结果仅保留 1 分钟用于交接，持久整集缓存仍只在独立后端；普通按需请求只共享在途任务，不另建长期成功缓存。任务失败保留原错误、抑制同键重复请求 5 分钟，不伪装成空弹幕；原匹配失败/未命中的一天复用策略保持不变。手动换源、导入、偏移更新或清除关联成功后取消旧任务并废弃交接结果，避免返回旧源或旧时间轴。清除关联物理删除唯一行，允许随后重新匹配，不保留会冲突的软删除占位。
+成功的按需请求只共享在途任务，不另建 MSG 成功交接缓存，持久整集缓存仍只在独立后端。任务失败保留原错误、抑制同键重复请求 5 分钟，不伪装成空弹幕；原匹配失败/未命中的一天复用策略保持不变。手动换源、导入、偏移更新或清除关联成功后取消旧任务，避免返回旧源或旧时间轴。清除关联物理删除唯一行，允许随后重新匹配，不保留会冲突的软删除占位。
 
-本地验证只使用合成媒体、阻塞式假后端和模拟云盘直链，不访问真实弹幕源、115、OpenList，不下载媒体。覆盖起播不阻塞、两端及重复视频请求共享一次抓取、失败冷却/到期、并发上限、客户端取消、服务关闭、参数隔离和关联更新。
+本地验证使用合成媒体、可阻塞的假后端和模拟云盘直链，不访问真实弹幕源、115、OpenList，不下载媒体。起播回归覆盖两端客户端标识与 UA、媒体来源选择、视频 GET/HEAD 和 Windows 原生视频路由，确认不匹配、不取弹幕；实际 XML/JSON 请求仍能获取内容并复用媒体关联。服务层原有失败冷却/到期、并发上限、客户端取消、服务关闭、参数隔离和关联更新测试继续保留。
 
-验证记录（2026-10-08）：`go test ./internal/service ./internal/handler ./internal/config -count=1 -timeout=180s` 通过，1974 项通过（含子测试）；`go test ./internal/service -run '^TestDanmakuPlayback' -count=20 -timeout=60s` 连续 20 轮通过；`go vet ./internal/service ./internal/handler ./internal/config` 通过。Go `-race` 因当前 Windows 环境 `CGO_ENABLED=0` 无法运行；未验证生产或两端实机首帧时序，不能保证弹幕一定在首帧前就绪。Windows 客户端无需源码改动或重新构建。
+验证记录（2026-10-09）：`go test ./internal/handler ./internal/service ./internal/config -count=1 -timeout=180s` 和 `go vet ./internal/handler ./internal/service ./internal/config` 通过；`go test ./internal/handler -run '^TestEmbyDanmaku(PlaybackDoesNotPrefetch|LoadsOnlyOnExplicitRequests)$' -count=20 -timeout=60s` 连续 20 轮通过。当前 Windows 环境 `CGO_ENABLED=0`，未执行 Go `-race`；本次未进行生产或两端实机验证。

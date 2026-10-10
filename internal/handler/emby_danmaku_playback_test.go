@@ -24,12 +24,14 @@ import (
 
 type embyPlaybackDanmakuBackend struct {
 	stubDanmakuPipeline
+	matches atomic.Int32
 	fetches atomic.Int32
 	entered chan service.DanmakuFetchRequest
 	release chan struct{}
 }
 
 func (b *embyPlaybackDanmakuBackend) MatchDanmaku(context.Context, string) (service.DanmakuMatchResult, error) {
+	b.matches.Add(1)
 	return service.DanmakuMatchResult{Matched: true, Status: service.DanmakuStatusMatched,
 		Provider: "youku", EpisodeID: "123", MatchMode: "native", AnimeTitle: "Synthetic"}, nil
 }
@@ -42,7 +44,7 @@ func (b *embyPlaybackDanmakuBackend) FetchDanmaku(ctx context.Context, request s
 		return service.DanmakuPayload{}, ctx.Err()
 	case <-b.release:
 		return service.DanmakuPayload{Source: "youku", EpisodeID: "123", Count: 1,
-			Comments: []service.DanmakuComment{{CID: "1", P: "1,1,16777215,test", M: "synthetic prepared danmaku", Time: 1}}}, nil
+			Comments: []service.DanmakuComment{{CID: "1", P: "1,1,16777215,test", M: "synthetic requested danmaku", Time: 1}}}, nil
 	}
 }
 
@@ -119,23 +121,24 @@ func playbackDanmakuRequest(t *testing.T, router http.Handler, method, path, cli
 	}
 }
 
-func TestEmbyDanmakuPlaybackPreparationTriggersOnlyRealSupportedPlayback(t *testing.T) {
+func TestEmbyDanmakuPlaybackDoesNotPrefetch(t *testing.T) {
 	cases := []struct {
 		name, method, path, client, userAgent string
-		trigger                               bool
 		status                                int
 	}{
-		{"senplayer-start", "POST", "/Items/media-1/PlaybackInfo?IsPlayback=true", "SenPlayer", "SenPlayer/6.2.2", true, 200},
-		{"senplayer-ua", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "", "SenPlayer/6.2.2", true, 200},
-		{"windows-start", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", true, 200},
-		{"windows-ua", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "", "MediaStationGoWindows/0.1.0-dev", true, 200},
-		{"selected-source", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true&MediaSourceId=media-2", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", true, 200},
-		{"detail-query", "GET", "/Items/media-1/PlaybackInfo", "SenPlayer", "SenPlayer/6.2.2", false, 200},
-		{"other-client", "POST", "/Items/media-1/PlaybackInfo?IsPlayback=true", "Infuse", "Infuse/1", false, 200},
-		{"invalid-selection", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true&MediaSourceId=missing", "SenPlayer", "SenPlayer/6.2.2", false, 400},
-		{"senplayer-stream", "GET", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2", true, 302},
-		{"windows-stream", "GET", "/Videos/media-1/stream", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", true, 302},
-		{"head-probe", "HEAD", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2", false, 302},
+		{"senplayer-start", "POST", "/Items/media-1/PlaybackInfo?IsPlayback=true", "SenPlayer", "SenPlayer/6.2.2", 200},
+		{"senplayer-ua", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "", "SenPlayer/6.2.2", 200},
+		{"windows-start", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", 200},
+		{"windows-ua", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "", "MediaStationGoWindows/0.1.0-dev", 200},
+		{"selected-source", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true&MediaSourceId=media-2", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", 200},
+		{"detail-query", "GET", "/Items/media-1/PlaybackInfo", "SenPlayer", "SenPlayer/6.2.2", 200},
+		{"other-client", "POST", "/Items/media-1/PlaybackInfo?IsPlayback=true", "Infuse", "Infuse/1", 200},
+		{"invalid-selection", "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true&MediaSourceId=missing", "SenPlayer", "SenPlayer/6.2.2", 400},
+		{"senplayer-stream", "GET", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2", 302},
+		{"windows-stream", "GET", "/Videos/media-1/stream", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", 302},
+		{"windows-native-stream", "GET", "/emby/api/stream/media-1", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", 302},
+		{"head-probe", "HEAD", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2", 302},
+		{"windows-native-head", "HEAD", "/emby/api/stream/media-1", "MediaStation Windows", "MediaStationGoWindows/0.1.0-dev", 302},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {
@@ -144,56 +147,50 @@ func TestEmbyDanmakuPlaybackPreparationTriggersOnlyRealSupportedPlayback(t *test
 			if w.Code != item.status {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
-			if item.trigger {
-				select {
-				case request := <-b.entered:
-					mediaID := "media-1"
-					if item.name == "selected-source" {
-						mediaID = "media-2"
-					}
-					if request.MediaID != mediaID || !request.WithRelated {
-						t.Fatalf("wrong preparation: %+v", request)
-					}
-				case <-time.After(3 * time.Second):
-					t.Fatal("real playback did not prepare danmaku")
-				}
-			} else {
-				select {
-				case <-b.entered:
-					t.Fatal("non-playback/probe/unrelated client fetched danmaku")
-				case <-time.After(20 * time.Millisecond):
-				}
+			select {
+			case <-b.entered:
+				t.Fatal("playback fetched danmaku without an explicit danmaku request")
+			case <-time.After(20 * time.Millisecond):
+			}
+			if b.matches.Load() != 0 || b.fetches.Load() != 0 {
+				t.Fatalf("playback started danmaku work: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
 			}
 		})
 	}
 }
 
-func TestEmbyDanmakuPlaybackSharesWorkAcrossSenPlayerAndWindows(t *testing.T) {
+func TestEmbyDanmakuLoadsOnlyOnExplicitRequests(t *testing.T) {
 	router, _, b := newEmbyPlaybackDanmakuRouter(t)
 	if w := playbackDanmakuRequest(t, router, "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "MediaStation Windows", "MediaStationGoWindows/test"); w.Code != 200 {
 		t.Fatal(w.Body.String())
-	}
-	select {
-	case <-b.entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("preparation did not start")
 	}
 	for range 3 {
 		if w := playbackDanmakuRequest(t, router, "GET", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2"); w.Code != 302 {
 			t.Fatal(w.Body.String())
 		}
 	}
+	if b.matches.Load() != 0 || b.fetches.Load() != 0 {
+		t.Fatalf("playback started danmaku work: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
+	}
 	close(b.release)
 	xml := playbackDanmakuRequest(t, router, "GET", "/api/danmu/media-1/raw", "SenPlayer", "SenPlayer/6.2.2")
-	if xml.Code != 200 || !strings.Contains(xml.Body.String(), "synthetic prepared danmaku") {
-		t.Fatalf("SenPlayer did not receive prepared XML: %d %s", xml.Code, xml.Body.String())
+	if xml.Code != 200 || !strings.Contains(xml.Body.String(), "synthetic requested danmaku") {
+		t.Fatalf("SenPlayer did not receive requested XML: %d %s", xml.Code, xml.Body.String())
+	}
+	if b.matches.Load() != 1 || b.fetches.Load() != 1 {
+		t.Fatalf("explicit XML did not load danmaku: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
+	}
+	request := <-b.entered
+	if request.MediaID != "media-1" || !request.WithRelated {
+		t.Fatalf("wrong explicit danmaku request: %+v", request)
 	}
 	jsonResponse := playbackDanmakuRequest(t, router, "GET", "/api/danmaku/media-1?with_related=true&ch_convert=0", "MediaStation Windows", "MediaStationGoWindows/test")
 	var payload service.DanmakuPayload
 	if err := json.Unmarshal(jsonResponse.Body.Bytes(), &payload); err != nil || jsonResponse.Code != 200 || payload.Count != 1 {
-		t.Fatalf("Windows did not receive prepared JSON: %d %s %v", jsonResponse.Code, jsonResponse.Body.String(), err)
+		t.Fatalf("Windows did not receive requested JSON: %d %s %v", jsonResponse.Code, jsonResponse.Body.String(), err)
 	}
-	if b.fetches.Load() != 1 {
-		t.Fatalf("two clients or repeated video requests refetched danmaku %d times", b.fetches.Load())
+	// Successful on-demand tasks only share in-flight work; persistent comment caching stays in the backend.
+	if b.matches.Load() != 1 || b.fetches.Load() != 2 {
+		t.Fatalf("explicit JSON did not reuse the match: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
 	}
 }
