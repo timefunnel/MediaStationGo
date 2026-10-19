@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/xml"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,26 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/repository"
 )
+
+func TestCloudNFOArtworkKeepsRemoteImageURLs(t *testing.T) {
+	var doc nfoDocument
+	if err := xml.Unmarshal([]byte(`<movie>
+		<title>Example</title>
+		<thumb aspect="poster">https://images.example/poster.jpg</thumb>
+		<thumb aspect="poster">poster.jpg</thumb>
+		<fanart><thumb>https://images.example/fanart.jpg</thumb><thumb>fanart.jpg</thumb></fanart>
+	</movie>`), &doc); err != nil {
+		t.Fatal(err)
+	}
+	sidecars := cloudSidecarSet{imageByName: map[string]string{
+		"poster.jpg": "/Movies/Example/poster.jpg",
+		"fanart.jpg": "/Movies/Example/fanart.jpg",
+	}}
+	meta := applyCloudNFOArtwork("openlist", sidecars, metadataFromDoc(&doc, "", false), &doc)
+	if meta.PosterURL != "https://images.example/poster.jpg" || meta.BackdropURL != "https://images.example/fanart.jpg" {
+		t.Fatalf("NFO remote images were replaced by cloud sidecars: %#v", meta)
+	}
+}
 
 func TestScanCloudLibraryCachesFileLevelRemoteArtwork(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

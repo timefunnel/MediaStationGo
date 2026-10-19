@@ -13,13 +13,17 @@ func applyCloudNFOArtwork(typ string, sidecars cloudSidecarSet, meta *LocalMetad
 	if doc == nil {
 		return meta
 	}
-	if ref := cloudImageRefFromNFOValues(sidecars, nfoPosterValues(doc)...); ref != "" {
-		meta.PosterURL = cloudPlaybackURL(typ, ref)
-		meta.HasArtwork = true
+	if meta.PosterURL == "" {
+		if ref := cloudImageRefFromNFOValues(sidecars, nfoPosterValues(doc)...); ref != "" {
+			meta.PosterURL = cloudPlaybackURL(typ, ref)
+			meta.HasArtwork = true
+		}
 	}
-	if ref := cloudImageRefFromNFOValues(sidecars, nfoBackdropValues(doc)...); ref != "" {
-		meta.BackdropURL = cloudPlaybackURL(typ, ref)
-		meta.HasArtwork = true
+	if meta.BackdropURL == "" {
+		if ref := cloudImageRefFromNFOValues(sidecars, nfoBackdropValues(doc)...); ref != "" {
+			meta.BackdropURL = cloudPlaybackURL(typ, ref)
+			meta.HasArtwork = true
+		}
 	}
 	return meta
 }

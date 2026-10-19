@@ -151,7 +151,6 @@ func (c *cloudScanCandidateCollector) walk(dirID, displayDir string, inheritedMe
 	c.req.progress.publish(c.scanner, c.lib.ID, c.req.result, "listing", c.req.progress.markDirVisited())
 	sidecars := newCloudSidecarSet(c.req.provider, entries)
 	dirMeta := c.scanner.cloudDirectoryMetadata(c.ctx, c.req.provider, displayDir, sidecars, inheritedMeta)
-	c.scanner.cacheCloudMetadataArtworkNow(c.ctx, dirMeta)
 	for _, entry := range entries {
 		if err := c.ctx.Err(); err != nil {
 			c.setWalkErr(err)
@@ -320,6 +319,8 @@ func (c *cloudScanCandidateCollector) addFileCandidate(displayDir string, entry 
 		localMeta = c.scanner.enrichCloudMetadataFromExternalIDsCached(c.ctx, c.lib, candidate.path, localMeta, c.req.externalMetadata)
 	}
 	if localMeta != nil {
+		// Warm only the final artwork source, after external ID enrichment has
+		// had a chance to replace cloud sidecars with provider image URLs.
 		c.scanner.cacheCloudMetadataArtworkNow(c.ctx, localMeta)
 	}
 	candidate.localMeta = localMeta

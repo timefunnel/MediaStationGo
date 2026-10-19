@@ -68,20 +68,20 @@ func (s *ScannerService) mergeCloudMetadataFromExternalIDs(ctx context.Context, 
 	localPoster, localBackdrop := cloudLocalArtworkURLs(meta)
 	mergedMatch := cloneCloudMetadataMatch(match)
 	mergeLocalMetadataIntoMatch(mergedMatch, meta)
+	// Prefer artwork from the matched provider over cloud sidecars, which need
+	// extra cloud API calls before their image bytes can be downloaded.
+	if localPoster != "" && isHTTPish(match.PosterURL) {
+		mergedMatch.PosterURL = match.PosterURL
+	}
+	if localBackdrop != "" && isHTTPish(match.BackdropURL) {
+		mergedMatch.BackdropURL = match.BackdropURL
+	}
 
 	enriched := cloneLocalMetadata(meta)
 	if enriched == nil {
 		enriched = &LocalMetadata{}
 	}
 	mergeMatchIntoLocalMetadata(enriched, mergedMatch)
-	if localPoster != "" {
-		enriched.PosterURL = localPoster
-		enriched.HasArtwork = true
-	}
-	if localBackdrop != "" {
-		enriched.BackdropURL = localBackdrop
-		enriched.HasArtwork = true
-	}
 	enriched.PathHint = false
 	enriched.HasNFO = true
 	if enriched.PosterURL != "" || enriched.BackdropURL != "" {
@@ -200,11 +200,12 @@ func cloudMetadataNeedsExternalEnrich(meta *LocalMetadata) bool {
 	if !hasExternalID {
 		return false
 	}
-	return meta.PosterURL == "" || meta.BackdropURL == "" || meta.Overview == "" || meta.Title == "" || meta.Rating <= 0
+	cloudPoster, cloudBackdrop := cloudLocalArtworkURLs(meta)
+	return meta.PosterURL == "" || meta.BackdropURL == "" || meta.Overview == "" || meta.Title == "" || meta.Rating <= 0 || cloudPoster != "" || cloudBackdrop != ""
 }
 
 func cloudLocalArtworkURLs(meta *LocalMetadata) (poster, backdrop string) {
-	if meta == nil || !meta.HasArtwork {
+	if meta == nil {
 		return "", ""
 	}
 	if _, _, ok := ParseCloudArtworkURL(meta.PosterURL); ok {

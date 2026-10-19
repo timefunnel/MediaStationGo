@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -492,7 +493,9 @@ func TestScanCloudLibraryEnrichesPathHintTMDbArtwork(t *testing.T) {
 	}
 }
 
-func TestScanCloudLibraryKeepsCloudArtworkWhenEnrichingPathHint(t *testing.T) {
+func TestScanCloudLibraryPrefersExternalArtworkWithoutFetchingCloudPoster(t *testing.T) {
+	var cloudImageRequests atomic.Int32
+	var remoteImageRequests atomic.Int32
 	tmdb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/movie/755679" {
 			t.Fatalf("unexpected tmdb path %s", r.URL.Path)
@@ -535,6 +538,7 @@ func TestScanCloudLibraryKeepsCloudArtworkWhenEnrichingPathHint(t *testing.T) {
 			if r.URL.Path != "/dav/Movies/速度与激情11 (2028) {tmdb-755679}/poster.jpg" {
 				t.Fatalf("unexpected get path %s", r.URL.Path)
 			}
+			cloudImageRequests.Add(1)
 			w.Header().Set("Content-Type", "image/jpeg")
 			_, _ = w.Write(testJPEG)
 		default:
@@ -567,6 +571,18 @@ func TestScanCloudLibraryKeepsCloudArtworkWhenEnrichingPathHint(t *testing.T) {
 	scanner := NewScannerService(cfg, log, repos, NewHub(log), nil, scraper)
 	scanner.SetStorageConfig(storage)
 	imageProxy := NewImageProxy(&config.Config{Cache: config.CacheConfig{CacheDir: t.TempDir()}}, log)
+	imageProxy.client = &http.Client{Transport: imageRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "image.tmdb.org" || (req.URL.Path != "/t/p/w500/remote-poster.jpg" && req.URL.Path != "/t/p/w1280/remote-backdrop.jpg") {
+			t.Fatalf("unexpected external image request: %s", req.URL)
+		}
+		remoteImageRequests.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"image/jpeg"}},
+			Body:       io.NopCloser(bytes.NewReader(testJPEG)),
+			Request:    req,
+		}, nil
+	})}
 	scanner.SetImageProxy(imageProxy)
 
 	res, err := scanner.ScanLibrary(t.Context(), lib.ID)
@@ -580,18 +596,37 @@ func TestScanCloudLibraryKeepsCloudArtworkWhenEnrichingPathHint(t *testing.T) {
 	if err := repos.DB.First(&media).Error; err != nil {
 		t.Fatal(err)
 	}
-	wantPoster := "/api/img/cloud/openlist?ref=%2FMovies%2F%E9%80%9F%E5%BA%A6%E4%B8%8E%E6%BF%80%E6%83%8511+%282028%29+%7Btmdb-755679%7D%2Fposter.jpg"
+	wantPoster := "https://image.tmdb.org/t/p/w500/remote-poster.jpg"
 	if media.PosterURL != wantPoster {
-		t.Fatalf("poster url = %q, want local cloud poster %q", media.PosterURL, wantPoster)
+		t.Fatalf("poster url = %q, want external poster %q", media.PosterURL, wantPoster)
 	}
 	if media.BackdropURL != "https://image.tmdb.org/t/p/w1280/remote-backdrop.jpg" || media.Overview == "" {
 		t.Fatalf("external enrichment should still fill missing fields: %#v", media)
 	}
-	rec := httptest.NewRecorder()
-	if !imageProxy.ServeCloudCached(rec, httptest.NewRequest(http.MethodGet, media.PosterURL, nil), "openlist:/Movies/速度与激情11 (2028) {tmdb-755679}/poster.jpg") {
-		t.Fatal("local cloud poster should be cached during enriched scan")
+	if got := cloudImageRequests.Load(); got != 0 {
+		t.Fatalf("cloud image requests = %d, want none when external artwork is available", got)
 	}
-	if got := rec.Body.Bytes(); !bytes.Equal(got, testJPEG) {
-		t.Fatalf("cached poster body = %x", got)
+	if got := remoteImageRequests.Load(); got != 2 {
+		t.Fatalf("external image requests = %d, want poster and backdrop once each", got)
+	}
+	if _, _, err := imageProxy.Fetch(t.Context(), media.PosterURL); err != nil {
+		t.Fatalf("read external poster cache: %v", err)
+	}
+	if got := remoteImageRequests.Load(); got != 2 {
+		t.Fatalf("cached poster caused another external request: %d", got)
+	}
+	// Existing cloud artwork references are repaired by the normal scan path,
+	// without a separate migration or an eager download of the old cloud image.
+	if err := repos.DB.Model(&media).Update("poster_url", CloudArtworkURL("openlist", "/Movies/速度与激情11 (2028) {tmdb-755679}/poster.jpg")).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanner.ScanLibrary(t.Context(), lib.ID); err != nil {
+		t.Fatalf("rescan cloud: %v", err)
+	}
+	if err := repos.DB.First(&media, "id = ?", media.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if media.PosterURL != wantPoster || cloudImageRequests.Load() != 0 || remoteImageRequests.Load() != 2 {
+		t.Fatalf("rescan poster = %q, cloud requests = %d, external image requests = %d", media.PosterURL, cloudImageRequests.Load(), remoteImageRequests.Load())
 	}
 }
