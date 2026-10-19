@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
+
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
@@ -28,14 +30,31 @@ type ManualScrapePreview struct {
 }
 
 func scrapeRevision(media model.Media) string {
-	// Persisted values only; projected LibraryName/display fields are excluded.
+	// Guard the source identity and editable metadata used or replaced by a
+	// scrape. Probe results, generated artwork and derived indexes can change
+	// independently; their writes also advance UpdatedAt.
 	data, _ := json.Marshal(struct {
-		ID, Path, Title, Original, Status, EpisodeTitle string
-		TMDb, Season, Episode, End, Part                int
-		Updated                                         string
+		ID, LibraryID, LibraryRootID, SeriesID, Path, RelativePath, STRMURL string
+		FileID                                                              string
+		SizeBytes                                                           int64
+		Title, OriginalName, Status, EpisodeTitle                           string
+		Overview, PosterURL, BackdropURL, ReleaseDate                       string
+		DoubanID, TheTVDBID, Languages, Countries, Genres, Actors           string
+		TMDbID, BangumiID, Year, Season, Episode, End, Part                 int
+		RatingBits                                                          uint32
+		NSFW                                                                bool
 	}{
-		media.ID, media.Path, media.Title, media.OriginalName, media.ScrapeStatus, media.EpisodeTitle,
-		media.TMDbID, media.SeasonNum, media.EpisodeNum, media.EpisodeEndNum, media.EpisodePartNum, media.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z")})
+		ID: media.ID, LibraryID: media.LibraryID, LibraryRootID: media.LibraryRootID,
+		SeriesID: media.SeriesID, Path: media.Path, RelativePath: media.RelativePath, STRMURL: media.STRMURL,
+		FileID: media.FileID, SizeBytes: media.SizeBytes,
+		Title: media.Title, OriginalName: media.OriginalName, Status: media.ScrapeStatus, EpisodeTitle: media.EpisodeTitle,
+		Overview: media.Overview, PosterURL: media.PosterURL, BackdropURL: media.BackdropURL, ReleaseDate: media.ReleaseDate,
+		DoubanID: media.DoubanID, TheTVDBID: media.TheTVDBID, Languages: media.Languages,
+		Countries: media.Countries, Genres: media.Genres, Actors: media.Actors,
+		TMDbID: media.TMDbID, BangumiID: media.BangumiID, Year: media.Year,
+		Season: media.SeasonNum, Episode: media.EpisodeNum, End: media.EpisodeEndNum, Part: media.EpisodePartNum,
+		RatingBits: math.Float32bits(media.Rating), NSFW: media.NSFW,
+	})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }

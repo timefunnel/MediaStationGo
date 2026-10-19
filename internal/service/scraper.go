@@ -236,11 +236,16 @@ func (s *ScraperService) applyProviderMatchWithOptions(ctx context.Context, m *m
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", m.ID).First(&current).Error; err != nil {
 			return err
 		}
-		if !current.UpdatedAt.Equal(snapshot.UpdatedAt) || current.Path != snapshot.Path || current.LibraryID != snapshot.LibraryID || current.Title != snapshot.Title || current.OriginalName != snapshot.OriginalName || current.TMDbID != snapshot.TMDbID || current.SeasonNum != snapshot.SeasonNum || current.EpisodeNum != snapshot.EpisodeNum || current.ScrapeStatus != snapshot.ScrapeStatus || current.EpisodeTitle != snapshot.EpisodeTitle {
-			return fmt.Errorf("媒体在刮削期间已变化，未覆盖，请重新校验")
-		}
 		if current.EpisodeEndNum != snapshot.EpisodeEndNum || current.EpisodePartNum != snapshot.EpisodePartNum {
 			return fmt.Errorf("季集覆盖或分段映射已变化，未覆盖")
+		}
+		if scrapeRevision(current) != scrapeRevision(snapshot) {
+			return fmt.Errorf("媒体在刮削期间已变化，未覆盖，请重新校验")
+		}
+		// Provider runtime only fills a missing duration. A probe may have
+		// completed while provider requests were in flight.
+		if current.DurationSec > 0 {
+			delete(updates, "duration_sec")
 		}
 		if err := savePreparedScrapedSeries(tx, series); err != nil {
 			return err
