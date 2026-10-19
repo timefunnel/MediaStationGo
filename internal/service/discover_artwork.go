@@ -56,7 +56,13 @@ func (d *DiscoverService) warmArtworkURLs(urls []string) int {
 	if d == nil || d.images == nil || len(urls) == 0 {
 		return 0
 	}
-	pending := uniqueDiscoverArtworkURLs(urls, discoverArtworkPrefetchLimit)
+	proxied := make([]string, 0, len(urls))
+	for _, raw := range urls {
+		if _, direct := d.images.directRemoteImageURL(raw, imageVariantOptions{}); !direct {
+			proxied = append(proxied, raw)
+		}
+	}
+	pending := uniqueDiscoverArtworkURLs(proxied, discoverArtworkPrefetchLimit)
 	if len(pending) == 0 {
 		return 0
 	}

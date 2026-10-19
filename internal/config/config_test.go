@@ -46,6 +46,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Cache.RedisPrefix != "mediastationgo" {
 		t.Fatalf("expected default redis prefix, got %q", cfg.Cache.RedisPrefix)
 	}
+	if cfg.Cache.RemoteImageDelivery != "proxy" {
+		t.Fatalf("expected default image delivery proxy, got %q", cfg.Cache.RemoteImageDelivery)
+	}
 	if cfg.Cache.MediaTTLSeconds != 15 {
 		t.Fatalf("expected default media cache ttl 15, got %d", cfg.Cache.MediaTTLSeconds)
 	}
@@ -99,6 +102,7 @@ func TestEnvOverride(t *testing.T) {
 	t.Setenv("MEDIASTATION_DATABASE_TYPE", "postgres")
 	t.Setenv("MEDIASTATION_DATABASE_DSN", "postgres://msgo:secret@postgres:5432/msgo?sslmode=disable")
 	t.Setenv("MEDIASTATION_CACHE_REDIS_URL", "redis://redis:6379/0")
+	t.Setenv("MEDIASTATION_CACHE_REMOTE_IMAGE_DELIVERY", "direct")
 	t.Setenv("MEDIASTATION_CACHE_MEDIA_TTL_SECONDS", "30")
 	t.Setenv("MEDIASTATION_CACHE_LIBRARY_BROWSE_TTL_SECONDS", "2400")
 	t.Setenv("MEDIASTATION_CACHE_LIBRARY_FACET_TTL_SECONDS", "7200")
@@ -132,6 +136,9 @@ func TestEnvOverride(t *testing.T) {
 	}
 	if cfg.Cache.RedisURL != "redis://redis:6379/0" || cfg.Cache.MediaTTLSeconds != 30 {
 		t.Fatalf("expected redis cache config from env, got url=%q ttl=%d", cfg.Cache.RedisURL, cfg.Cache.MediaTTLSeconds)
+	}
+	if cfg.Cache.RemoteImageDelivery != "direct" {
+		t.Fatalf("expected direct image delivery from env, got %q", cfg.Cache.RemoteImageDelivery)
 	}
 	if cfg.Cache.LibraryBrowseTTLSeconds != 2400 || cfg.Cache.LibraryFacetTTLSeconds != 7200 || cfg.Cache.EmbySeriesTTLSeconds != 1800 {
 		t.Fatalf("expected durable media cache config from env, got %+v", cfg.Cache)

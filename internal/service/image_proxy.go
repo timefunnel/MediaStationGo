@@ -2,7 +2,8 @@
 //
 // Some deployments cannot reach image.tmdb.org directly (GFW, internal-only
 // networks). ImageProxy fronts a remote image URL so the browser only ever
-// talks to the MediaStationGo origin. The proxy:
+// talks to the MediaStationGo origin by default. Direct delivery can instead
+// redirect public TMDB images to their CDN. The proxy:
 //
 //   - validates the URL scheme is http/https,
 //   - streams bytes through with a small disk cache under cache/images,

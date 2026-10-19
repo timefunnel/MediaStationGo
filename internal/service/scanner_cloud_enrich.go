@@ -278,6 +278,9 @@ func (s *ScannerService) prefetchRemoteArtworkFromScan(ctx context.Context, raw 
 	if s == nil || s.imageProxy == nil || !isHTTPish(raw) {
 		return
 	}
+	if _, direct := s.imageProxy.directRemoteImageURL(raw, imageVariantOptions{}); direct {
+		return
+	}
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	err := s.imageProxy.PrefetchRemote(fetchCtx, raw)
 	cancel()

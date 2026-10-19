@@ -57,6 +57,9 @@ func (p *ImageProxy) Serve(ctx context.Context, w http.ResponseWriter, r *http.R
 	if isLocalImagePath(raw) {
 		return p.serveLocalImage(w, r, raw)
 	}
+	if p.serveDirectRemoteImage(w, r, raw) {
+		return nil
+	}
 	return p.serveRemoteImage(ctx, w, r, raw)
 }
 

@@ -129,6 +129,7 @@ type LoggingConfig struct {
 // CacheConfig 控制磁盘转码/刮削缓存。
 type CacheConfig struct {
 	CacheDir                   string `mapstructure:"cache_dir"`
+	RemoteImageDelivery        string `mapstructure:"remote_image_delivery"`
 	ImageCacheTTLHours         int    `mapstructure:"image_cache_ttl_hours"`
 	ImageCacheMaxMB            int    `mapstructure:"image_cache_max_mb"`
 	ImageCachePruneIntervalMin int    `mapstructure:"image_cache_prune_interval_min"`

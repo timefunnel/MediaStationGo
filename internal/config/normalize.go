@@ -47,6 +47,13 @@ func (c *Config) normalize() error {
 	if c.Cache.CacheDir == "" {
 		c.Cache.CacheDir = filepath.Join(c.App.DataDir, "cache")
 	}
+	c.Cache.RemoteImageDelivery = strings.ToLower(strings.TrimSpace(c.Cache.RemoteImageDelivery))
+	if c.Cache.RemoteImageDelivery == "" {
+		c.Cache.RemoteImageDelivery = "proxy"
+	}
+	if c.Cache.RemoteImageDelivery != "proxy" && c.Cache.RemoteImageDelivery != "direct" {
+		return fmt.Errorf("cache.remote_image_delivery must be proxy or direct")
+	}
 	if c.Cache.ImageCacheTTLHours < 1 {
 		c.Cache.ImageCacheTTLHours = 30 * 24
 	}

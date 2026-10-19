@@ -20,6 +20,12 @@ func (s *ScraperService) prepareScrapedArtworkURL(ctx context.Context, mediaID, 
 	if s == nil || s.images == nil || !isHTTPish(candidate) {
 		return candidate, ""
 	}
+	if _, direct := s.images.directRemoteImageURL(candidate, imageVariantOptions{}); direct {
+		if isHTTPish(current) {
+			return candidate, current
+		}
+		return candidate, ""
+	}
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	err := s.images.PrefetchRemote(fetchCtx, candidate)
 	cancel()
