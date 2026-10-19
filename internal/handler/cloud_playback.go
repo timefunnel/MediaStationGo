@@ -54,6 +54,9 @@ func cloudPlayHandler(svc *service.Container) gin.HandlerFunc {
 }
 
 func serveCloudResolvedLink(svc *service.Container, c *gin.Context, typ, ref string) {
+	if isCloudImageRef(ref) && serveMigratedCloudArtwork(svc, c, typ, ref) {
+		return
+	}
 	if isCloudImageRef(ref) && svc != nil && svc.ImageProxy != nil {
 		if svc.ImageProxy.ServeCloudCached(c.Writer, c.Request, typ+":"+ref) {
 			return

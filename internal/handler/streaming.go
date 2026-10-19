@@ -102,6 +102,9 @@ func cloudArtworkProxyHandler(svc *service.Container) gin.HandlerFunc {
 			return
 		}
 		stableKey := typ + ":" + ref
+		if serveMigratedCloudArtwork(svc, c, typ, ref) {
+			return
+		}
 		if svc.ImageProxy.ServeCloudCached(c.Writer, c.Request, stableKey) {
 			return
 		}
