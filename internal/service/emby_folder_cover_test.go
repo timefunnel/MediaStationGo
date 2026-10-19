@@ -1,11 +1,60 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
+
+func TestFolderCoverImageSourceReusesLibraryAndSkipsSeriesLookup(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		name := "automatic"
+		if manual {
+			name = "selected"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc := newTestEmbyService(t)
+			lib := model.Library{Base: model.Base{ID: "library"}, Name: "电影", Path: "/media/movies", Type: "movie", Enabled: true}
+			if manual {
+				lib.CoverMediaIDs = []string{"poster"}
+			}
+			if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+				t.Fatal(err)
+			}
+			media := model.Media{Base: model.Base{ID: "poster"}, LibraryID: lib.ID, Title: "Poster", Path: "/media/movies/poster.mkv", PosterURL: "https://example.com/poster.jpg"}
+			if err := svc.repo.DB.Create(&media).Error; err != nil {
+				t.Fatal(err)
+			}
+			var lookups, seriesQueries int
+			if err := svc.repo.DB.Callback().Query().After("gorm:query").Register("image_lookup_count", func(db *gorm.DB) {
+				sql := db.Statement.SQL.String()
+				if db.Statement.Table == "libraries" && strings.Contains(sql, "id = ?") {
+					lookups++
+				}
+				if strings.Contains(sql, "emby_series_key =") || db.Statement.Table == "series" {
+					seriesQueries++
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			raw, loaded, err := svc.ImageSource(t.Context(), lib.ID, "primary")
+			if err != nil || loaded == nil || raw != "" {
+				t.Fatalf("image source raw=%q library=%v err=%v", raw, loaded, err)
+			}
+			covers, err := svc.FolderCoverArtworkForLibrary(t.Context(), loaded, "primary", 4)
+			if err != nil || len(covers) != 1 || covers[0].URL != media.PosterURL {
+				t.Fatalf("covers=%v err=%v", covers, err)
+			}
+			if lookups != 1 || seriesQueries != 0 {
+				t.Fatalf("library lookups=%d series queries=%d; want 1, 0", lookups, seriesQueries)
+			}
+		})
+	}
+}
 
 func TestEmbyFolderCoverTagChangesWithArtworkURL(t *testing.T) {
 	artwork := EmbyFolderCoverArtwork{MediaID: "movie", ImageType: "Primary", Tag: "movie", URL: "https://img.example/old.jpg"}

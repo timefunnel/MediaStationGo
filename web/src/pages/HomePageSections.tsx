@@ -76,7 +76,7 @@ export function HomeFeaturedSection({
         <div className="theme-hero-bg h-full w-full" />
         {featuredVisual && (
           <img
-            src={imageURL(featuredVisual, featuredItem.updated_at, { maxWidth: 1600, quality: 86 })}
+            src={imageURL(featuredVisual, featuredItem.updated_at, { maxWidth: 1280, quality: 82 })}
             alt=""
             decoding="async"
             className="absolute inset-0 h-full w-full scale-105 object-cover object-center opacity-[0.34] blur-[1px]"
@@ -146,7 +146,7 @@ export function HomeFeaturedSection({
             </div>
             {featuredPoster && (
               <img
-                src={imageURL(featuredPoster, featuredItem.updated_at, { maxWidth: 640, quality: 88 })}
+                src={imageURL(featuredPoster, featuredItem.updated_at, { maxWidth: 640, quality: 82 })}
                 alt={featuredItem.title}
                 decoding="async"
                 className="absolute inset-2 h-[calc(100%-1rem)] w-[calc(100%-1rem)] rounded-[1.25rem] object-cover"

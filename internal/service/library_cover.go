@@ -33,6 +33,17 @@ func (e *EmbyService) LibraryCoverSelection(ctx context.Context, libraryID strin
 	if lib == nil {
 		return nil, nil, fmt.Errorf("%w: 媒体库不存在", ErrLibraryCoverSelection)
 	}
+	return e.libraryCoverSelection(ctx, lib, ids)
+}
+
+func (e *EmbyService) libraryCoverSelection(ctx context.Context, lib *model.Library, ids []string) ([]EmbyFolderCoverArtwork, []LibraryCoverItem, error) {
+	if len(ids) > 4 {
+		return nil, nil, fmt.Errorf("%w: 最多选择 4 部作品", ErrLibraryCoverSelection)
+	}
+	ctx, err := e.withEmbyLibrarySnapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	libraryIDs, err := MergedLibraryIDsForLibrary(ctx, e.repo, lib.ID)
 	if err != nil {
 		return nil, nil, err

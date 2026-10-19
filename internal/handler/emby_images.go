@@ -35,16 +35,19 @@ func embyItemImageHandler(svc *service.Container) gin.HandlerFunc {
 		req := c.Request.WithContext(ctx)
 		id := c.Param("id")
 		imgType := strings.ToLower(c.Param("type"))
-		raw, err := svc.Emby.ImageURL(ctx, id, imgType)
-		if err != nil || raw == "" {
+		started := time.Now()
+		raw, lib, err := svc.Emby.ImageSource(ctx, id, imgType)
+		service.RecordImageTiming(c.Writer, "img_lookup", time.Since(started))
+		if err != nil {
+			writeInternalOrCanceled(c, err)
+			return
+		}
+		if lib != nil {
 			c.Request = req
-			if serveEmbyFolderCoverImage(svc, c, id, imgType) {
-				return
-			}
-			if isEmbyLibraryImageRequest(ctx, svc, id) {
-				embyServeMissingFolderCover(c)
-				return
-			}
+			serveEmbyFolderCoverImage(svc, c, lib, imgType)
+			return
+		}
+		if raw == "" {
 			embyServePlaceholderImage(c)
 			return
 		}
@@ -77,14 +80,6 @@ func embyServePlaceholderImage(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "image/png", embyPlaceholderPNG)
-}
-
-func isEmbyLibraryImageRequest(ctx context.Context, svc *service.Container, id string) bool {
-	if svc == nil || svc.Repo == nil || svc.Repo.Library == nil || strings.TrimSpace(id) == "" {
-		return false
-	}
-	lib, err := svc.Repo.Library.FindByID(ctx, id)
-	return err == nil && lib != nil
 }
 
 func embyServeMissingFolderCover(c *gin.Context) {

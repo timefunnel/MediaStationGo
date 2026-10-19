@@ -40,6 +40,8 @@ type ImageProxy struct {
 	variantCachePruning    bool
 	variantCacheLastPruned time.Time
 	variantFallback        imageVariantFallbackFunc
+	variantFlightsMu       sync.Mutex
+	variantFlights         map[string]*imageVariantFlight
 	folderCoverMu          sync.Mutex
 	folderCoverFlights     map[string]*folderCoverFlight
 

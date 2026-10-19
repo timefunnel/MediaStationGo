@@ -9,8 +9,10 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,6 +29,25 @@ const imageVariantFFmpegTimeout = 4 * time.Second
 var errImageVariantDecode = errors.New("image variant source is not decodable")
 
 type imageVariantFallbackFunc func(context.Context, []byte, imageVariantOptions) ([]byte, string, error)
+
+type imageVariantFlight struct {
+	done   chan struct{}
+	result imageVariantResult
+	err    error
+}
+
+type imageVariantResult struct {
+	body                           []byte
+	contentType                    string
+	readTime, buildTime, writeTime time.Duration
+}
+
+type imageVariantLoader func() ([]byte, string, error)
+
+// RecordImageTiming exposes phase durations without including image URLs or paths.
+func RecordImageTiming(w http.ResponseWriter, phase string, elapsed time.Duration) {
+	w.Header().Add("Server-Timing", fmt.Sprintf("%s;dur=%.3f", phase, float64(elapsed)/float64(time.Millisecond)))
+}
 
 type imageVariantOptions struct {
 	maxWidth   int
@@ -89,25 +110,108 @@ func parsePositiveImageVariantInt(raw string) (int, bool) {
 }
 
 func (p *ImageProxy) serveImageVariant(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, sourceSize int64, data []byte, contentType, cacheControl string, variant imageVariantOptions) error {
+	return p.serveImageVariantWithLoader(w, r, key, modTime, sourceSize, cacheControl, variant, func() ([]byte, string, error) {
+		return data, contentType, nil
+	})
+}
+
+func (p *ImageProxy) serveImageVariantWithLoader(w http.ResponseWriter, r *http.Request, key string, modTime time.Time, sourceSize int64, cacheControl string, variant imageVariantOptions, load imageVariantLoader) error {
 	variantKey, variantCachePath := p.imageVariantCachePaths(key, modTime, sourceSize, variant)
 	if p.serveCachedImageVariantFile(w, r, variantKey, variantCachePath, cacheControl) {
 		return nil
 	}
-
-	out, outType, err := buildImageVariant(data, contentType, variant)
-	if err != nil && p != nil && p.variantFallback != nil {
-		out, outType, err = p.variantFallback(r.Context(), data, variant)
-	}
+	started := time.Now()
+	result, shared, err := p.loadImageVariant(r.Context(), variantKey, variantCachePath, variant, load)
 	if err != nil {
 		return err
 	}
-	p.writeImageVariantCache(variantCachePath, out)
+	if shared {
+		RecordImageTiming(w, "img_wait", time.Since(started))
+	} else {
+		RecordImageTiming(w, "img_read", result.readTime)
+		RecordImageTiming(w, "img_transform", result.buildTime)
+		RecordImageTiming(w, "img_write", result.writeTime)
+	}
 	w.Header().Del("Content-Length")
-	w.Header().Set("Content-Type", outType)
+	w.Header().Set("Content-Type", result.contentType)
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("ETag", imageVariantCacheETag(variantKey))
-	http.ServeContent(w, r, variantKey, modTime, bytes.NewReader(out))
+	http.ServeContent(w, r, variantKey, modTime, bytes.NewReader(result.body))
 	return nil
+}
+
+func (p *ImageProxy) loadImageVariant(ctx context.Context, key, path string, variant imageVariantOptions, load imageVariantLoader) (result imageVariantResult, shared bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return result, false, err
+	}
+	p.variantFlightsMu.Lock()
+	if flight := p.variantFlights[key]; flight != nil {
+		p.variantFlightsMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return result, true, ctx.Err()
+		case <-flight.done:
+			return flight.result, true, flight.err
+		}
+	}
+	flight := &imageVariantFlight{done: make(chan struct{})}
+	if p.variantFlights == nil {
+		p.variantFlights = make(map[string]*imageVariantFlight)
+	}
+	p.variantFlights[key] = flight
+	p.variantFlightsMu.Unlock()
+	// A panicking decoder must also release waiters when HTTP recovery runs.
+	err = errors.New("image variant generation did not complete")
+	defer func() {
+		p.variantFlightsMu.Lock()
+		flight.result, flight.err = result, err
+		delete(p.variantFlights, key)
+		close(flight.done)
+		p.variantFlightsMu.Unlock()
+	}()
+	result, err = p.generateImageVariant(ctx, path, variant, load)
+	return result, false, err
+}
+
+func (p *ImageProxy) generateImageVariant(ctx context.Context, path string, variant imageVariantOptions, load imageVariantLoader) (result imageVariantResult, err error) {
+	// Another request may have completed between the streaming cache check and
+	// acquiring this flight. Recheck its output before loading the source.
+	if file, openErr := os.Open(path); openErr == nil { // #nosec G304 -- SHA-derived variant cache path.
+		defer file.Close()
+		body, readErr := io.ReadAll(io.LimitReader(file, imageVariantCacheFileMaxBytes+1))
+		if readErr != nil {
+			return result, readErr
+		}
+		if len(body) <= imageVariantCacheFileMaxBytes {
+			if contentType, valid := validImageContentType(body); valid {
+				return imageVariantResult{body: body, contentType: contentType}, nil
+			}
+		}
+	} else if !errors.Is(openErr, os.ErrNotExist) {
+		return result, openErr
+	}
+	started := time.Now()
+	data, contentType, err := load()
+	result.readTime = time.Since(started)
+	if err != nil {
+		return result, err
+	}
+	started = time.Now()
+	result.body, result.contentType, err = buildImageVariant(data, contentType, variant)
+	if err != nil && p.variantFallback != nil {
+		result.body, result.contentType, err = p.variantFallback(ctx, data, variant)
+	}
+	result.buildTime = time.Since(started)
+	if err != nil {
+		return result, err
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	started = time.Now()
+	p.writeImageVariantCache(path, result.body)
+	result.writeTime = time.Since(started)
+	return result, nil
 }
 
 func buildImageVariant(data []byte, contentType string, variant imageVariantOptions) ([]byte, string, error) {

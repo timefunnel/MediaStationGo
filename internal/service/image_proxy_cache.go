@@ -586,6 +586,7 @@ func (p *ImageProxy) serveImageFile(w http.ResponseWriter, r *http.Request, key,
 }
 
 func (p *ImageProxy) serveImageFileWithVariant(w http.ResponseWriter, r *http.Request, key, path, cacheControl string, allowVariant bool, etag string) bool {
+	started := time.Now()
 	file, err := os.Open(path) // #nosec G304 -- caller only passes validated local paths or SHA-derived cache paths.
 	if err != nil {
 		return false
@@ -595,6 +596,34 @@ func (p *ImageProxy) serveImageFileWithVariant(w http.ResponseWriter, r *http.Re
 	if err != nil || stat.IsDir() || stat.Size() <= 0 {
 		return false
 	}
+	if variant := imageVariantFromRequest(r); allowVariant && variant.enabled() {
+		if stat.Size() > maxImageVariantInputBytes {
+			p.serveImageVariantFailure(w, key, errors.New("image exceeds variant input limit"))
+			return true
+		}
+		load := func() ([]byte, string, error) {
+			data, err := io.ReadAll(io.LimitReader(file, maxImageVariantInputBytes+1))
+			if err != nil {
+				return nil, "", err
+			}
+			current, err := file.Stat()
+			if err != nil {
+				return nil, "", err
+			}
+			if int64(len(data)) != stat.Size() || current.Size() != stat.Size() || !current.ModTime().Equal(stat.ModTime()) {
+				return nil, "", errors.New("image variant source changed while reading")
+			}
+			ctype, valid := validImageContentType(data)
+			if !valid {
+				return nil, "", errors.New("image variant source is not an image")
+			}
+			return data, ctype, nil
+		}
+		if err := p.serveImageVariantWithLoader(w, r, key, stat.ModTime(), stat.Size(), cacheControl, variant, load); err != nil {
+			p.serveImageVariantFailure(w, key, err)
+		}
+		return true
+	}
 	var sample [512]byte
 	n, _ := file.Read(sample[:])
 	_, _ = file.Seek(0, io.SeekStart)
@@ -602,30 +631,15 @@ func (p *ImageProxy) serveImageFileWithVariant(w http.ResponseWriter, r *http.Re
 	if !isImageContentType(ctype) {
 		return false
 	}
-	if variant := imageVariantFromRequest(r); allowVariant && variant.enabled() {
-		if stat.Size() > maxImageVariantInputBytes {
-			p.serveImageVariantFailure(w, key, errors.New("image exceeds variant input limit"))
-			return true
-		}
-		data, err := io.ReadAll(io.LimitReader(file, maxImageVariantInputBytes))
-		if err != nil || len(data) == 0 {
-			if err == nil {
-				err = errors.New("image variant source is empty")
-			}
-			p.serveImageVariantFailure(w, key, err)
-			return true
-		}
-		if err := p.serveImageVariant(w, r, key, stat.ModTime(), stat.Size(), data, ctype, cacheControl, variant); err != nil {
-			p.serveImageVariantFailure(w, key, err)
-		}
-		return true
-	}
 	if etag == "" {
 		etag = imageFileETag(key, stat)
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("ETag", etag)
+	if !allowVariant {
+		RecordImageTiming(w, "img_cache", time.Since(started))
+	}
 	http.ServeContent(w, r, key, stat.ModTime(), file)
 	return true
 }

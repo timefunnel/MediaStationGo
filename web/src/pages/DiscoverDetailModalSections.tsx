@@ -97,8 +97,8 @@ export function DiscoverArtworkPanel({
           >
             <img
               src={imageURL(item.poster_url, undefined, {
-                maxWidth: adultArtwork ? 1280 : 640,
-                quality: 88,
+                maxWidth: adultArtwork ? 960 : 480,
+                quality: 82,
               })}
               alt={item.title}
               decoding="async"
@@ -122,7 +122,7 @@ export function DiscoverBackdropPanel({ item }: { item: DiscoverItem }) {
   return (
     <div className="relative aspect-[16/7] overflow-hidden rounded-2xl bg-gray-100">
       <img
-        src={imageURL(item.backdrop_url, undefined, { maxWidth: 1280, quality: 86 })}
+        src={imageURL(item.backdrop_url, undefined, { maxWidth: 1280, quality: 82 })}
         alt=""
         loading="lazy"
         decoding="async"
@@ -216,7 +216,7 @@ export function DiscoverPreviewGallery({
             onClick={() => onPreview(url)}
           >
             <img
-              src={imageURL(url, undefined, { maxWidth: 960, quality: 88 })}
+              src={imageURL(url, undefined, { maxWidth: 960, quality: 82 })}
               alt={`${title} 详情图 ${index + 1}`}
               loading="lazy"
               decoding="async"

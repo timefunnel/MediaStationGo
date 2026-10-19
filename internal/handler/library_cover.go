@@ -13,6 +13,7 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type libraryCoverRequest struct {
@@ -156,13 +157,17 @@ func libraryCoverImageHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "媒体库不存在"})
 			return
 		}
-		artworks, err := svc.Emby.FolderCoverArtwork(ctx, lib.ID, "Primary", 4)
+		started := time.Now()
+		artworks, err := svc.Emby.FolderCoverArtworkForLibrary(ctx, lib, "Primary", 4)
+		service.RecordImageTiming(c.Writer, "img_selection", time.Since(started))
 		if err != nil {
 			writeLibraryCoverError(c, err)
 			return
 		}
 		width, height := embyFolderCoverDimensions(c)
+		started = time.Now()
 		body, err := renderLibraryCover(ctx, svc, lib.Name, artworks, width, height)
+		service.RecordImageTiming(c.Writer, "img_cover", time.Since(started))
 		if err != nil {
 			c.Header("Cache-Control", "no-store")
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -179,6 +184,7 @@ func renderLibraryCover(ctx context.Context, svc *service.Container, title strin
 	}
 	tag := service.EmbyFolderCoverTag("", title, artworks)
 	return svc.ImageProxy.FetchFolderCover(ctx, tag, artworks, width, height, func() ([]byte, error) {
+		started := time.Now()
 		images := make([]image.Image, 0, len(artworks))
 		for _, art := range artworks {
 			img, err := fetchEmbyFolderArtwork(ctx, svc, art.URL)
@@ -187,7 +193,13 @@ func renderLibraryCover(ctx context.Context, svc *service.Container, title strin
 			}
 			images = append(images, img)
 		}
-		return buildEmbyFolderCoverGallery(images, title, width, height)
+		readTime := time.Since(started)
+		started = time.Now()
+		body, err := buildEmbyFolderCoverGallery(images, title, width, height)
+		if svc.Log != nil {
+			svc.Log.Info("library cover generated", zap.Int("width", width), zap.Int("height", height), zap.Duration("artwork_read", readTime), zap.Duration("render_encode", time.Since(started)), zap.Int("bytes", len(body)), zap.Error(err))
+		}
+		return body, err
 	})
 }
 

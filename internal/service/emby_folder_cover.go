@@ -23,15 +23,27 @@ func (e *EmbyService) FolderCoverArtwork(ctx context.Context, id, imageType stri
 	if e == nil || e.repo == nil || e.repo.Library == nil || e.repo.DB == nil {
 		return nil, nil
 	}
-	if limit <= 0 || limit > 8 {
-		limit = 4
-	}
 	lib, err := e.repo.Library.FindByID(ctx, id)
 	if err != nil || lib == nil {
 		return nil, err
 	}
+	return e.FolderCoverArtworkForLibrary(ctx, lib, imageType, limit)
+}
+
+// FolderCoverArtworkForLibrary reuses library metadata already read by a handler.
+func (e *EmbyService) FolderCoverArtworkForLibrary(ctx context.Context, lib *model.Library, imageType string, limit int) ([]EmbyFolderCoverArtwork, error) {
+	if lib == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 8 {
+		limit = 4
+	}
+	ctx, err := e.withEmbyLibrarySnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if len(lib.CoverMediaIDs) > 0 {
-		artworks, _, err := e.LibraryCoverSelection(ctx, id, lib.CoverMediaIDs)
+		artworks, _, err := e.libraryCoverSelection(ctx, lib, lib.CoverMediaIDs)
 		return artworks, err
 	}
 	return e.automaticFolderCoverArtwork(ctx, lib, imageType, limit)

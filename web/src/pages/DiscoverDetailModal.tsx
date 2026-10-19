@@ -172,7 +172,7 @@ export function DiscoverDetailModal({
           }}
         >
           <img
-            src={imageURL(artworkPreviewURL, undefined, { maxWidth: 1920, quality: 92 })}
+            src={imageURL(artworkPreviewURL, undefined, { maxWidth: 1920, quality: 85 })}
             alt={resolvedItem.title}
             decoding="async"
             className="max-h-full max-w-full object-contain shadow-2xl"

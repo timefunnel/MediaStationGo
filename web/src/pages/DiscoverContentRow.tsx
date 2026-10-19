@@ -292,8 +292,8 @@ function DiscoverCard({
     () =>
       imageURL(activeImage, posterVersion, {
         refreshCache: shouldRefreshCache,
-        maxWidth: isJavDBAdult || isFD2Adult ? 800 : isPerson ? 320 : 420,
-        quality: isJavDBAdult || isFD2Adult ? 88 : 84,
+        maxWidth: isJavDBAdult || isFD2Adult ? 640 : isPerson ? 320 : 360,
+        quality: isJavDBAdult || isFD2Adult || isPerson ? 82 : 80,
       }),
     [activeImage, isFD2Adult, isJavDBAdult, isPerson, posterVersion, shouldRefreshCache],
   )

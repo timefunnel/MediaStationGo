@@ -22,6 +22,7 @@ import (
 	"golang.org/x/image/math/f64"
 	_ "golang.org/x/image/webp"
 
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
@@ -33,41 +34,38 @@ const (
 	embyFolderCoverAspectRatio  = 16.0 / 9.0
 )
 
-func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, id, imageType string) bool {
-	if svc == nil || svc.Repo == nil || svc.Repo.Library == nil || svc.Emby == nil || svc.ImageProxy == nil {
-		return false
+func serveEmbyFolderCoverImage(svc *service.Container, c *gin.Context, lib *model.Library, imageType string) {
+	started := time.Now()
+	artworks, err := svc.Emby.FolderCoverArtworkForLibrary(c.Request.Context(), lib, imageType, embyFolderCoverGridLimit)
+	service.RecordImageTiming(c.Writer, "img_selection", time.Since(started))
+	if err != nil {
+		writeLibraryCoverError(c, err)
+		return
 	}
-	lib, err := svc.Repo.Library.FindByID(c.Request.Context(), id)
-	if err != nil || lib == nil {
-		if err != nil && svc.Log != nil {
-			svc.Log.Warn("library cover name lookup failed", zap.String("library_id", id), zap.Error(err))
-		}
-		return false
-	}
-	artworks, err := svc.Emby.FolderCoverArtwork(c.Request.Context(), id, imageType, embyFolderCoverGridLimit)
-	if err != nil || len(artworks) == 0 {
-		if err != nil && svc.Log != nil {
-			svc.Log.Warn("library cover selection failed", zap.String("library_id", id), zap.Error(err))
-		}
-		return false
+	if len(artworks) == 0 || svc.ImageProxy == nil {
+		embyServeMissingFolderCover(c)
+		return
 	}
 	width, height := embyFolderCoverDimensions(c)
+	started = time.Now()
 	body, err := renderLibraryCover(c.Request.Context(), svc, lib.Name, artworks, width, height)
+	service.RecordImageTiming(c.Writer, "img_cover", time.Since(started))
 	if err != nil {
 		if svc.Log != nil {
-			svc.Log.Warn("library cover rendering failed", zap.String("library_id", id), zap.Error(err))
+			svc.Log.Warn("library cover rendering failed", zap.String("library_id", lib.ID), zap.Error(err))
 		}
-		return false
+		c.Header("Cache-Control", "no-store")
+		c.Status(http.StatusBadGateway)
+		return
 	}
-	tag := service.EmbyFolderCoverTag(id, lib.Name, artworks)
+	tag := service.EmbyFolderCoverTag(lib.ID, lib.Name, artworks)
 	setEmbyFolderCoverHeaders(c, tag)
 	c.Header("Content-Length", strconv.Itoa(len(body)))
 	if c.Request.Method == http.MethodHead {
 		c.Status(http.StatusOK)
-		return true
+		return
 	}
 	c.Data(http.StatusOK, "image/png", body)
-	return true
 }
 
 func fetchEmbyFolderArtwork(ctx context.Context, svc *service.Container, raw string) (image.Image, error) {

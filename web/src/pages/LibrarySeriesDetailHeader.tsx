@@ -79,7 +79,7 @@ export function LibrarySeriesDetailHeader({
         <div className="w-40 shrink-0 overflow-hidden rounded-xl bg-sand-200 shadow-card">
           {poster ? (
             <img
-              src={imageURL(poster, series.rep.updated_at, { maxWidth: 480, quality: 86 })}
+              src={imageURL(poster, series.rep.updated_at, { maxWidth: 480, quality: 82 })}
               alt={series.rep.title}
               decoding="async"
               className="aspect-[2/3] w-full object-cover"
