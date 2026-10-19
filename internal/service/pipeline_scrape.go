@@ -135,6 +135,9 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 		}
 	}
 
+	if len(req.EpisodeMappings) > 0 || len(req.MediaIDs) > 0 {
+		return PipelineScrapeResult{}, errors.New("剧集批量刮削未找到唯一候选，未应用季集映射，请确认刮削条目")
+	}
 	if err := s.scraper.EnrichOneWithOptions(ctx, media, options); err != nil {
 		return PipelineScrapeResult{}, err
 	}
@@ -345,7 +348,12 @@ func pipelineScrapeMatchesForMediaType(matches []ExternalMediaResult, mediaType 
 	}
 	filtered := make([]ExternalMediaResult, 0, len(matches))
 	for _, match := range matches {
-		if strings.EqualFold(strings.TrimSpace(match.MediaType), mediaType) {
+		expectedType := mediaType
+		// TMDB represents episodic animation as TV; Bangumi keeps "anime".
+		if strings.EqualFold(strings.TrimSpace(match.Source), "tmdb") && strings.EqualFold(mediaType, "anime") {
+			expectedType = "tv"
+		}
+		if strings.EqualFold(strings.TrimSpace(match.MediaType), expectedType) {
 			filtered = append(filtered, match)
 		}
 	}

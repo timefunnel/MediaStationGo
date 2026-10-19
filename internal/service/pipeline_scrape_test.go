@@ -185,6 +185,14 @@ func TestPipelineScrapeDefersAnchorEpisodeDetailsToSeasonBatch(t *testing.T) {
 }
 
 func TestPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t *testing.T) {
+	for _, mediaType := range []string{"tv", "anime"} {
+		t.Run(mediaType, func(t *testing.T) {
+			testPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t, mediaType)
+		})
+	}
+}
+
+func testPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t *testing.T, mediaType string) {
 	searchCalls := 0
 	seriesCalls := 0
 	seasonCalls := 0
@@ -233,7 +241,7 @@ func TestPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t *testing.T) {
 	scraper := NewScraperService(cfg, log, repos, NewTMDbProvider(cfg, log, nil), nil, nil, nil, NewHub(log))
 	svc := NewPipelineScrapeService(repos, scraper)
 
-	lib := model.Library{Name: "TV", Path: "cloud://openlist/115/剧集", Type: "tv", Enabled: true}
+	lib := model.Library{Name: "TV", Path: "cloud://openlist/115/剧集", Type: mediaType, Enabled: true}
 	if err := repos.DB.Create(&lib).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -250,11 +258,11 @@ func TestPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t *testing.T) {
 	}
 
 	result, err := svc.Scrape(t.Context(), rows[0].ID, PipelineScrapeRequest{
-		Category:  "tv",
+		Category:  mediaType,
 		Title:     "低智商犯罪",
 		Queries:   []string{"低智商犯罪"},
 		Provider:  "tmdb",
-		MediaType: "tv",
+		MediaType: mediaType,
 		MediaIDs:  []string{rows[0].ID, rows[1].ID},
 		EpisodeMappings: map[string]ManualEpisodeMapping{
 			rows[0].ID: {SeasonNum: 1, EpisodeNum: 1},
@@ -283,6 +291,70 @@ func TestPipelineScrapeBatchReusesSelectedMatchAndSeasonDetails(t *testing.T) {
 	}
 	if got[0].Actors != "演员甲" || got[1].Actors != "演员甲" || got[0].Genres != "剧情" || got[1].Genres != "剧情" {
 		t.Fatalf("extended TMDB metadata was not propagated: %#v", got)
+	}
+}
+
+func TestPipelineScrapeBatchRejectsUnresolvedCandidatesWithoutChangingMedia(t *testing.T) {
+	for _, candidateCount := range []int{0, 2} {
+		t.Run(map[int]string{0: "no_match", 2: "ambiguous"}[candidateCount], func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/search/movie" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+					return
+				}
+				if r.URL.Path != "/search/tv" {
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				results := make([]map[string]any, 0, candidateCount)
+				for i := 0; i < candidateCount; i++ {
+					results = append(results, map[string]any{"id": 100 + i, "name": "示例剧"})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+			}))
+			defer upstream.Close()
+
+			db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Series{}, &model.Media{})
+			repos := repository.New(db)
+			cfg := &config.Config{}
+			cfg.Secrets.TMDbAPIKey = "test-key"
+			cfg.Secrets.TMDbAPIProxy = upstream.URL
+			log := zap.NewNop()
+			scraper := NewScraperService(cfg, log, repos, NewTMDbProvider(cfg, log, nil), nil, nil, nil, NewHub(log))
+			svc := NewPipelineScrapeService(repos, scraper)
+			lib := model.Library{Name: "TV", Path: "cloud://openlist/test/series", Type: "tv", Enabled: true}
+			if err := db.Create(&lib).Error; err != nil {
+				t.Fatal(err)
+			}
+			rows := []model.Media{
+				{LibraryID: lib.ID, Title: "示例剧", Path: lib.Path + "/示例剧/E01.mkv", ScrapeStatus: "pending"},
+				{LibraryID: lib.ID, Title: "示例剧", Path: lib.Path + "/示例剧/E02.mkv", ScrapeStatus: "pending"},
+			}
+			if err := db.Create(&rows).Error; err != nil {
+				t.Fatal(err)
+			}
+			_, err := svc.Scrape(t.Context(), rows[0].ID, PipelineScrapeRequest{
+				Category: "tv", Queries: []string{"示例剧"}, Provider: "tmdb", MediaType: "tv",
+				MediaIDs: []string{rows[0].ID, rows[1].ID},
+				EpisodeMappings: map[string]ManualEpisodeMapping{
+					rows[0].ID: {SeasonNum: 1, EpisodeNum: 1},
+					rows[1].ID: {SeasonNum: 1, EpisodeNum: 2},
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), "唯一候选") {
+				t.Fatalf("error=%v, want explicit unresolved batch error", err)
+			}
+			for _, before := range rows {
+				after, err := repos.Media.FindByID(t.Context(), before.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.ScrapeStatus != before.ScrapeStatus || after.TMDbID != before.TMDbID || !after.UpdatedAt.Equal(before.UpdatedAt) {
+					t.Fatalf("unresolved batch changed media: before=%#v after=%#v", before, after)
+				}
+			}
+		})
 	}
 }
 
@@ -499,8 +571,9 @@ func TestPipelineScrapeReusesResolvedFD2Match(t *testing.T) {
 
 func TestPipelineScrapeMatchesForMediaType(t *testing.T) {
 	matches := []ExternalMediaResult{
-		{MediaType: "movie", Title: "黑衣人2", TMDbID: 608},
-		{MediaType: "tv", Title: "Bo' Selecta!", TMDbID: 608},
+		{Source: "tmdb", MediaType: "movie", Title: "黑衣人2", TMDbID: 608},
+		{Source: "tmdb", MediaType: "tv", Title: "Bo' Selecta!", TMDbID: 608},
+		{Source: "bangumi", MediaType: "anime", Title: "示例动漫", BangumiID: 100},
 	}
 
 	filtered := pipelineScrapeMatchesForMediaType(matches, "movie")
@@ -509,6 +582,10 @@ func TestPipelineScrapeMatchesForMediaType(t *testing.T) {
 	}
 	if filtered[0].MediaType != "movie" || filtered[0].Title != "黑衣人2" || filtered[0].TMDbID != 608 {
 		t.Fatalf("filtered match = %+v", filtered[0])
+	}
+	filtered = pipelineScrapeMatchesForMediaType(matches, "anime")
+	if len(filtered) != 2 || filtered[0].Source != "tmdb" || filtered[0].MediaType != "tv" || filtered[1].Source != "bangumi" {
+		t.Fatalf("anime candidates must retain TMDB TV and Bangumi anime, excluding movies: %+v", filtered)
 	}
 }
 
