@@ -27,6 +27,7 @@ type Container struct {
 	Stream              *StreamService
 	Transcoder          *TranscoderService
 	FFprobe             *FFprobeService
+	MediaProbeQueue     *MediaProbeQueueService
 	TMDb                *TMDbProvider
 	Adult               *AdultProvider
 	Bangumi             *BangumiProvider
@@ -100,6 +101,9 @@ func NewWithVersion(cfg *config.Config, log *zap.Logger, repos *repository.Conta
 // Boot 启动后台工作进程（watcher, downloads poller, subscription scheduler）。
 // 在 AutoMigrate 后调用一次。
 func (c *Container) Boot() {
+	if c.MediaProbeQueue != nil {
+		c.MediaProbeQueue.Boot(c.stopCtx)
+	}
 	if err := c.NormalizeLocalLibraryPaths(c.stopCtx); err != nil {
 		c.Log.Warn("normalize local library paths failed", zap.Error(err))
 	}

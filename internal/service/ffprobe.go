@@ -101,6 +101,10 @@ type ProbeSubtitleStream struct {
 // Probe runs ffprobe against path and returns a typed result. A 30s timeout
 // is applied so a single broken file does not hang the scanner.
 func (f *FFprobeService) Probe(ctx context.Context, path string) (*ProbeResult, error) {
+	return f.probeLocal(ctx, path, true)
+}
+
+func (f *FFprobeService) probeLocal(ctx context.Context, path string, allowFallback bool) (*ProbeResult, error) {
 	if f == nil {
 		return nil, errors.New("ffprobe service nil")
 	}
@@ -125,9 +129,14 @@ func (f *FFprobeService) Probe(ctx context.Context, path string) (*ProbeResult, 
 		if err == nil {
 			return parseProbeJSON(out)
 		}
+		if !allowFallback {
+			return nil, fmt.Errorf("ffprobe failed: %w", err)
+		}
 		if f.log != nil {
 			f.log.Debug("ffprobe failed, trying ffmpeg fallback", zap.String("path", path), zap.Error(err))
 		}
+	} else if !allowFallback {
+		return nil, err
 	}
 	return f.probeWithFFmpeg(ctx, path)
 }
@@ -137,6 +146,10 @@ func (f *FFprobeService) Probe(ctx context.Context, path string) (*ProbeResult, 
 // authorization, or a provider-specific User-Agent can still expose stream
 // metadata without downloading the whole file.
 func (f *FFprobeService) ProbeHTTP(ctx context.Context, rawURL string, headers map[string]string) (*ProbeResult, error) {
+	return f.probeRemote(ctx, rawURL, headers, true)
+}
+
+func (f *FFprobeService) probeRemote(ctx context.Context, rawURL string, headers map[string]string, allowFallback bool) (*ProbeResult, error) {
 	if f == nil {
 		return nil, errors.New("ffprobe service nil")
 	}
@@ -164,11 +177,28 @@ func (f *FFprobeService) ProbeHTTP(ctx context.Context, rawURL string, headers m
 		if err == nil {
 			return parseProbeJSON(out)
 		}
+		if !allowFallback {
+			return nil, fmt.Errorf("remote ffprobe failed: %w", err)
+		}
 		if f.log != nil {
 			f.log.Debug("remote ffprobe failed, trying ffmpeg fallback", zap.Error(err))
 		}
+	} else if !allowFallback {
+		return nil, err
 	}
 	return f.probeHTTPWithFFmpeg(ctx, rawURL, headerText)
+}
+
+// The explicit queue performs one probe attempt, without a second media read
+// through ffmpeg after failure. Other existing probe entry points keep their policy.
+type mediaProbeQueueFFprobe struct{ service *FFprobeService }
+
+func (p mediaProbeQueueFFprobe) Probe(ctx context.Context, path string) (*ProbeResult, error) {
+	return p.service.probeLocal(ctx, path, false)
+}
+
+func (p mediaProbeQueueFFprobe) ProbeHTTP(ctx context.Context, rawURL string, headers map[string]string) (*ProbeResult, error) {
+	return p.service.probeRemote(ctx, rawURL, headers, false)
 }
 
 func (f *FFprobeService) acquire(ctx context.Context) (chan struct{}, error) {
