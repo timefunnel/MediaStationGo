@@ -147,11 +147,11 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirect(ctx context.Context, file
 	warmErr := p.warmOpenListParent(warmCtx, parent)
 	cancel()
 	if warmErr != nil {
-		return nil, fmt.Errorf("%s: list parent %s after api get cache miss failed: %w (initial get: %v)", p.name, parent, warmErr, err)
+		return nil, fmt.Errorf("%s: list parent %s after api link cache miss failed: %w (initial link: %v)", p.name, parent, warmErr, err)
 	}
 	link, retryErr := p.resolveOpenListAPIDirectOnce(ctx, target)
 	if retryErr != nil {
-		return nil, fmt.Errorf("%s: api get %s still failed after listing parent %s: %w", p.name, target, parent, retryErr)
+		return nil, fmt.Errorf("%s: api link %s still failed after listing parent %s: %w", p.name, target, parent, retryErr)
 	}
 	return link, nil
 }
@@ -162,7 +162,8 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirectOnce(ctx context.Context, 
 		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]string{"path": normalizeCloudDAVPath(fileRef), "password": ""})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/get"), bytes.NewReader(payload))
+	// /fs/link avoids /fs/get's duplicate object lookup and related-file listing.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.openListAPIURL("/api/fs/link"), bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -174,15 +175,18 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirectOnce(ctx context.Context, 
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/get"), err)
+		return nil, decorateDAVTransportError(p.name, p.openListAPIURL("/api/fs/link"), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, p.openListAPIStatusError("get", fileRef, resp.StatusCode)
+		return nil, p.openListAPIStatusError("link", fileRef, resp.StatusCode)
 	}
-	var decoded openListGetResponse
+	var decoded openListLinkResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("%s: decode api get: %w", p.name, err)
+		return nil, fmt.Errorf("%s: decode api link: %w", p.name, err)
+	}
+	if decoded.Code == http.StatusUnauthorized || decoded.Code == http.StatusForbidden {
+		return nil, p.openListAPIStatusError("link", fileRef, decoded.Code)
 	}
 	if decoded.Code != 0 && decoded.Code != 200 {
 		msg := strings.TrimSpace(decoded.Message)
@@ -191,23 +195,32 @@ func (p *cloudDrive2Provider) resolveOpenListAPIDirectOnce(ctx context.Context, 
 		}
 		return nil, &openListAPIResponseError{
 			provider: p.name,
-			action:   "get",
+			action:   "link",
 			target:   fileRef,
 			code:     decoded.Code,
 			message:  msg,
 		}
 	}
-	raw := firstNonEmpty(decoded.Data.RawURL, decoded.Data.URL)
+	raw := strings.TrimSpace(decoded.Data.URL)
 	if raw == "" {
-		return nil, fmt.Errorf("%s: api get %s returned empty raw_url", p.name, fileRef)
+		return nil, fmt.Errorf("%s: api link %s returned empty url", p.name, fileRef)
 	}
 	resolved, err := p.resolveOpenListPlaybackURL(raw)
 	if err != nil {
 		return nil, err
 	}
-	headers := normalizeOpenListPlaybackHeaders(decoded.Data.Header)
+	headers, err := normalizeOpenListPlaybackHeaders(decoded.Data.Header)
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid api link headers: %w", p.name, err)
+	}
+	// A 302 preserves the playback client's UA, but cannot supply other headers.
+	for name, value := range headers {
+		if strings.EqualFold(name, "User-Agent") && value == p.ua {
+			delete(headers, name)
+		}
+	}
 	if len(headers) > 0 {
-		return nil, fmt.Errorf("%s: api get %s returned raw_url that requires headers (%s); refusing WebDAV/proxy fallback for pure 302 playback", p.name, fileRef, strings.Join(sortedHeaderNames(headers), ","))
+		return nil, fmt.Errorf("%s: api link %s returned url that requires headers (%s); refusing WebDAV/proxy fallback for pure 302 playback", p.name, fileRef, strings.Join(sortedHeaderNames(headers), ","))
 	}
 	resolved, err = p.resolveOpenListCDNRedirect(ctx, fileRef, resolved)
 	if err != nil {
@@ -256,15 +269,18 @@ func (p *cloudDrive2Provider) resolveOpenListCDNRedirect(ctx context.Context, fi
 	}
 	location, status, err := p.firstHTTPRedirectLocation(ctx, rawURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("%s: probe raw_url %s failed: %w", p.name, fileRef, err)
+		return "", fmt.Errorf("%s: probe link url %s failed: %w", p.name, fileRef, err)
 	}
 	if location != "" {
 		return location, nil
 	}
-	return "", fmt.Errorf("%s: api get %s returned an OpenList-hosted raw_url with http %d and no CDN Location; refusing OpenList/WebDAV proxy fallback for pure 302 playback", p.name, fileRef, status)
+	return "", fmt.Errorf("%s: api link %s returned an OpenList-hosted url with http %d and no CDN Location; refusing OpenList/WebDAV proxy fallback for pure 302 playback", p.name, fileRef, status)
 }
 
 func (p *cloudDrive2Provider) openListAPIStatusError(action, target string, status int) error {
+	if action == "link" && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+		return fmt.Errorf("%s: api link %s denied (%d)；/api/fs/link 需要 OpenList 管理员 Token 或管理员账号", p.name, target, status)
+	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return fmt.Errorf("%s: api %s %s returned http %d；请检查 OpenList Token 或用户名密码，并确认填写的是 OpenList 服务地址而不是 /dav 地址", p.name, action, target, status)
 	}

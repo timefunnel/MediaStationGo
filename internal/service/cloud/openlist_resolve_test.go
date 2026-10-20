@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestOpenListResolveUsesAPIRawURLFor302Playback(t *testing.T) {
+func TestOpenListResolveUsesAPILinkURLFor302Playback(t *testing.T) {
 	var gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -24,8 +24,8 @@ func TestOpenListResolveUsesAPIRawURLFor302Playback(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+		case "/api/fs/link":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -40,8 +40,8 @@ func TestOpenListResolveUsesAPIRawURLFor302Playback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if gotPath != "/api/fs/get" {
-		t.Fatalf("api path = %q, want /api/fs/get", gotPath)
+	if gotPath != "/api/fs/link" {
+		t.Fatalf("api path = %q, want /api/fs/link", gotPath)
 	}
 	if gotAuth != "alist-token" {
 		t.Fatalf("Authorization = %q, want token", gotAuth)
@@ -50,21 +50,21 @@ func TestOpenListResolveUsesAPIRawURLFor302Playback(t *testing.T) {
 		t.Fatalf("url = %q", link.URL)
 	}
 	if link.Proxy {
-		t.Fatalf("openlist raw_url without required headers should be 302 playback")
+		t.Fatalf("openlist url without required headers should be 302 playback")
 	}
 }
 
-func TestOpenListResolveWMVUsesAPIRawURLFor302Playback(t *testing.T) {
+func TestOpenListResolveWMVUsesAPILinkURLFor302Playback(t *testing.T) {
 	var gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fs/list":
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			gotPath = r.URL.Path
 			gotAuth = r.Header.Get("Authorization")
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.wmv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.wmv?sign=1"}}`))
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -79,8 +79,8 @@ func TestOpenListResolveWMVUsesAPIRawURLFor302Playback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if gotPath != "/api/fs/get" {
-		t.Fatalf("api path = %q, want /api/fs/get", gotPath)
+	if gotPath != "/api/fs/link" {
+		t.Fatalf("api path = %q, want /api/fs/link", gotPath)
 	}
 	if gotAuth != "alist-token" {
 		t.Fatalf("Authorization = %q, want token", gotAuth)
@@ -90,16 +90,16 @@ func TestOpenListResolveWMVUsesAPIRawURLFor302Playback(t *testing.T) {
 	}
 }
 
-func TestOpenListResolveCollapsesHostedRawURLRedirectToCDN(t *testing.T) {
+func TestOpenListResolveCollapsesHostedLinkURLRedirectToCDN(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/d/Cloud/Movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"/d/Cloud/Movie.mkv?sign=1"}}`))
 		case "/d/Cloud/Movie.mkv":
 			probeSeen = true
 			if r.Header.Get("Range") != "bytes=0-0" {
@@ -121,14 +121,14 @@ func TestOpenListResolveCollapsesHostedRawURLRedirectToCDN(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	if !probeSeen {
-		t.Fatal("expected OpenList-hosted raw_url probe")
+		t.Fatal("expected OpenList-hosted url probe")
 	}
 	if link.URL != "https://cdn.example.test/movie.mkv?sign=cdn" || link.Proxy || len(link.Headers) != 0 {
 		t.Fatalf("link = %#v, want collapsed CDN 302 playback", link)
 	}
 }
 
-func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
+func TestOpenListResolveLogsInWithUsernamePasswordForAPILinkURL(t *testing.T) {
 	var loginSeen bool
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +149,9 @@ func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
 				t.Fatalf("list Authorization = %q, want api-token", r.Header.Get("Authorization"))
 			}
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			gotAuth = r.Header.Get("Authorization")
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -167,24 +167,24 @@ func TestOpenListResolveLogsInWithUsernamePasswordForAPIRawURL(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	if !loginSeen {
-		t.Fatalf("expected api login before fs/get")
+		t.Fatalf("expected api login before fs/link")
 	}
 	if gotAuth != "api-token" {
 		t.Fatalf("Authorization = %q, want api-token", gotAuth)
 	}
 	if link.URL != "https://cdn.example.test/movie.mkv?sign=1" || link.Proxy {
-		t.Fatalf("link = %#v, want raw_url 302 playback", link)
+		t.Fatalf("link = %#v, want url 302 playback", link)
 	}
 }
 
-func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
+func TestOpenListResolveRejectsProxyWhenAPILinkURLNeedsHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fs/list":
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/dav/Cloud/Movie.mkv","header":{"Cookie":"sid=abc"}}}`))
+		case "/api/fs/link":
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"/dav/Cloud/Movie.mkv","header":{"Cookie":"sid=abc"}}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -201,16 +201,16 @@ func TestOpenListResolveRejectsProxyWhenAPIRawURLNeedsHeaders(t *testing.T) {
 	}
 }
 
-func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
+func TestOpenListResolveRejectsHostedLinkURLWithoutCDNRedirect(t *testing.T) {
 	var probeSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"/d/Cloud/Movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"/d/Cloud/Movie.mkv?sign=1"}}`))
 		case "/d/Cloud/Movie.mkv":
 			probeSeen = true
 			w.Header().Set("Content-Range", "bytes 0-0/10")
@@ -227,24 +227,24 @@ func TestOpenListResolveRejectsHostedRawURLWithoutCDNRedirect(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err == nil || !strings.Contains(err.Error(), "OpenList-hosted raw_url") || !strings.Contains(err.Error(), "no CDN Location") {
-		t.Fatalf("resolve error = %v, want hosted raw_url refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "OpenList-hosted url") || !strings.Contains(err.Error(), "no CDN Location") {
+		t.Fatalf("resolve error = %v, want hosted url refusal", err)
 	}
 	if !probeSeen {
-		t.Fatal("expected OpenList-hosted raw_url probe")
+		t.Fatal("expected OpenList-hosted url probe")
 	}
 }
 
-func TestOpenListResolveDoesNotFallbackToWebDAVWhenAPIRawURLFails(t *testing.T) {
+func TestOpenListResolveDoesNotFallbackToWebDAVWhenAPILinkURLFails(t *testing.T) {
 	var davSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"code":500,"message":"driver cannot provide raw_url"}`))
+			_, _ = w.Write([]byte(`{"code":500,"message":"driver cannot provide url"}`))
 		case "/dav/Cloud/Movie.mkv":
 			davSeen = true
 			w.WriteHeader(http.StatusOK)
@@ -259,11 +259,90 @@ func TestOpenListResolveDoesNotFallbackToWebDAVWhenAPIRawURLFails(t *testing.T) 
 		t.Fatal(err)
 	}
 	_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
-	if err == nil || !strings.Contains(err.Error(), "pure 302 playback requires OpenList raw_url") {
-		t.Fatalf("resolve error = %v, want raw_url requirement", err)
+	if err == nil || !strings.Contains(err.Error(), "pure 302 playback requires OpenList link url") {
+		t.Fatalf("resolve error = %v, want url requirement", err)
 	}
 	if davSeen {
-		t.Fatal("openlist video resolve fell back to WebDAV after raw_url failure")
+		t.Fatal("openlist video resolve fell back to WebDAV after url failure")
+	}
+}
+
+func TestOpenListLinkPreservesPathAndValidatesPlaybackHeaders(t *testing.T) {
+	const clientUA = "BaoMiHua/1 iOS"
+	const fileRef = "/115/电影/A+B/Movie.mkv"
+	for _, tc := range []struct {
+		name    string
+		header  string
+		wantErr string
+	}{
+		{"same UA array", `{"User-Agent":["BaoMiHua/1 iOS"]}`, ""},
+		{"same UA string", `{"user-agent":"BaoMiHua/1 iOS"}`, ""},
+		{"no headers", `null`, ""},
+		{"different UA", `{"User-Agent":["OtherPlayer"]}`, "User-Agent"},
+		{"cookie", `{"Cookie":["secret"]}`, "Cookie"},
+		{"authorization", `{"Authorization":["secret"]}`, "Authorization"},
+		{"UA and referer", `{"User-Agent":["BaoMiHua/1 iOS"],"Referer":["https://example.test"]}`, "Referer"},
+		{"malformed headers", `[]`, "invalid api link headers"},
+		{"malformed value", `{"Cookie":123}`, "invalid api link headers"},
+		{"malformed array", `{"User-Agent":["BaoMiHua/1 iOS",123]}`, "invalid api link headers"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path != "/api/fs/link" || r.Method != http.MethodPost {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				var body map[string]string
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if body["path"] != fileRef || r.UserAgent() != clientUA {
+					t.Errorf("path=%q UA=%q", body["path"], r.UserAgent())
+				}
+				_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv","header":` + tc.header + `}}`))
+			}))
+			defer srv.Close()
+			p, err := New(TypeOpenList, map[string]any{"server": srv.URL, "token": "admin-token", "ua": clientUA}, srv.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			link, err := p.Resolve(context.Background(), fileRef)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err=%v, want %s", err, tc.wantErr)
+				}
+			} else if err != nil || link.Proxy || len(link.Headers) != 0 {
+				t.Fatalf("link=%#v err=%v", link, err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("calls=%d, want one link request", calls.Load())
+			}
+		})
+	}
+}
+
+func TestOpenListLinkPermissionFailureDoesNotRetryOrList(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"code":403,"message":"You are not an admin"}`))
+			}))
+			defer srv.Close()
+			p, err := New(TypeOpenList, map[string]any{"server": srv.URL, "token": "user-token"}, srv.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = p.Resolve(context.Background(), "/Cloud/Movie.mkv")
+			if err == nil || !strings.Contains(err.Error(), "管理员") || calls.Load() != 1 {
+				t.Fatalf("err=%v calls=%d, want explicit admin error without retry", err, calls.Load())
+			}
+		})
 	}
 }
 
@@ -272,7 +351,7 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/fs/get":
+		case "/api/fs/link":
 			getCalls++
 			if getCalls == 1 {
 				if listCalls != 0 {
@@ -284,7 +363,7 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 			if listCalls != 1 {
 				t.Fatal("target parent was not warmed after the cache miss")
 			}
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		case "/api/fs/list":
 			listCalls++
 			var body map[string]any
@@ -314,7 +393,7 @@ func TestOpenListResolveListsExactParentAndRetriesOnObjectCacheMiss(t *testing.T
 	}
 }
 
-func TestOpenListResolveDoesNotWarmParentWhenGetSucceeds(t *testing.T) {
+func TestOpenListResolveDoesNotWarmParentWhenLinkSucceeds(t *testing.T) {
 	var getCalls, listCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -322,9 +401,9 @@ func TestOpenListResolveDoesNotWarmParentWhenGetSucceeds(t *testing.T) {
 		case "/api/fs/list":
 			listCalls++
 			_, _ = w.Write([]byte(`{"code":500,"message":"temporary list failure"}`))
-		case "/api/fs/get":
+		case "/api/fs/link":
 			getCalls++
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -393,13 +472,13 @@ func TestOpenListResolveCollapsesConcurrentParentWarmup(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/fs/get":
+		case "/api/fs/link":
 			call := getCalls.Add(1)
 			if call <= 2 {
 				_, _ = w.Write([]byte(`{"code":500,"message":"failed to get obj: code: 430004, message: file not found"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv?sign=1"}}`))
 		case "/api/fs/list":
 			if listCalls.Add(1) == 1 {
 				close(listStarted)

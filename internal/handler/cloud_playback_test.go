@@ -63,18 +63,18 @@ func TestProxyCloudResolvedLinkUsesHEADWithoutSyntheticRange(t *testing.T) {
 
 func TestCloudPlaybackAuthorizesProgressOnlyAfterSuccessfulResolve(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	var getSucceeds bool
+	var linkSucceeds bool
 	openList := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fs/list":
 			_, _ = w.Write([]byte(`{"code":200,"data":{"content":[],"total":0}}`))
-		case "/api/fs/get":
-			if !getSucceeds {
+		case "/api/fs/link":
+			if !linkSucceeds {
 				_, _ = w.Write([]byte(`{"code":500,"message":"driver unavailable"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"code":200,"data":{"raw_url":"https://cdn.example.test/movie.mkv"}}`))
+			_, _ = w.Write([]byte(`{"code":200,"data":{"url":"https://cdn.example.test/movie.mkv"}}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -121,7 +121,7 @@ func TestCloudPlaybackAuthorizesProgressOnlyAfterSuccessfulResolve(t *testing.T)
 		t.Fatalf("failed resolve grant error = %v", err)
 	}
 
-	getSucceeds = true
+	linkSucceeds = true
 	successRecorder := httptest.NewRecorder()
 	successContext, _ := gin.CreateTestContext(successRecorder)
 	successContext.Set(middleware.CtxUserID, "user-1")

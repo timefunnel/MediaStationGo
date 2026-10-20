@@ -17,7 +17,7 @@ func TestOpenListWebDAVListAndResolve(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/api/fs/list" || r.URL.Path == "/api/fs/get" {
+		if r.URL.Path == "/api/fs/list" || r.URL.Path == "/api/fs/link" {
 			http.NotFound(w, r)
 			return
 		}
@@ -63,8 +63,8 @@ func TestOpenListWebDAVListAndResolve(t *testing.T) {
 		t.Fatalf("entries = %#v", entries)
 	}
 	_, err = p.Resolve(context.Background(), entries[0].ID)
-	if err == nil || !strings.Contains(err.Error(), "pure 302 playback requires OpenList raw_url") {
-		t.Fatalf("openlist video resolve should require raw_url instead of WebDAV proxy fallback, err=%v", err)
+	if err == nil || !strings.Contains(err.Error(), "pure 302 playback requires OpenList link url") {
+		t.Fatalf("openlist video resolve should require url instead of WebDAV proxy fallback, err=%v", err)
 	}
 }
 

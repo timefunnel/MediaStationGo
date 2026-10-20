@@ -29,12 +29,12 @@ func TestCloudResolveHotCacheHitDoesNotRefresh(t *testing.T) {
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		n := resolves.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, n)
+		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%d.mkv"}}`, n)
 	}))
 	defer upstream.Close()
 
@@ -182,13 +182,13 @@ func TestCloudResolveExpiredLinkDoesNotReturnStaleOnResolveFailure(t *testing.T)
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		n := resolves.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"https://cdnfhnfile.115cdn.net/hash/movie.mp4?t=%d"}}`, expiry)
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"https://cdnfhnfile.115cdn.net/hash/movie.mp4?t=%d"}}`, expiry)
 			return
 		}
 		_, _ = fmt.Fprint(w, `{"code":500,"message":"failed get link"}`)
@@ -240,12 +240,12 @@ func TestCloudResolveExpiredLinkReturnsCircuitErrorInsteadOfStale(t *testing.T) 
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		resolves.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"code":200,"data":{"raw_url":"http://cdn.local/movie.mkv"}}`)
+		_, _ = fmt.Fprint(w, `{"code":200,"data":{"url":"http://cdn.local/movie.mkv"}}`)
 	}))
 	defer upstream.Close()
 
@@ -284,7 +284,7 @@ func TestCloudResolveCachesFastFailedGetLinkWithoutRetry(t *testing.T) {
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		resolves.Add(1)
@@ -322,7 +322,7 @@ func TestCloudResolveOpensCircuitAfterConsecutiveTransportFailures(t *testing.T)
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		resolves.Add(1)
@@ -357,7 +357,7 @@ func TestCloudResolveRateLimitOpensCircuitImmediately(t *testing.T) {
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		resolves.Add(1)
@@ -398,7 +398,7 @@ func TestCloudResolveCircuitAllowsSingleHalfOpenProbe(t *testing.T) {
 			writeOpenListCacheList(w)
 			return
 		}
-		if r.URL.Path != "/api/fs/get" {
+		if r.URL.Path != "/api/fs/link" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		call := resolves.Add(1)
@@ -411,7 +411,7 @@ func TestCloudResolveCircuitAllowsSingleHalfOpenProbe(t *testing.T) {
 			close(probeStarted)
 			<-releaseProbe
 		}
-		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+		_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%d.mkv"}}`, call)
 	}))
 	defer upstream.Close()
 
@@ -476,7 +476,7 @@ func TestCloudResolveColdMissUsesBoundedWorkerDeadline(t *testing.T) {
 					Body:       io.NopCloser(strings.NewReader(`{"code":200,"data":{"content":[],"total":0}}`)),
 					Request:    r,
 				}, nil
-			case "/api/fs/get":
+			case "/api/fs/link":
 				select {
 				case <-started:
 				default:
@@ -551,13 +551,13 @@ func TestCloudResolveContinuesAfterOwnerContextCanceled(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			if resolves.Add(1) == 1 {
 				close(getStarted)
 			}
 			<-releaseGet
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"code":200,"data":{"raw_url":"http://cdn.local/movie.mkv"}}`)
+			_, _ = fmt.Fprint(w, `{"code":200,"data":{"url":"http://cdn.local/movie.mkv"}}`)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -615,10 +615,10 @@ func TestCloudResolveKeepsDifferentUserAgentsIndependent(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			resolves.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -652,7 +652,7 @@ func TestCloudResolveSerializesDifferentUserAgentsForSameFile(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			call := resolves.Add(1)
 			current := active.Add(1)
 			for {
@@ -667,7 +667,7 @@ func TestCloudResolveSerializesDifferentUserAgentsForSameFile(t *testing.T) {
 				<-releaseFirst
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%s.mkv"}}`, url.PathEscape(r.UserAgent()))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -729,7 +729,7 @@ func TestCloudResolveLimitsColdMissesAcrossFilesToTwo(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			call := resolves.Add(1)
 			current := active.Add(1)
 			for {
@@ -744,7 +744,7 @@ func TestCloudResolveLimitsColdMissesAcrossFilesToTwo(t *testing.T) {
 				<-releaseFirstTwo
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%d.mkv"}}`, call)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -805,7 +805,7 @@ func TestCloudResolveQueuedUserAgentStopsAfterRateLimit(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			call := resolves.Add(1)
 			if call == 1 {
 				close(firstStarted)
@@ -869,14 +869,14 @@ func TestCloudResolveConfigChangePreventsOldFlightCacheWrite(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/fs/list":
 			writeOpenListCacheList(w)
-		case "/api/fs/get":
+		case "/api/fs/link":
 			call := resolves.Add(1)
 			if call == 1 {
 				close(firstStarted)
 				<-releaseFirst
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"raw_url":"http://cdn.local/%d.mkv"}}`, call)
+			_, _ = fmt.Fprintf(w, `{"code":200,"data":{"url":"http://cdn.local/%d.mkv"}}`, call)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}

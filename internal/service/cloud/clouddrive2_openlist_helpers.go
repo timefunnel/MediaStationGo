@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -37,13 +38,13 @@ func sameURLHost(raw string, base *url.URL) bool {
 	return strings.EqualFold(u.Host, base.Host)
 }
 
-func normalizeOpenListPlaybackHeaders(raw json.RawMessage) map[string]string {
+func normalizeOpenListPlaybackHeaders(raw json.RawMessage) (map[string]string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil
+		return nil, nil
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil
+		return nil, err
 	}
 	out := make(map[string]string, len(obj))
 	for k, v := range obj {
@@ -59,19 +60,25 @@ func normalizeOpenListPlaybackHeaders(raw json.RawMessage) map[string]string {
 		case []any:
 			parts := make([]string, 0, len(value))
 			for _, item := range value {
-				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				s, ok := item.(string)
+				if !ok {
+					return nil, fmt.Errorf("invalid value for header %s", key)
+				}
+				if strings.TrimSpace(s) != "" {
 					parts = append(parts, strings.TrimSpace(s))
 				}
 			}
 			if len(parts) > 0 {
 				out[key] = strings.Join(parts, ", ")
 			}
+		default:
+			return nil, fmt.Errorf("invalid value for header %s", key)
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
 func isCloudVideoPlaybackCandidate(fileRef string) bool {
@@ -98,11 +105,10 @@ type openListListItem struct {
 	IsDir bool   `json:"is_dir"`
 }
 
-type openListGetResponse struct {
+type openListLinkResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		RawURL string          `json:"raw_url"`
 		URL    string          `json:"url"`
 		Header json.RawMessage `json:"header"`
 	} `json:"data"`
