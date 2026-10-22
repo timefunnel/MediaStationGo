@@ -6,7 +6,7 @@
 
 使用现有 Emby 认证，在根路径和 `/emby` 前缀下提供：
 
-`System/Info` 的 `ProtocolExtensions` 声明 `danmaku-associations` v1。播放器只在用户开启跨设备同步且服务端声明此能力时调用下述接口；未声明时使用标准媒体详情做本地匹配，选源和偏移只在本次播放生效，不探测新接口、不请求旧集中弹幕服务。同步开关关闭不影响本地搜索、下载和绘制。
+`System/Info` 的 `ProtocolExtensions` 声明 `danmaku-associations` v1。播放器只在用户开启跨设备同步且服务端声明此能力时调用下述接口；关闭或未声明时使用标准媒体详情做本地匹配，选源和偏移按账号与物理媒体版本保存在本机，重启后仍可复用，不探测新接口、不请求旧集中弹幕服务。同步开关关闭不影响本地搜索、下载和绘制。
 
 - `GET /Items/:id/Danmaku?MediaSourceId=物理版本ID`
 - `PUT /Items/:id/Danmaku?MediaSourceId=物理版本ID`
