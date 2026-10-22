@@ -9,12 +9,17 @@ import (
 )
 
 const mediaStationGoPlaybackPreferencesExtension = "playback-preferences"
+const mediaStationGoDanmakuAssociationsExtension = "danmaku-associations"
 const mediaStationGoUpdateDownloadSourcesExtension = "update-download-sources"
 
 func (e *EmbyService) mediaStationGoProtocolExtensions() []map[string]any {
 	extensions := []map[string]any{
 		{
 			"Id":      mediaStationGoPlaybackPreferencesExtension,
+			"Version": 1,
+		},
+		{
+			"Id":      mediaStationGoDanmakuAssociationsExtension,
 			"Version": 1,
 		},
 	}

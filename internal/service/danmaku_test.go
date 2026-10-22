@@ -125,17 +125,6 @@ func TestDanmakuUnavailableIsNotSilentlyEmptied(t *testing.T) {
 	}
 }
 
-func TestDanmakuBackendDoesNotDependOnResourceImport(t *testing.T) {
-	svc, _ := newDanmakuTestService(t)
-	builder := serviceContainerBuilder{cfg: &config.Config{Danmaku: config.DanmakuConfig{
-		Enabled: true, URL: "http://127.0.0.1:9322", Token: "test-token-16-chars",
-	}}, log: zap.NewNop(), repos: svc.repos, c: &Container{Danmaku: svc}}
-	builder.initDanmakuBackend()
-	if !svc.Available() || builder.c.ResourceImport != nil {
-		t.Fatal("independent backend requires resource_import")
-	}
-}
-
 func TestDanmakuBackendNegativeRecordMigrationAndExpiry(t *testing.T) {
 	row := &model.MediaDanmaku{Status: DanmakuStatusUnmatched}
 	if !rowNeedsAutomaticMatch(row) {

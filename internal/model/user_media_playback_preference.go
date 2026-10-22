@@ -14,4 +14,11 @@ type UserMediaPlaybackPreference struct {
 	PreferredMediaSourceID string `gorm:"size:128;not null;default:''" json:"preferred_media_source_id,omitempty"`
 	// HiddenFromResume 记录用户在 Emby 客户端把该条目移出“继续观看/最近观看”。
 	HiddenFromResume bool `gorm:"not null;default:false" json:"hidden_from_resume"`
+	// Danmaku references are scoped to this user and this physical media version.
+	DanmakuSource        string  `gorm:"size:32;not null;default:''" json:"-"`
+	DanmakuEpisodeURL    string  `gorm:"size:2048;not null;default:''" json:"-"`
+	DanmakuAnimeTitle    string  `gorm:"size:255;not null;default:''" json:"-"`
+	DanmakuEpisodeTitle  string  `gorm:"size:255;not null;default:''" json:"-"`
+	DanmakuOffsetSeconds float64 `gorm:"not null;default:0" json:"-"`
+	DanmakuRevision      uint64  `gorm:"not null;default:0" json:"-"`
 }

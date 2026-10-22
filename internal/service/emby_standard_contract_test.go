@@ -23,18 +23,21 @@ func TestEmbySystemInfoAdvertisesVersionedProtocolExtensions(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			extensions, ok := payload["ProtocolExtensions"].([]map[string]any)
-			if !ok || len(extensions) != 2 {
-				t.Fatalf("ProtocolExtensions = %#v, want two extensions", payload["ProtocolExtensions"])
+			if !ok || len(extensions) != 3 {
+				t.Fatalf("ProtocolExtensions = %#v, want three extensions", payload["ProtocolExtensions"])
 			}
 			if extensions[0]["Id"] != "playback-preferences" || extensions[0]["Version"] != 1 {
 				t.Fatalf("ProtocolExtensions[0] = %#v, want playback-preferences v1", extensions[0])
 			}
-			if extensions[1]["Id"] != "update-download-sources" || extensions[1]["Version"] != 1 || extensions[1]["MaxAgeSeconds"] != 3600 {
-				t.Fatalf("ProtocolExtensions[1] = %#v, want update-download-sources v1", extensions[1])
+			if extensions[1]["Id"] != "danmaku-associations" || extensions[1]["Version"] != 1 {
+				t.Fatalf("ProtocolExtensions[1] = %#v, want danmaku-associations v1", extensions[1])
 			}
-			sources, ok := extensions[1]["Sources"].([]string)
+			if extensions[2]["Id"] != "update-download-sources" || extensions[2]["Version"] != 1 || extensions[2]["MaxAgeSeconds"] != 3600 {
+				t.Fatalf("ProtocolExtensions[2] = %#v, want update-download-sources v1", extensions[2])
+			}
+			sources, ok := extensions[2]["Sources"].([]string)
 			if !ok || len(sources) != 2 || sources[0] != "https://one.example/" || sources[1] != "direct" {
-				t.Fatalf("ProtocolExtensions[1].Sources = %#v", extensions[1]["Sources"])
+				t.Fatalf("ProtocolExtensions[2].Sources = %#v", extensions[2]["Sources"])
 			}
 		})
 	}

@@ -159,38 +159,63 @@ func TestEmbyDanmakuPlaybackDoesNotPrefetch(t *testing.T) {
 	}
 }
 
-func TestEmbyDanmakuLoadsOnlyOnExplicitRequests(t *testing.T) {
-	router, _, b := newEmbyPlaybackDanmakuRouter(t)
-	if w := playbackDanmakuRequest(t, router, "GET", "/Items/media-1/PlaybackInfo?IsPlayback=true", "MediaStation Windows", "MediaStationGoWindows/test"); w.Code != 200 {
-		t.Fatal(w.Body.String())
+func TestEmbyDanmakuClientContextDoesNotFetchComments(t *testing.T) {
+	router, _, backend := newEmbyPlaybackDanmakuRouter(t)
+	response := playbackDanmakuRequest(t, router, "GET", "/Items/media-1/Danmaku?MediaSourceId=media-1", "MediaStation Windows", "MediaStationGoWindows/test")
+	var context service.ClientDanmakuContext
+	if err := json.Unmarshal(response.Body.Bytes(), &context); err != nil || response.Code != 200 || context.MediaID != "media-1" {
+		t.Fatalf("context=%d %s err=%v", response.Code, response.Body.String(), err)
 	}
-	for range 3 {
-		if w := playbackDanmakuRequest(t, router, "GET", "/Videos/media-1/stream", "SenPlayer", "SenPlayer/6.2.2"); w.Code != 302 {
-			t.Fatal(w.Body.String())
+	for _, path := range []string{"/api/danmu/media-1/raw", "/api/danmaku/media-1"} {
+		if w := playbackDanmakuRequest(t, router, "GET", path, "MediaStation Windows", "MediaStationGoWindows/test"); w.Code != 404 {
+			t.Fatalf("retired route: %s => %d", path, w.Code)
 		}
 	}
-	if b.matches.Load() != 0 || b.fetches.Load() != 0 {
-		t.Fatalf("playback started danmaku work: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
+	if backend.matches.Load() != 0 || backend.fetches.Load() != 0 {
+		t.Fatal("client context triggered upstream work")
 	}
-	close(b.release)
-	xml := playbackDanmakuRequest(t, router, "GET", "/api/danmu/media-1/raw", "SenPlayer", "SenPlayer/6.2.2")
-	if xml.Code != 200 || !strings.Contains(xml.Body.String(), "synthetic requested danmaku") {
-		t.Fatalf("SenPlayer did not receive requested XML: %d %s", xml.Code, xml.Body.String())
+}
+
+func TestEmbyDanmakuAssociationUsesAuthenticatedAccountAndSelectedVersion(t *testing.T) {
+	router, svc, backend := newEmbyPlaybackDanmakuRouter(t)
+	put := func(path, body string, authenticated bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if authenticated {
+			req.Header.Set("X-Emby-Token", signedTestToken(t, "test-secret"))
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
 	}
-	if b.matches.Load() != 1 || b.fetches.Load() != 1 {
-		t.Fatalf("explicit XML did not load danmaku: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
+	body := `{"source":"iqiyi","episode_url":"https://www.iqiyi.com/v_test.html","offset_seconds":-2.5,"expected_revision":"0","user_id":"other-user"}`
+	path := "/Items/media-1/Danmaku?MediaSourceId=media-2"
+	if w := put(path, body, false); w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated write: %d %s", w.Code, w.Body.String())
 	}
-	request := <-b.entered
-	if request.MediaID != "media-1" || !request.WithRelated {
-		t.Fatalf("wrong explicit danmaku request: %+v", request)
+	if w := put(path+"&UserId=other-user", body, true); w.Code != http.StatusForbidden {
+		t.Fatalf("forged user scope: %d %s", w.Code, w.Body.String())
 	}
-	jsonResponse := playbackDanmakuRequest(t, router, "GET", "/api/danmaku/media-1?with_related=true&ch_convert=0", "MediaStation Windows", "MediaStationGoWindows/test")
-	var payload service.DanmakuPayload
-	if err := json.Unmarshal(jsonResponse.Body.Bytes(), &payload); err != nil || jsonResponse.Code != 200 || payload.Count != 1 {
-		t.Fatalf("Windows did not receive requested JSON: %d %s %v", jsonResponse.Code, jsonResponse.Body.String(), err)
+	if w := put(path, body, true); w.Code != http.StatusOK {
+		t.Fatalf("save selected version: %d %s", w.Code, w.Body.String())
 	}
-	// Successful on-demand tasks only share in-flight work; persistent comment caching stays in the backend.
-	if b.matches.Load() != 1 || b.fetches.Load() != 2 {
-		t.Fatalf("explicit JSON did not reuse the match: matches=%d fetches=%d", b.matches.Load(), b.fetches.Load())
+	for _, scope := range [][2]string{{"media-1", "user-1"}, {"media-2", "other-user"}} {
+		out, err := svc.Danmaku.ClientContext(t.Context(), scope[0], scope[1])
+		if err != nil || out.Association != nil {
+			t.Fatalf("unexpected association in %v: %+v %v", scope, out, err)
+		}
+	}
+	out, err := svc.Danmaku.ClientContext(t.Context(), "media-2", "user-1")
+	if err != nil || out.Association == nil || out.Association.OffsetSeconds != -2.5 {
+		t.Fatalf("missing authenticated association: %+v %v", out, err)
+	}
+	if w := put(path, body, true); w.Code != http.StatusConflict {
+		t.Fatalf("stale update: %d %s", w.Code, w.Body.String())
+	}
+	if w := put("/Items/media-1/Danmaku?MediaSourceId=missing", body, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("unrelated version: %d %s", w.Code, w.Body.String())
+	}
+	if backend.matches.Load() != 0 || backend.fetches.Load() != 0 {
+		t.Fatal("saving a reference triggered source traffic")
 	}
 }

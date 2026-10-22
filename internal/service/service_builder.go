@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -41,8 +40,10 @@ func newServiceContainer(cfg *config.Config, log *zap.Logger, repos *repository.
 	builder.initSiteDownloadServices()
 	builder.initImageProxy()
 	builder.attachRuntimeContext()
+	if cfg.Danmaku.Enabled && log != nil {
+		log.Warn("central danmaku fetching is retired; players fetch sources locally and only account references are stored")
+	}
 	builder.initResourceImport()
-	builder.initDanmakuBackend()
 	builder.recoverPipelineIngest()
 	builder.recoverResourceImports()
 	return builder.c
@@ -82,21 +83,6 @@ func (b *serviceContainerBuilder) initResourceImport() {
 		b.c.Subscription.SetResourceImport(service)
 		service.SetSubscriptionFailureHandler(b.c.Subscription.handleResourceImportSubscriptionFailure)
 		service.SetSubscriptionCompletionHandler(b.c.Subscription.completeResourceImportSubscription)
-	}
-}
-
-func (b *serviceContainerBuilder) initDanmakuBackend() {
-	if !b.cfg.Danmaku.Enabled || b.c.Danmaku == nil {
-		return
-	}
-	client, err := newDanmakuHTTPClient(b.cfg.Danmaku, b.repos)
-	if err != nil {
-		b.log.Error("danmaku server initialization failed", zap.Error(err))
-		return
-	}
-	b.c.Danmaku.SetBackendClient(client)
-	if b.cfg.Danmaku.TimeoutSeconds > 0 {
-		b.c.Danmaku.preparation.timeout = time.Duration(b.cfg.Danmaku.TimeoutSeconds) * time.Second
 	}
 }
 
