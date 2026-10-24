@@ -90,6 +90,11 @@ func registerAuthedDLNAControlRoutes(authed *gin.RouterGroup, svc *service.Conta
 }
 
 func registerAuthedFavoriteAndMediaActionRoutes(authed *gin.RouterGroup, svc *service.Container) {
+	authed.GET("/blacklist", requirePermission(svc, "can_favorite"), listMediaBlacklistHandler(svc))
+	authed.DELETE("/blacklist/:id", requirePermission(svc, "can_favorite"), removeBlacklistItemHandler(svc))
+	authed.POST("/media/:id/blacklist", requirePermission(svc, "can_favorite"), setMediaBlacklistHandler(svc, true))
+	authed.DELETE("/media/:id/blacklist", requirePermission(svc, "can_favorite"), setMediaBlacklistHandler(svc, false))
+	authed.GET("/media/:id/blacklist/status", requirePermission(svc, "can_favorite"), mediaBlacklistStatusHandler(svc))
 	authed.GET("/favorites", requirePermission(svc, "can_favorite"), listFavoritesAliasHandler(svc))
 	authed.POST("/media/:id/favorite", requirePermission(svc, "can_favorite"), addMediaFavoriteHandler(svc))
 	authed.DELETE("/media/:id/favorite", requirePermission(svc, "can_favorite"), removeMediaFavoriteHandler(svc))

@@ -198,7 +198,7 @@ func TestEmbyUserItemByIDRouteReturnsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Library{}, &model.Media{}, &model.Favorite{}, &model.PlaybackHistory{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Library{}, &model.Media{}, &model.Favorite{}, &model.MediaBlacklist{}, &model.PlaybackHistory{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repos := repository.New(db)

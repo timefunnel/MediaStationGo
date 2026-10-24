@@ -15,6 +15,7 @@ import { MediaDetailVersions } from './MediaDetailVersions'
 import { MediaDetailParts } from './MediaDetailParts'
 import { MediaDetailSubtitles } from './MediaDetailSubtitles'
 import { MediaDetailDanmaku } from './MediaDetailDanmaku'
+import { MediaBlacklistButton } from './MediaBlacklistButton'
 
 interface MediaDetailPlaybackActionsProps {
   media: Media
@@ -167,6 +168,7 @@ export function MediaDetailPlaybackActions({
           <span>{favourite ? '取消收藏' : '加入收藏'}</span>
         </button>
       )}
+      {canFavorite && <MediaBlacklistButton key={media.id} media={media} />}
     </div>
   )
 }

@@ -25,7 +25,7 @@ const menuPermissionGroups: Array<{
     items: [
       { key: 'can_view_dashboard', label: '系统首页', description: '首页推荐和继续观看入口' },
       { key: 'can_play_media', label: '媒体库与播放', description: '媒体库、海报墙、播放列表、详情与播放页' },
-      { key: 'can_favorite', label: '我的收藏', description: '收藏菜单和收藏操作' },
+      { key: 'can_favorite', label: '收藏与拉黑', description: '我的收藏、我的拉黑菜单及对应操作' },
       { key: 'can_view_history', label: '观看历史', description: '观看历史菜单和历史记录' },
     ],
   },

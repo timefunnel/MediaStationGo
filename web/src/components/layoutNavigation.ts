@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
+  Ban,
   Cast,
   Clock,
   CloudDownload,
@@ -62,9 +63,10 @@ export const LAYOUT_NAV_GROUPS: LayoutNavGroup[] = [
     id: 'personal',
     label: '个人观影',
     icon: User,
-    activePaths: ['/favourites', '/playlists', '/playlist', '/history', '/play-profiles', '/recycle'],
+    activePaths: ['/favourites', '/blacklist', '/playlists', '/playlist', '/history', '/play-profiles', '/recycle'],
     items: [
       { to: '/favourites', label: '我的收藏', icon: Heart, permission: 'can_favorite' },
+      { to: '/blacklist', label: '我的拉黑', icon: Ban, permission: 'can_favorite' },
       { to: '/playlists', label: '播放列表', icon: ListMusic, permission: 'can_play_media' },
       { to: '/history', label: '观看历史', icon: Clock, permission: 'can_view_history' },
       { to: '/recycle', label: '回收站', icon: Trash2, permission: 'can_manage_files' },

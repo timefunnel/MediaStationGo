@@ -48,7 +48,7 @@ func (e *EmbyService) Item(ctx context.Context, mediaID, userID string) (map[str
 			return e.seriesItemWithFavorites(ctx, series, userID)
 		}
 	}
-	m, err := e.repo.Media.FindByID(ctx, mediaID)
+	m, err := e.visibleMediaByID(ctx, mediaID, userID)
 	if err != nil {
 		return nil, err
 	}

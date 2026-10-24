@@ -21,7 +21,7 @@ func (e *EmbyService) applyUserMediaVisibility(ctx context.Context, q *gorm.DB, 
 	if len(visibility.AllowedLibraryIDs) > 0 {
 		q = q.Where("library_id IN ?", visibility.AllowedLibraryIDs)
 	}
-	return q
+	return e.applyMediaBlacklist(q, userID)
 }
 
 func (e *EmbyService) filterMediaRowsForUser(ctx context.Context, rows []model.Media, userID string) []model.Media {

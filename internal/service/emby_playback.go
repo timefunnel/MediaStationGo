@@ -91,7 +91,7 @@ func (e *EmbyService) playableMedia(ctx context.Context, id, userID string) (*mo
 	} else if ok && len(series.Episodes) > 0 {
 		return &series.Episodes[0], nil
 	}
-	m, err := e.repo.Media.FindByID(ctx, id)
+	m, err := e.visibleMediaByID(ctx, id, userID)
 	if err != nil || m == nil {
 		return m, err
 	}

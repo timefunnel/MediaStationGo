@@ -66,6 +66,7 @@ func targetLooksLikeBootstrapOnly(target *gorm.DB) (bool, error) {
 		&model.Media{},
 		&model.PlaybackHistory{},
 		&model.Favorite{},
+		&model.MediaBlacklist{},
 		&model.Playlist{},
 		&model.PlaylistItem{},
 		&model.DownloadTask{},

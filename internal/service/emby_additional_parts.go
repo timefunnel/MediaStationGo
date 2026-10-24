@@ -10,7 +10,7 @@ import (
 // AdditionalParts exposes Emby's multipart-video contract without treating
 // sequential files as selectable media versions.
 func (e *EmbyService) AdditionalParts(ctx context.Context, mediaID, userID string) (map[string]any, error) {
-	anchor, err := e.repo.Media.FindByID(ctx, strings.TrimSpace(mediaID))
+	anchor, err := e.visibleMediaByID(ctx, strings.TrimSpace(mediaID), userID)
 	if err != nil || anchor == nil {
 		return nil, err
 	}

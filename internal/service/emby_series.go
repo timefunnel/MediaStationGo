@@ -71,9 +71,12 @@ func (e *EmbyService) findSeriesGroup(ctx context.Context, id, userID string) (e
 		}
 	}
 	if !strings.HasPrefix(id, embyVirtualSeriesPrefix) {
-		if series, err := e.repo.Series.FindByID(ctx, id); err != nil {
+		var persisted []model.Series
+		query := e.applySeriesBlacklist(e.repo.DB.WithContext(ctx).Model(&model.Series{}).Where("series.id = ?", id), userID, "series.id")
+		if err := query.Limit(1).Find(&persisted).Error; err != nil {
 			return embySeriesGroup{}, false, err
-		} else if series != nil {
+		} else if len(persisted) > 0 {
+			series := &persisted[0]
 			lib, err := e.repo.Library.FindByID(ctx, series.LibraryID)
 			if err != nil {
 				return embySeriesGroup{}, false, err
