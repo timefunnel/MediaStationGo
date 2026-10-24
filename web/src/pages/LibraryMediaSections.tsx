@@ -3,8 +3,10 @@ import { Film } from 'lucide-react'
 
 import { MediaCard } from '../components/MediaCard'
 import { Pagination } from '../components/Pagination'
+import { usePermission } from '../hooks/usePermission'
 import type { Media } from '../types'
 import type { SeriesCard } from '../utils/groupSeries'
+import { MediaBlacklistButton } from './MediaBlacklistButton'
 
 type LibraryMediaSectionsProps = {
   isSeries: boolean
@@ -37,9 +39,21 @@ export function LibraryMediaSections({
   highlightedMediaID,
   followedSeriesKeys = new Set(),
 }: LibraryMediaSectionsProps) {
+  const canBlacklist = usePermission('can_favorite')
   const totalPages = Math.max(1, Math.ceil(total / LIBRARY_CARD_PAGE_SIZE))
   if (selectedSeries) return null
   if (loading) return <div role="status" className="py-24 text-center text-sm text-sand-500">加载当前页…</div>
+
+  const coverActions = (media: Media) => {
+    const adminActions = movieActions(media)
+    if (!adminActions && !canBlacklist) return undefined
+    return (
+      <div className={adminActions ? 'grid grid-cols-3 gap-1' : undefined}>
+        {adminActions}
+        {canBlacklist && <MediaBlacklistButton key={media.id} media={media} compact />}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -50,7 +64,7 @@ export function LibraryMediaSections({
               key={media.id}
               className={highlightedMediaID === media.id ? 'rounded-lg ring-4 ring-emerald-400/70 ring-offset-2' : ''}
             >
-              <MediaCard media={media} actions={movieActions(media)} />
+              <MediaCard media={media} actions={coverActions(media)} />
             </div>
           ))}
         </div>
@@ -75,6 +89,7 @@ export function LibraryMediaSections({
                 media={series.rep}
                 count={series.count}
                 autoFollow={followedSeriesKeys.has(series.key)}
+                actions={canBlacklist ? <MediaBlacklistButton key={series.linkMedia.id} media={series.linkMedia} compact /> : undefined}
                 onClick={() => onSeriesClick(series)}
               />
             </div>

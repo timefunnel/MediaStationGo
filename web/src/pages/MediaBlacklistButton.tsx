@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Ban } from 'lucide-react'
+import { Ban, LoaderCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { blacklistAPI } from '../api/blacklist'
 import type { Media } from '../types'
 
-export function MediaBlacklistButton({ media }: { media: Media }) {
+export function MediaBlacklistButton({ media, compact = false }: { media: Media; compact?: boolean }) {
   const [blocked, setBlocked] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
@@ -13,6 +13,7 @@ export function MediaBlacklistButton({ media }: { media: Media }) {
   const series = Boolean(media.series_id || media.season_num > 0 || media.episode_num > 0)
 
   useEffect(() => {
+    if (compact) return
     let active = true
     setBlocked(null)
     setError(false)
@@ -25,15 +26,18 @@ export function MediaBlacklistButton({ media }: { media: Media }) {
       }
     })
     return () => { active = false }
-  }, [media.id, reload])
+  }, [compact, media.id, reload])
 
   const toggle = async () => {
-    if (blocked === null || busy) return
+    if (busy || (!compact && blocked === null)) return
     setBusy(true)
     try {
-      await blacklistAPI.set(media.id, !blocked)
-      setBlocked(!blocked)
-      toast.success(blocked ? '已解除拉黑，Emby 将恢复显示' : series ? '已拉黑整部剧，Emby 将隐藏所有季和集' : '已加入我的拉黑，Emby 将隐藏该影片')
+      // Poster grids do not preload one status request per card. Read the
+      // current account state only when its shortcut is actually used.
+      const current = compact ? await blacklistAPI.status(media.id) : blocked
+      await blacklistAPI.set(media.id, !current)
+      setBlocked(!current)
+      toast.success(current ? '已解除拉黑，Emby 将恢复显示' : series ? '已拉黑整部剧，Emby 将隐藏所有季和集' : '已加入我的拉黑，Emby 将隐藏该影片')
     } catch (err) {
       toast.error(errorMessage(err, '拉黑操作失败'))
     } finally {
@@ -41,12 +45,22 @@ export function MediaBlacklistButton({ media }: { media: Media }) {
     }
   }
 
+  const label = error ? '重试拉黑状态'
+    : busy ? '正在保存…'
+    : blocked === null ? (compact ? (series ? '拉黑或解除整剧拉黑' : '拉黑或解除拉黑') : '加载拉黑状态…')
+    : blocked ? (series ? '解除整剧拉黑' : '解除拉黑')
+    : series ? '拉黑整部剧' : '加入拉黑'
+  const buttonClass = compact
+    ? 'flex h-8 w-8 items-center justify-center rounded-lg border border-white/70 bg-white/90 text-gray-700 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50'
+    : 'btn-outline gap-2'
+
   return (
-    <button type="button" className={`btn-outline gap-2 ${blocked ? '!border-red-200 !bg-red-50 !text-red-600' : ''}`}
-      disabled={busy || (blocked === null && !error)} aria-pressed={blocked === true}
+    <button type="button" className={`${buttonClass} ${blocked ? '!border-red-200 !bg-red-50 !text-red-600' : ''}`}
+      title={compact ? label : undefined} aria-label={label}
+      disabled={busy || (!compact && blocked === null && !error)} aria-pressed={blocked === null ? undefined : blocked}
       onClick={() => error ? setReload((value) => value + 1) : void toggle()}>
-      <Ban size={14} />
-      <span>{error ? '重试拉黑状态' : blocked === null ? '加载拉黑状态…' : busy ? '正在保存…' : blocked ? (series ? '解除整剧拉黑' : '解除拉黑') : (series ? '拉黑整部剧' : '加入拉黑')}</span>
+      {compact && busy ? <LoaderCircle size={13} className="animate-spin" /> : <Ban size={compact ? 13 : 14} />}
+      <span className={compact ? 'sr-only' : undefined}>{label}</span>
     </button>
   )
 }
