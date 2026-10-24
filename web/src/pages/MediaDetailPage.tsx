@@ -26,6 +26,7 @@ export function MediaDetailPage() {
   const navigate = useNavigate()
   const role = useAuthStore((s) => s.user?.role)
   const canFavorite = usePermission('can_favorite')
+  const canBlacklist = usePermission('can_blacklist')
   const canExternalPlayer = usePermission('can_external_player')
   const detail = useMediaDetailPageState({ id, navigate, canFavorite })
   const refreshMedia = detail.refresh
@@ -207,6 +208,7 @@ export function MediaDetailPage() {
         isAdmin={role === 'admin'}
         favourite={detail.favourite}
         canFavorite={canFavorite}
+        canBlacklist={canBlacklist}
         canExternalPlayer={canExternalPlayer}
         onToggleFavourite={detail.toggleFavourite}
         onUpgrade={() => void openUpgrade()}

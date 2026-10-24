@@ -68,6 +68,7 @@ export const defaultPermissions: Record<string, boolean> = {
   can_cast: true,
   can_external_player: true,
   can_favorite: true,
+  can_blacklist: false,
   can_view_history: true,
   can_edit_media: false,
   can_rescrape: false,
@@ -91,6 +92,7 @@ export const permissionDisplayNames: Record<string, string> = {
   can_cast: '投屏',
   can_external_player: '外部播放器',
   can_favorite: '收藏',
+  can_blacklist: '我的拉黑',
   can_view_history: '观看历史',
   can_edit_media: '编辑媒体',
   can_rescrape: '重新刮削',
@@ -115,6 +117,7 @@ export const permissionCategories = {
     'can_cast',
     'can_external_player',
     'can_favorite',
+    'can_blacklist',
     'can_view_history',
   ],
   media: [

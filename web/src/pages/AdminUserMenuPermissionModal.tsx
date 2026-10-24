@@ -8,6 +8,7 @@ type MenuPermissionKey =
   | 'can_view_dashboard'
   | 'can_play_media'
   | 'can_favorite'
+  | 'can_blacklist'
   | 'can_view_history'
   | 'can_view_discover'
   | 'can_use_ai'
@@ -25,7 +26,8 @@ const menuPermissionGroups: Array<{
     items: [
       { key: 'can_view_dashboard', label: '系统首页', description: '首页推荐和继续观看入口' },
       { key: 'can_play_media', label: '媒体库与播放', description: '媒体库、海报墙、播放列表、详情与播放页' },
-      { key: 'can_favorite', label: '收藏与拉黑', description: '我的收藏、我的拉黑菜单及对应操作' },
+      { key: 'can_favorite', label: '我的收藏', description: '我的收藏菜单及收藏操作' },
+      { key: 'can_blacklist', label: '我的拉黑', description: '拉黑菜单、详情和封面拉黑操作，普通账户默认关闭' },
       { key: 'can_view_history', label: '观看历史', description: '观看历史菜单和历史记录' },
     ],
   },

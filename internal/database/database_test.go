@@ -26,6 +26,50 @@ func TestOpenRequiresConfig(t *testing.T) {
 	}
 }
 
+func TestAutoMigrateBlacklistPermissionRequiresExplicitGrant(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	// A pre-feature permission table has no can_blacklist column.
+	if err := db.Exec(`CREATE TABLE user_permissions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, can_favorite BOOLEAN DEFAULT true)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO user_permissions (id, user_id, can_favorite) VALUES ('p1', 'u1', true), ('p2', 'u2', false)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, userID := range []string{"u1", "u2"} {
+		var row model.UserPermission
+		if err := db.Where("user_id = ?", userID).First(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		if row.CanBlacklist || row.CanFavorite != (userID == "u1") {
+			t.Fatalf("migration granted access or changed favorites: %+v", row)
+		}
+	}
+	if err := db.Model(&model.UserPermission{}).Where("user_id = ?", "u1").Update("can_blacklist", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var granted model.UserPermission
+	if err := db.Where("user_id = ?", "u1").First(&granted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !granted.CanBlacklist {
+		t.Fatal("repeat migration removed the explicit grant")
+	}
+}
+
 func TestOpenSQLiteWithNilLoggerConfiguresPool(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Database.Type = "sqlite"

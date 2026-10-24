@@ -39,7 +39,7 @@ export function LibraryMediaSections({
   highlightedMediaID,
   followedSeriesKeys = new Set(),
 }: LibraryMediaSectionsProps) {
-  const canBlacklist = usePermission('can_favorite')
+  const canBlacklist = usePermission('can_blacklist')
   const totalPages = Math.max(1, Math.ceil(total / LIBRARY_CARD_PAGE_SIZE))
   if (selectedSeries) return null
   if (loading) return <div role="status" className="py-24 text-center text-sm text-sand-500">加载当前页…</div>

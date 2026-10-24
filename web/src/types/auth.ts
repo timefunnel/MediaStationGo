@@ -35,6 +35,7 @@ export interface UserPermission {
   can_cast: boolean
   can_external_player: boolean
   can_favorite: boolean
+  can_blacklist: boolean
   can_view_history: boolean
   can_edit_media: boolean
   can_rescrape: boolean

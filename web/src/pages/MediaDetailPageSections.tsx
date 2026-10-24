@@ -21,6 +21,7 @@ interface MediaDetailPlaybackActionsProps {
   media: Media
   favourite: boolean
   canFavorite: boolean
+  canBlacklist: boolean
   canExternalPlayer: boolean
   onToggleFavourite: () => void
   onUpgrade: () => void
@@ -107,6 +108,7 @@ export function MediaDetailPlaybackActions({
   media,
   favourite,
   canFavorite,
+  canBlacklist,
   canExternalPlayer,
   onToggleFavourite,
   onUpgrade,
@@ -168,7 +170,7 @@ export function MediaDetailPlaybackActions({
           <span>{favourite ? '取消收藏' : '加入收藏'}</span>
         </button>
       )}
-      {canFavorite && <MediaBlacklistButton key={media.id} media={media} />}
+      {canBlacklist && <MediaBlacklistButton key={media.id} media={media} />}
     </div>
   )
 }
@@ -178,6 +180,7 @@ export function MediaDetailMainContent({
   isAdmin,
   favourite,
   canFavorite,
+  canBlacklist,
   canExternalPlayer,
   onToggleFavourite,
   onUpgrade,
@@ -213,6 +216,7 @@ export function MediaDetailMainContent({
             media={media}
             favourite={favourite}
             canFavorite={canFavorite}
+            canBlacklist={canBlacklist}
             canExternalPlayer={canExternalPlayer}
             onToggleFavourite={onToggleFavourite}
             onUpgrade={onUpgrade}

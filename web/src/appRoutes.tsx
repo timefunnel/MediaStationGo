@@ -73,7 +73,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'discover', element: <DiscoverPage />, permission: 'can_view_discover' },
   { path: 'search', element: <SearchPage />, permission: 'can_play_media' },
   { path: 'favourites', element: <FavouritesPage />, permission: 'can_favorite' },
-  { path: 'blacklist', element: <BlacklistPage />, permission: 'can_favorite' },
+  { path: 'blacklist', element: <BlacklistPage />, permission: 'can_blacklist' },
   { path: 'playlists', element: <PlaylistsPage />, permission: 'can_play_media' },
   { path: 'playlist/:id', element: <PlaylistDetailPage />, permission: 'can_play_media' },
   { path: 'media/:id', element: <MediaDetailPage />, permission: 'can_play_media' },

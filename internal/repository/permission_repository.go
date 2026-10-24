@@ -20,6 +20,7 @@ var permissionWriteFields = []string{
 	"CanCast",
 	"CanExternalPlayer",
 	"CanFavorite",
+	"CanBlacklist",
 	"CanViewHistory",
 	"CanEditMedia",
 	"CanRescrape",

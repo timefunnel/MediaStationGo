@@ -29,10 +29,9 @@ export function usePermission(
 ): boolean {
   const { autoFetch = true } = options
   const { hasPermission, isSuper, permissions, isLoading, fetchPermissions } = usePermissionStore()
-  const tier = useAuthStore((state) => state.tier)
   const role = useAuthStore((state) => state.user?.role)
   const isAuthenticated = useAuthStore((state) => state.token !== null)
-  const hasSuperAccess = isSuper || tier === 'plus' || role === 'admin'
+  const hasSuperAccess = isSuper || role === 'admin'
 
   // 权限未加载时自动获取
   useEffect(() => {
@@ -79,12 +78,11 @@ export function usePermission(
  */
 export function usePermissions() {
   const { permissions, isSuper, isLoading, fetchPermissions } = usePermissionStore()
-  const tier = useAuthStore((state) => state.tier)
   const role = useAuthStore((state) => state.user?.role)
   const isAuthenticated = useAuthStore((state) => state.token !== null)
 
   const check = (key: string): boolean => {
-    if (isSuper || tier === 'plus' || role === 'admin') {
+    if (isSuper || role === 'admin') {
       return true
     }
     return permissions[key] === true
@@ -92,7 +90,7 @@ export function usePermissions() {
 
   return {
     permissions,
-    isSuper: isSuper || tier === 'plus' || role === 'admin',
+    isSuper: isSuper || role === 'admin',
     isLoading,
     check,
     refetch: fetchPermissions,

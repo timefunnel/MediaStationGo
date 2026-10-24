@@ -19,9 +19,12 @@ import (
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
 
-func blacklistRouteRequest(t *testing.T, router *gin.Engine, user, method, path string, status int) map[string]any {
+func blacklistRouteRequest(t *testing.T, router *gin.Engine, user, method, path string, status int, tier ...string) map[string]any {
 	t.Helper()
 	claims := middleware.Claims{UserID: user, Role: "user", RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+	if len(tier) > 0 {
+		claims.Tier = tier[0]
+	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("blacklist-test-secret"))
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +54,13 @@ func TestMediaBlacklistRoutesAndEmbyAliases(t *testing.T) {
 	cfg := &config.Config{}
 	emby := service.NewEmbyService(cfg, zap.NewNop(), repos).SetRuntimeCache(service.NewRuntimeCacheService(cfg, zap.NewNop()))
 	svc := &service.Container{Repo: repos, Emby: emby, Permissions: service.NewPermissionService(zap.NewNop(), repos)}
+	for _, userID := range []string{"user-1", "user-2"} {
+		permissions := service.DefaultPermissions(userID)
+		permissions.CanBlacklist = true
+		if err := svc.Permissions.Save(t.Context(), userID, permissions); err != nil {
+			t.Fatal(err)
+		}
+	}
 	router := gin.New()
 	registerEmbyRoutes(router, "blacklist-test-secret", svc)
 	api := router.Group("/api")
@@ -102,9 +112,82 @@ func TestMediaBlacklistRoutesAndEmbyAliases(t *testing.T) {
 	request("user-1", http.MethodDelete, "/api/media/episode-3/blacklist", http.StatusOK)
 	request("user-1", http.MethodGet, "/Items/episode-1", http.StatusOK)
 	request("user-1", http.MethodPost, "/api/media/missing/blacklist", http.StatusNotFound)
-	if err := db.Model(&model.UserPermission{}).Where("user_id = ?", "user-1").Update("can_favorite", false).Error; err != nil {
+	if err := db.Model(&model.UserPermission{}).Where("user_id = ?", "user-1").Update("can_blacklist", false).Error; err != nil {
 		t.Fatal(err)
 	}
 	request("user-1", http.MethodGet, "/api/blacklist", http.StatusForbidden)
 	request("user-1", http.MethodPost, "/api/media/movie/blacklist", http.StatusForbidden)
+}
+
+func TestMediaBlacklistRoutesRequireIndependentMenuPermission(t *testing.T) {
+	_, db := embyFavoriteRouteFixture(t)
+	repos := repository.New(db)
+	svc := &service.Container{
+		Repo: repos, Emby: service.NewEmbyService(&config.Config{}, zap.NewNop(), repos),
+		Media:       service.NewMediaService(&config.Config{}, zap.NewNop(), repos),
+		Permissions: service.NewPermissionService(zap.NewNop(), repos),
+	}
+	router := gin.New()
+	api := router.Group("/api")
+	api.Use(middleware.AuthRequired("blacklist-test-secret"), activeUserRequired(svc))
+	registerAuthedFavoriteAndMediaActionRoutes(api, svc)
+	for i, tier := range []string{"free", "plus"} {
+		t.Run(tier, func(t *testing.T) {
+			userID := []string{"user-1", "user-2"}[i]
+			if err := db.Model(&model.User{}).Where("id = ?", userID).Update("tier", tier).Error; err != nil {
+				t.Fatal(err)
+			}
+			request := func(method, path string, status int) map[string]any {
+				return blacklistRouteRequest(t, router, userID, method, path, status, tier)
+			}
+			assertDenied := func(recordID string) {
+				t.Helper()
+				for _, route := range []struct{ method, path string }{
+					{http.MethodGet, "/api/blacklist"},
+					{http.MethodGet, "/api/media/movie/blacklist/status"},
+					{http.MethodPost, "/api/media/movie/blacklist"},
+					{http.MethodDelete, "/api/media/movie/blacklist"},
+					{http.MethodDelete, "/api/blacklist/" + recordID},
+				} {
+					request(route.method, route.path, http.StatusForbidden)
+				}
+			}
+			// Default favorite access must not grant any blacklist endpoint.
+			request(http.MethodGet, "/api/media/movie/favorite/status", http.StatusOK)
+			assertDenied("missing")
+			var count int64
+			if err := db.Model(&model.MediaBlacklist{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("unauthorized request changed blacklist: count=%d err=%v", count, err)
+			}
+			permissions := service.DefaultPermissions(userID)
+			permissions.CanFavorite = false
+			permissions.CanBlacklist = true
+			if err := svc.Permissions.Save(t.Context(), userID, permissions); err != nil {
+				t.Fatal(err)
+			}
+			request(http.MethodGet, "/api/media/movie/favorite/status", http.StatusForbidden)
+			request(http.MethodPost, "/api/media/movie/blacklist", http.StatusOK)
+			request(http.MethodGet, "/api/media/movie/blacklist/status", http.StatusOK)
+			items := request(http.MethodGet, "/api/blacklist", http.StatusOK)["items"].([]any)
+			if len(items) != 1 {
+				t.Fatalf("blacklist after grant=%v", items)
+			}
+			recordID := items[0].(map[string]any)["id"].(string)
+			permissions.CanBlacklist = false
+			if err := svc.Permissions.Save(t.Context(), userID, permissions); err != nil {
+				t.Fatal(err)
+			}
+			assertDenied(recordID)
+			if err := db.Model(&model.MediaBlacklist{}).Where("id = ?", recordID).Count(&count).Error; err != nil || count != 1 {
+				t.Fatalf("revoked request changed blacklist: count=%d err=%v", count, err)
+			}
+			permissions.CanBlacklist = true
+			if err := svc.Permissions.Save(t.Context(), userID, permissions); err != nil {
+				t.Fatal(err)
+			}
+			request(http.MethodDelete, "/api/blacklist/"+recordID, http.StatusOK)
+			request(http.MethodPost, "/api/media/movie/blacklist", http.StatusOK)
+			request(http.MethodDelete, "/api/media/movie/blacklist", http.StatusOK)
+		})
+	}
 }
