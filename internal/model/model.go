@@ -38,6 +38,7 @@ func AllModels() []interface{} {
 		&Series{},
 		&Media{},
 		&MediaProbeJob{},
+		&MediaProbeExchange{},
 		&CloudArtworkAlias{},
 		&Person{},
 		&AdultPerformerFollow{},

@@ -17,6 +17,9 @@ func registerMediaProbeQueueRoutes(admin *gin.RouterGroup, svc *service.Containe
 		}
 		c.Next()
 	})
+	if svc != nil && svc.MediaProbeQueue != nil {
+		registerProbeExchangeRoutes(queue, svc.MediaProbeQueue)
+	}
 	queue.GET("", func(c *gin.Context) {
 		page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
 		if err != nil {

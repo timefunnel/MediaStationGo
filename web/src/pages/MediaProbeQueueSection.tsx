@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { mediaProbeQueueAPI, type ProbeQueueConfig, type ProbeQueuePlan, type ProbeQueueSnapshot, type ProbeQueueStatus } from '../api/mediaProbeQueue'
 import { libraryAPI } from '../api/library'
 import type { Library } from '../types'
+import { MediaProbeExchangeSection } from './MediaProbeExchangeSection'
 
 const statusLabels: Record<ProbeQueueStatus, string> = {
   pending: '待处理', running: '运行中', completed: '已完成', partial: '部分信息未知',
@@ -96,6 +97,7 @@ export function MediaProbeQueueSection() {
       </div>
 
       {error && <p role="alert" className="text-sm text-red-500">队列加载失败：{error}。已有数据可能过期。</p>}
+      {snapshot && <MediaProbeExchangeSection disabled={disabled || dirty} libraryIDs={snapshot.config.library_ids} onImported={refresh} />}
       {!snapshot && !error && <p className="flex items-center gap-2 text-sm text-sand-500"><LoaderCircle size={16} className="animate-spin" />正在加载队列…</p>}
 
       {snapshot && draft && <>
