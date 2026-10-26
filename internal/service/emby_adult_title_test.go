@@ -31,6 +31,46 @@ func TestEmbyAdultDisplayNameNormalizesAdultCodeTitle(t *testing.T) {
 	}
 }
 
+func TestEmbyAdultDisplayNameUsesMetadataCodeAndIgnoresSiteDomains(t *testing.T) {
+	svc := newTestEmbyService(t)
+	lib := model.Library{Name: "Adult", Path: `/media/adult`, Type: "adult", Enabled: true}
+	if err := svc.repo.Library.Create(t.Context(), &lib); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	cases := []struct {
+		name         string
+		filename     string
+		originalName string
+		want         string
+	}{
+		{name: "matched metadata", filename: "hhd800.com@SONE-996.mp4", originalName: "SONE-996", want: "SONE-996 测试标题"},
+		{name: "metadata takes precedence", filename: "HHD-800 SONE-996.mp4", originalName: "SONE-996", want: "SONE-996 测试标题"},
+		{name: "filename without metadata", filename: "hhd800.com@SONE-996.mp4", want: "SONE-996 测试标题"},
+		{name: "legitimate HHD code", filename: "HHD-800.mp4", want: "HHD-800 测试标题"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			media := model.Media{
+				LibraryID:    lib.ID,
+				Title:        "测试标题",
+				OriginalName: tc.originalName,
+				Path:         "/media/adult/" + tc.name + "/" + tc.filename,
+				ScrapeStatus: "matched",
+			}
+			if err := svc.repo.DB.Create(&media).Error; err != nil {
+				t.Fatalf("create media: %v", err)
+			}
+			item, err := svc.Item(t.Context(), media.ID, "user-1")
+			if err != nil {
+				t.Fatalf("item: %v", err)
+			}
+			if item["Name"] != tc.want {
+				t.Fatalf("Name = %#v, want %q", item["Name"], tc.want)
+			}
+		})
+	}
+}
+
 func TestEmbyAdultDisplayNameStripsCHNoiseSuffix(t *testing.T) {
 	svc := newTestEmbyService(t)
 	lib := model.Library{Name: "Adult", Path: `/media/adult`, Type: "adult", Enabled: true}

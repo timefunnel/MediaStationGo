@@ -24,9 +24,10 @@ func adultDisplayNameForMedia(m *model.Media, currentName string, adult bool) st
 	if m == nil || name == "" || !adult {
 		return name
 	}
+	// Metadata owns the work identity; release filenames may contain other codes.
 	code := firstNonEmpty(
-		AdultCodeFromMediaPath(m.Path),
 		normalizeAdultCode(m.OriginalName),
+		AdultCodeFromMediaPath(m.Path),
 		normalizeAdultCode(m.Title),
 	)
 	if code == "" {

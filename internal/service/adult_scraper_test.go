@@ -32,6 +32,33 @@ func TestNormalizeAdultCode(t *testing.T) {
 	}
 }
 
+func TestNormalizeAdultCodeIgnoresSiteDomains(t *testing.T) {
+	cases := map[string]string{
+		"hhd800.com@SONE-996.mp4":         "SONE-996",
+		"[www.hhd800.com]SONE-996.mkv":    "SONE-996",
+		"https://hhd800.com/SONE-996":     "SONE-996",
+		"HHD800.COM@SONE-996":             "SONE-996",
+		"abc123.net@SONE-996.mp4":         "SONE-996",
+		"abc123.org@SONE-996.mp4":         "SONE-996",
+		"abc123.tv@SONE-996.mp4":          "SONE-996",
+		"abc123.cc@SONE-996.mp4":          "SONE-996",
+		"hhd800.com":                      "",
+		"HHD800.mp4":                      "HHD-800",
+		"HHD-800.mkv":                     "HHD-800",
+		"SONE-996.hhd800.com.mp4":         "SONE-996",
+		"hhd800.com@fc2-ppv-1234567.mkv":  "FC2-PPV-1234567",
+		"hhd800.com@heyzo_1234.mp4":       "HEYZO-1234",
+		"hhd800.com@120118_001-carib.mp4": "120118-001",
+	}
+	for input, want := range cases {
+		t.Run(input, func(t *testing.T) {
+			if got := normalizeAdultCode(input); got != want {
+				t.Fatalf("normalizeAdultCode(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}
+
 func TestParseAdultDetailHTML(t *testing.T) {
 	html := `<html>
 <h2 class="title"><strong>SSIS-001 测试标题</strong></h2>
