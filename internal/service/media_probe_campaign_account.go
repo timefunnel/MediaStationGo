@@ -20,7 +20,10 @@ func (s *MediaProbeCampaignService) Account(ctx context.Context) (*ProbeAccountV
 	return &view, nil
 }
 
-func (s *MediaProbeCampaignService) AccountAction(ctx context.Context, action, sessionID string, confirmed bool) (*ProbeAccountView, error) {
+func (s *MediaProbeCampaignService) AccountAction(ctx context.Context, action, sessionID string, confirmed bool, cookie string) (*ProbeAccountView, error) {
+	if action != "import-cookie" && cookie != "" {
+		return nil, errors.New("仅导入已有登录操作可以接收 B Cookie")
+	}
 	if !s.nodeConfigured() {
 		return nil, errors.New("独立补齐节点尚未配置")
 	}
@@ -34,7 +37,7 @@ func (s *MediaProbeCampaignService) AccountAction(ctx context.Context, action, s
 	s.mu.Unlock()
 	payload := map[string]any{}
 	switch action {
-	case "start":
+	case "start", "import-cookie":
 		if !confirmed {
 			return nil, errors.New("请确认 B 授权的调用范围")
 		}
@@ -43,6 +46,12 @@ func (s *MediaProbeCampaignService) AccountAction(ctx context.Context, action, s
 			return nil, err
 		}
 		payload["a_account_id"], payload["confirmed"] = aID, true
+		if action == "import-cookie" {
+			if err := validateProbeAccountCookie(cookie, aID); err != nil {
+				return nil, err
+			}
+			payload["cookie"] = cookie
+		}
 	case "poll", "cancel":
 		if !validProbeNodeID(sessionID) {
 			return nil, errors.New("B 授权会话标识无效")

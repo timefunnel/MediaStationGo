@@ -22,11 +22,13 @@ func registerProbeCampaignRoutes(queue *gin.RouterGroup, svc *service.MediaProbe
 		var req struct {
 			SessionID string `json:"session_id"`
 			Confirmed bool   `json:"confirmed"`
+			Cookie    string `json:"cookie"`
 		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 20<<10)
 		if !bindProbeExchange(c, &req) {
 			return
 		}
-		view, err := svc.AccountAction(c.Request.Context(), c.Param("action"), req.SessionID, req.Confirmed)
+		view, err := svc.AccountAction(c.Request.Context(), c.Param("action"), req.SessionID, req.Confirmed, req.Cookie)
 		if err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return

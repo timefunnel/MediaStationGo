@@ -419,12 +419,46 @@ func TestProbeCampaignAccountProxyIsIndependentAndDoesNotUse115ForStatus(t *test
 	if err != nil || !view.Available || view.AccountID != "42" || !view.Configured {
 		t.Fatalf("account status depends on pipeline: %+v %v", view, err)
 	}
-	for _, action := range []string{"start", "logout", "unknown"} {
-		if _, err := f.service.AccountAction(t.Context(), action, "", false); err == nil {
+	for _, action := range []string{"start", "import-cookie", "logout", "unknown"} {
+		if _, err := f.service.AccountAction(t.Context(), action, "", false, ""); err == nil {
 			t.Fatalf("unconfirmed action accepted: %s", action)
 		}
 	}
 	if f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
 		t.Fatal("status or rejected actions contacted 115")
+	}
+}
+
+func TestProbeCampaignCookieImportForwardsOnlyBToPrivateNode(t *testing.T) {
+	f := newCampaignFixture(t, 1)
+	calls := 0
+	cookie := "UID=42_session; CID=import-cid; SEID=import-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/account/import-cookie" || r.Header.Get("Authorization") != "Bearer "+f.service.nodeToken || r.Header.Get("Cookie") != "" {
+			t.Error("wrong private credential boundary")
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload["cookie"] != cookie || payload["a_account_id"] != "7" || payload["confirmed"] != true || len(payload) != 3 {
+			t.Error("wrong import payload")
+		}
+		io.WriteString(w, `{"phase":"open_prepare","configured":false,"request_limit":6,"requests":1}`)
+	}))
+	defer server.Close()
+	f.service.nodeURL = server.URL
+	for _, value := range []string{"UID=7_session; CID=cid; SEID=seid", strings.Repeat("x", 16385)} {
+		if _, err := f.service.AccountAction(t.Context(), "import-cookie", "", true, value); err == nil {
+			t.Fatal("unsafe import accepted")
+		}
+	}
+	if calls != 0 {
+		t.Fatal("unsafe import reached node")
+	}
+	view, err := f.service.AccountAction(t.Context(), "import-cookie", "", true, cookie)
+	if err != nil || !view.Available || view.RequestLimit != 6 || calls != 1 || f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
+		t.Fatalf("invalid proxy: %+v %v", view, err)
 	}
 }

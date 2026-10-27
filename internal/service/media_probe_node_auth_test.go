@@ -29,6 +29,7 @@ type accountFixture struct {
 	challenge                       string
 	clock                           time.Time
 	waits                           []time.Duration
+	statusDelay                     time.Duration
 }
 
 func newAccountFixture(t *testing.T) *accountFixture {
@@ -70,6 +71,7 @@ func newAccountFixture(t *testing.T) *accountFixture {
 			}
 			w.Write(picture.Bytes())
 		case "/get/status/":
+			time.Sleep(f.statusDelay)
 			if r.URL.Query().Get("sign") == "" || r.URL.Query().Get("time") != "123" {
 				t.Error("missing QR signature")
 			}
@@ -120,6 +122,7 @@ func newAccountFixture(t *testing.T) *accountFixture {
 	}
 	f.node = node
 	node.client = server.Client()
+	node.login.statusClient = server.Client()
 	node.base = server.URL
 	node.login.qrBase, node.login.passportBase, node.login.webBase = server.URL, server.URL, server.URL
 	node.login.now = func() time.Time { return f.clock }

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 const probeAccountMaxRequests = 29 // One QR + image, 20 status checks, 7 grant/identity requests.
 const probeAccountMaxPolls = 20
+const probeAccountCookieRequests = 6
 
 type ProbeAccountView struct {
 	Available        bool      `json:"available"`
@@ -36,6 +38,7 @@ type ProbeAccountView struct {
 	Image            string    `json:"image,omitempty"`
 	ExpiresAt        time.Time `json:"expires_at,omitempty"`
 	Requests         int       `json:"requests"`
+	RequestLimit     int       `json:"request_limit"`
 	Error            string    `json:"error,omitempty"`
 }
 
@@ -60,10 +63,14 @@ type probeAccountLogin struct {
 	qrBase, passportBase, webBase string
 	appID                         string
 	now                           func() time.Time
+	statusClient                  *http.Client
 }
 
 func newProbeAccountLogin() *probeAccountLogin {
-	return &probeAccountLogin{qrBase: "https://qrcodeapi.115.com", passportBase: "https://passportapi.115.com", webBase: "https://webapi.115.com", appID: "100197303", now: time.Now}
+	client := newProbeWorkerHTTPClient()
+	client.Timeout = 65 * time.Second
+	client.Transport.(*http.Transport).ResponseHeaderTimeout = 60 * time.Second
+	return &probeAccountLogin{qrBase: "https://qrcodeapi.115.com", passportBase: "https://passportapi.115.com", webBase: "https://webapi.115.com", appID: "100197303", now: time.Now, statusClient: client}
 }
 
 func probeAccountPending(phase string) bool {
@@ -134,7 +141,7 @@ func (n *ProbeNode) accountTake(ctx context.Context, poll bool) error {
 	if s == nil || !n.login.now().Before(s.view.ExpiresAt) {
 		return errors.New("B 授权会话已过期")
 	}
-	if s.view.Requests >= probeAccountMaxRequests || poll && s.polls >= probeAccountMaxPolls {
+	if s.view.Requests >= s.view.RequestLimit || poll && s.polls >= probeAccountMaxPolls {
 		return errors.New("已达到本次 B 授权的请求或状态查询上限")
 	}
 	wait := n.wait
@@ -184,12 +191,23 @@ func (n *ProbeNode) accountRequest(ctx context.Context, endpoint string, form ur
 	if err := n.accountTake(ctx, poll); err != nil {
 		return nil, err
 	}
-	resp, err := n.client.Do(req)
+	client := n.client
+	if poll {
+		client = n.login.statusClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, errors.New("B 授权连接失败，已停止且不重试")
+		var timeout net.Error
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			if poll {
+				return nil, errors.New("B 扫码状态查询超时，已停止且不重试；这不表示二维码已过期")
+			}
+			return nil, errors.New("B 授权接口连接或响应超时，已停止且不重试")
+		}
+		return nil, errors.New("B 授权连接失败，已停止且不重试；这不表示二维码已过期")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -281,18 +299,18 @@ func (n *ProbeNode) accountQR(ctx context.Context) error {
 	return nil
 }
 
-func (n *ProbeNode) startAccount(ctx context.Context, aID string) (*ProbeAccountView, error) {
+func (n *ProbeNode) beginAccount(aID string, limit int) error {
 	if !probeDecimalID(aID) || aID == "0" {
-		return nil, errors.New("无法确认现有 A 账号身份")
+		return errors.New("无法确认现有 A 账号身份")
 	}
 	if n.accountActive() {
-		return nil, errors.New("已有 B 授权会话，请完成或取消后再开始")
+		return errors.New("已有 B 授权会话，请完成或取消后再开始")
 	}
 	previous, err := n.accountView()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	n.login.session = &probeAccountSession{aID: aID, view: ProbeAccountView{SessionID: uuid.NewString(), Phase: "cookie_wait", ExpiresAt: n.login.now().Add(5 * time.Minute)}}
+	n.login.session = &probeAccountSession{aID: aID, view: ProbeAccountView{SessionID: uuid.NewString(), Phase: "cookie_wait", ExpiresAt: n.login.now().Add(5 * time.Minute), RequestLimit: limit}}
 	session := n.login.session
 	session.view.Configured, session.view.AccountID = previous.Configured, previous.AccountID
 	session.timer = time.AfterFunc(5*time.Minute, func() {
@@ -302,9 +320,34 @@ func (n *ProbeNode) startAccount(ctx context.Context, aID string) (*ProbeAccount
 			n.accountActive()
 		}
 	})
+	return nil
+}
+
+func (n *ProbeNode) startAccount(ctx context.Context, aID string) (*ProbeAccountView, error) {
+	if err := n.beginAccount(aID, probeAccountMaxRequests); err != nil {
+		return nil, err
+	}
 	work, cancel := context.WithDeadline(ctx, n.login.session.view.ExpiresAt)
 	defer cancel()
 	if err := n.accountQR(work); err != nil {
+		n.failAccount(err)
+		return nil, err
+	}
+	view := n.login.session.view
+	return &view, nil
+}
+
+func (n *ProbeNode) importAccountCookie(ctx context.Context, aID, cookie string) (*ProbeAccountView, error) {
+	cookie = strings.TrimSpace(cookie)
+	if err := validateProbeAccountCookie(cookie, aID); err != nil {
+		return nil, err
+	}
+	if err := n.beginAccount(aID, probeAccountCookieRequests); err != nil {
+		return nil, err
+	}
+	work, cancel := context.WithDeadline(ctx, n.login.session.view.ExpiresAt)
+	defer cancel()
+	if err := n.acceptAccountCookie(work, cookie); err != nil {
 		n.failAccount(err)
 		return nil, err
 	}
@@ -403,16 +446,29 @@ func (n *ProbeNode) finishAccountCookie(ctx context.Context) error {
 		parts = append(parts, key+"="+result.Cookie[key])
 	}
 	cookie := strings.Join(parts, "; ")
+	return n.acceptAccountCookie(ctx, cookie)
+}
+
+func validateProbeAccountCookie(cookie, aID string) error {
+	if len(cookie) > 16384 || strings.ContainsAny(cookie, "\r\n\x00") {
+		return errors.New("B 登录凭据格式无效或超过大小限制")
+	}
 	id := probeCookieAccount(cookie)
-	if !probeDecimalID(id) || id == "0" || id == s.aID {
-		return errors.New("扫码账号是 A 或身份无效，请改用独立 B 账号")
+	if !probeDecimalID(id) || id == "0" || id == aID {
+		return errors.New("登录账号是 A 或身份无效，请改用独立 B 账号")
 	}
 	if err := validateProbeWorkerCookie(cookie, id); err != nil {
 		return err
 	}
-	if len(cookie) > 16384 {
-		return errors.New("B 登录凭据超过大小限制")
+	return nil
+}
+
+func (n *ProbeNode) acceptAccountCookie(ctx context.Context, cookie string) error {
+	s := n.login.session
+	if err := validateProbeAccountCookie(cookie, s.aID); err != nil {
+		return err
 	}
+	id := probeCookieAccount(cookie)
 	// uploadinfo has a top-level user_id (unlike OpenAPI's data.user_id).
 	body, err := n.accountRequest(ctx, n.login.webBase+"/files/uploadinfo", nil, cookie, "", false, false)
 	if err != nil {
@@ -516,8 +572,9 @@ func (n *ProbeNode) serveAccount(w http.ResponseWriter, r *http.Request, respond
 		AAccountID string `json:"a_account_id"`
 		SessionID  string `json:"session_id"`
 		Confirmed  bool   `json:"confirmed"`
+		Cookie     string `json:"cookie"`
 	}
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20<<10))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&req); err != nil {
 		respond(nil, errors.New("B 授权请求结构无效"))
@@ -528,7 +585,18 @@ func (n *ProbeNode) serveAccount(w http.ResponseWriter, r *http.Request, respond
 		respond(nil, errors.New("B 授权请求包含额外内容"))
 		return
 	}
+	if r.URL.Path != "/v1/account/import-cookie" && req.Cookie != "" {
+		respond(nil, errors.New("仅导入已有登录操作可以接收 B Cookie"))
+		return
+	}
 	switch r.URL.Path {
+	case "/v1/account/import-cookie":
+		if !req.Confirmed {
+			respond(nil, errors.New("请先确认导入已有 B 登录及最多 6 次自动授权请求"))
+			return
+		}
+		view, err := n.importAccountCookie(r.Context(), req.AAccountID, req.Cookie)
+		respond(view, err)
 	case "/v1/account/start":
 		if !req.Confirmed {
 			respond(nil, errors.New("请先确认本次有限 B 授权范围"))
