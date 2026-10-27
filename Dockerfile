@@ -45,8 +45,6 @@ COPY . .
 COPY --from=frontend /app/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o mediastation-go ./cmd/server
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o media-probe-worker ./cmd/media-probe-worker
 
 # ---- Stage 4: runtime ------------------------------------------------------
 FROM alpine:3.23
@@ -85,7 +83,6 @@ RUN mkdir -p /data /cache /media \
     && chown -R mediastation:mediastation /data /cache /media
 
 COPY --from=backend /app/mediastation-go /usr/local/bin/mediastation-go
-COPY --from=backend /app/media-probe-worker /usr/local/bin/media-probe-worker
 COPY --from=frontend /app/web/dist /app/web/dist
 COPY internal/handler/assets/fonts/OFL.txt internal/handler/assets/fonts/README.md /app/licenses/noto-sans-cjk/
 

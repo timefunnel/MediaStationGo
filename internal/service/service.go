@@ -28,7 +28,6 @@ type Container struct {
 	Transcoder          *TranscoderService
 	FFprobe             *FFprobeService
 	MediaProbeQueue     *MediaProbeQueueService
-	MediaProbeCampaign  *MediaProbeCampaignService
 	TMDb                *TMDbProvider
 	Adult               *AdultProvider
 	Bangumi             *BangumiProvider
@@ -102,11 +101,6 @@ func NewWithVersion(cfg *config.Config, log *zap.Logger, repos *repository.Conta
 // Boot 启动后台工作进程（watcher, downloads poller, subscription scheduler）。
 // 在 AutoMigrate 后调用一次。
 func (c *Container) Boot() {
-	if c.MediaProbeCampaign != nil {
-		if err := c.MediaProbeCampaign.Boot(c.stopCtx); err != nil {
-			c.Log.Error("recover media probe campaign failed", zap.Error(err))
-		}
-	}
 	if c.MediaProbeQueue != nil {
 		c.MediaProbeQueue.Boot(c.stopCtx)
 	}

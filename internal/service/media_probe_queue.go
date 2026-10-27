@@ -74,16 +74,15 @@ type MediaProbeQueueService struct {
 	probe  mediaTrackProber
 	log    *zap.Logger
 
-	mu              sync.Mutex
-	collectMu       sync.Mutex
-	startOnce       sync.Once
-	running         bool
-	secondaryActive bool
-	cancel          context.CancelFunc
-	plan            *MediaProbeQueuePlan
-	message         string
-	collectError    string
-	lifetime        context.Context
+	mu           sync.Mutex
+	collectMu    sync.Mutex
+	startOnce    sync.Once
+	running      bool
+	cancel       context.CancelFunc
+	plan         *MediaProbeQueuePlan
+	message      string
+	collectError string
+	lifetime     context.Context
 }
 
 func NewMediaProbeQueueService(repo *repository.Container, stream *StreamService, probe mediaTrackProber, log *zap.Logger) *MediaProbeQueueService {

@@ -76,7 +76,7 @@ func (s *MediaProbeQueueService) Start(ctx context.Context, planID string, confi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running || s.secondaryActive {
+	if s.running {
 		return errors.New("已有一轮正在运行")
 	}
 	if s.plan == nil || s.plan.ID != planID || time.Now().After(s.plan.ExpiresAt) {

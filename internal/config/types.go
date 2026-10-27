@@ -2,28 +2,21 @@ package config
 
 // Config 是根配置聚合。
 type Config struct {
-	App              AppConfig              `mapstructure:"app"`
-	Database         DatabaseConfig         `mapstructure:"database"`
-	Secrets          SecretsConfig          `mapstructure:"secrets"`
-	Logging          LoggingConfig          `mapstructure:"logging"`
-	Cache            CacheConfig            `mapstructure:"cache"`
-	Search           SearchConfig           `mapstructure:"search"`
-	Media            MediaConfig            `mapstructure:"media"`
-	Transcoder       TranscoderConfig       `mapstructure:"transcoder"`
-	AI               AIConfig               `mapstructure:"ai"`
-	FlareSolverr     FlareSolverrConfig     `mapstructure:"flaresolverr"`
-	ApiConfig        ApiConfigConfig        `mapstructure:"api_config"`
-	Organizer        OrganizerConfig        `mapstructure:"organizer"`
-	License          LicenseConfig          `mapstructure:"license"`
-	ResourceImport   ResourceImportConfig   `mapstructure:"resource_import"`
-	Danmaku          DanmakuConfig          `mapstructure:"danmaku"`
-	MediaProbeWorker MediaProbeWorkerConfig `mapstructure:"media_probe_worker"`
-}
-
-// The independent node owns B credentials; MSG only holds its service token.
-type MediaProbeWorkerConfig struct {
-	URL   string `mapstructure:"url"`
-	Token string `mapstructure:"token"`
+	App            AppConfig            `mapstructure:"app"`
+	Database       DatabaseConfig       `mapstructure:"database"`
+	Secrets        SecretsConfig        `mapstructure:"secrets"`
+	Logging        LoggingConfig        `mapstructure:"logging"`
+	Cache          CacheConfig          `mapstructure:"cache"`
+	Search         SearchConfig         `mapstructure:"search"`
+	Media          MediaConfig          `mapstructure:"media"`
+	Transcoder     TranscoderConfig     `mapstructure:"transcoder"`
+	AI             AIConfig             `mapstructure:"ai"`
+	FlareSolverr   FlareSolverrConfig   `mapstructure:"flaresolverr"`
+	ApiConfig      ApiConfigConfig      `mapstructure:"api_config"`
+	Organizer      OrganizerConfig      `mapstructure:"organizer"`
+	License        LicenseConfig        `mapstructure:"license"`
+	ResourceImport ResourceImportConfig `mapstructure:"resource_import"`
+	Danmaku        DanmakuConfig        `mapstructure:"danmaku"`
 }
 
 // DanmakuConfig configures the independent danmaku server, not media-pipeline.

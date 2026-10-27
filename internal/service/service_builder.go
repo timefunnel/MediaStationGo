@@ -40,7 +40,6 @@ func newServiceContainer(cfg *config.Config, log *zap.Logger, repos *repository.
 	builder.initSiteDownloadServices()
 	builder.initImageProxy()
 	builder.attachRuntimeContext()
-	builder.c.MediaProbeCampaign = NewMediaProbeCampaignService(builder.c.MediaProbeQueue, builder.c.StorageCfg, builder.c.Crypto, cfg, builder.c.stopCtx)
 	if cfg.Danmaku.Enabled && log != nil {
 		log.Warn("central danmaku fetching is retired; players fetch sources locally and only account references are stored")
 	}
