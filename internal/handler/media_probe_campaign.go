@@ -46,11 +46,12 @@ func registerProbeCampaignRoutes(queue *gin.RouterGroup, svc *service.MediaProbe
 	group.POST("/plan", func(c *gin.Context) {
 		var req struct {
 			LibraryIDs []string `json:"library_ids"`
+			MaxFiles   int      `json:"max_files"`
 		}
 		if !bindProbeExchange(c, &req) {
 			return
 		}
-		plan, err := svc.Plan(c.Request.Context(), req.LibraryIDs)
+		plan, err := svc.Plan(c.Request.Context(), req.LibraryIDs, req.MaxFiles)
 		if err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return

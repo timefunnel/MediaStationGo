@@ -3,7 +3,7 @@ import { api, LONG_REQUEST_TIMEOUT } from '../api/client'
 import { ProbeAccountSection } from './ProbeAccountSection'
 
 interface CampaignPlan {
-  id: string; digest: string; files: number; batches: number; b_account_id: string
+  id: string; digest: string; files: number; max_files?: number; batches: number; b_account_id: string
   a_requests_max: number; control_requests_max: number; media_requests_max: number
   media_bytes_max: number; run_seconds_max: number; notice: string; targets: string[]
 }
@@ -43,6 +43,11 @@ export function MediaProbeCampaignSection({ disabled, libraryIDs, onImported }: 
     try { await action() } catch (cause) { report(cause) } finally { setBusy(false) }
   }
   const running = view?.status === 'running'
+  const preview = (maxFiles: number) => perform(async () => {
+    setPlan(null); setConfirmed(false)
+    const { data } = await api.post<CampaignPlan>(`${base}/plan`, { library_ids: libraryIDs, max_files: maxFiles }, { timeout: LONG_REQUEST_TIMEOUT })
+    setPlan(data); await refresh()
+  })
   return <section className="space-y-3 rounded-xl border border-gray-200 p-4" aria-label="第二账号自动补齐">
     <h4 className="text-sm font-semibold text-ink-600">第二账号自动补齐</h4>
     <p className="text-xs leading-6 text-sand-600">维护好 B 账号后，沿用上方已保存的媒体库选择；未选择时覆盖全部云端库。系统自动准备来源分享与暂存目录，分批转存、补齐并回填。A 账号沿用已有登录，B 账号与探测负载由独立节点管理。</p>
@@ -52,16 +57,14 @@ export function MediaProbeCampaignSection({ disabled, libraryIDs, onImported }: 
     {view?.error && <p role="alert" className="text-xs text-red-500">{view.error}</p>}
     {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
     <div className="flex flex-wrap gap-2">
-      <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || running || !view?.configured || !accountReady} onClick={() => void perform(async () => {
-        setPlan(null); setConfirmed(false)
-        const { data } = await api.post<CampaignPlan>(`${base}/plan`, { library_ids: libraryIDs }, { timeout: LONG_REQUEST_TIMEOUT })
-        setPlan(data); await refresh()
-      })}>预览所选范围</button>
+      <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || running || !view?.configured || !accountReady} onClick={() => void preview(0)}>预览所选范围</button>
+      <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || running || !view?.configured || !accountReady} onClick={() => void preview(5)}>预览小范围测试（最多 5 条）</button>
       {running && <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={busy} onClick={() => void perform(async () => { await api.post(`${base}/pause`); await refresh() })}>停止任务</button>}
       <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={busy} onClick={() => void perform(async () => { await refresh() })}>刷新状态</button>
     </div>
     {plan && !running && <div className="space-y-2 rounded-lg border border-primary-400/40 p-3 text-xs leading-6 text-sand-600">
       <p>账号 B：{plan.b_account_id} · 待补齐 {plan.files} 个文件 · {plan.batches} 批，每批最多 10 个</p>
+      {Boolean(plan.max_files) && <p>小范围测试：固定所选范围内前 {plan.max_files} 条缺失记录，最多 1 批；完成后停止。</p>}
       <p>总上限：A 请求 {plan.a_requests_max} 次；控制请求 {plan.control_requests_max} 次（含 A）；媒体读取 {plan.media_requests_max} 次、响应体 {(plan.media_bytes_max / 1024 ** 3).toFixed(2)} GiB；最长 {(plan.run_seconds_max / 3600).toFixed(1)} 小时。实际用量通常低于上限。</p>
       <p>{plan.notice}</p>
       <details><summary className="cursor-pointer">请求目标</summary>{plan.targets.map(target => <p key={target} className="break-words">{target}</p>)}</details>

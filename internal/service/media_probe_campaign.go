@@ -35,6 +35,7 @@ type ProbeCampaignPlan struct {
 	LibraryIDs      []string  `json:"library_ids"`
 	AccountID       string    `json:"b_account_id"`
 	Files           int       `json:"files"`
+	MaxFiles        int       `json:"max_files,omitempty"`
 	Batches         int       `json:"batches"`
 	SourceRequests  int       `json:"a_requests_max"`
 	ControlRequests int       `json:"control_requests_max"`
@@ -281,7 +282,10 @@ func (s *MediaProbeCampaignService) sourceAccount(ctx context.Context) (string, 
 
 // Planning reads the MSG database and trusted service configuration only.
 // Node /status reads its credential file; pipeline /roots reads its config.
-func (s *MediaProbeCampaignService) Plan(ctx context.Context, libraryIDs []string) (*ProbeCampaignPlan, error) {
+func (s *MediaProbeCampaignService) Plan(ctx context.Context, libraryIDs []string, maxFiles int) (*ProbeCampaignPlan, error) {
+	if maxFiles < 0 || maxFiles > 10 {
+		return nil, errors.New("小范围测试上限必须为 1 到 10；0 表示完整所选范围")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	s.mu.Lock()
@@ -312,7 +316,7 @@ func (s *MediaProbeCampaignService) Plan(ctx context.Context, libraryIDs []strin
 	if !status.Configured || !probeDecimalID(status.AccountID) || status.AccountID == "0" || status.AccountID == aID {
 		return nil, errors.New("B 账号未登录或与 A 是同一账号")
 	}
-	manifest, err := s.queue.ExportExchangeManifest(ctx, libraryIDs)
+	manifest, err := s.queue.exportExchangeManifest(ctx, libraryIDs, maxFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +363,7 @@ func (s *MediaProbeCampaignService) Plan(ctx context.Context, libraryIDs []strin
 	sort.Slice(roots, func(i, j int) bool { return roots[i].RootID < roots[j].RootID })
 	batches := (files + 9) / 10
 	plan := &ProbeCampaignPlan{ID: manifest.ID, ExpiresAt: time.Now().UTC().Add(30 * time.Minute), LibraryIDs: append([]string{}, libraryIDs...), AccountID: status.AccountID,
-		Files: files, Batches: batches, SourceRequests: len(roots) + 1, ControlRequests: len(roots) + 4 + 80*batches,
+		Files: files, MaxFiles: maxFiles, Batches: batches, SourceRequests: len(roots) + 1, ControlRequests: len(roots) + 4 + 80*batches,
 		MediaRequests: 60 * batches, MediaBytes: int64(batches) * (320 << 20), RunSeconds: 180 + 910*batches,
 		Targets: []string{"A：webapi.115.com/files/uploadinfo、/share/send", "B：proapi.115.com/open/user/info、/open/folder/add、/open/ufile/files、/open/ufile/downurl", "B：webapi.115.com/files/uploadinfo、115cdn.com/webapi/share/snap、/share/receive", "B Token 刷新：passportapi.115.com/open/refreshToken（每批最多一次）", "共享信息：115server.ddsrem.com；媒体读取：B 直链指定的 115 CDN"},
 		Notice:  "A 仅核验身份并为所选库根创建来源分享；B 自动建目录、按缺口转存、查询共享信息、限量探测并逐批回填。并发 1；控制请求间隔至少 5 秒，文件间隔 10 秒，媒体请求间隔至少 1 秒；每批最多 15 分钟、共享查询 1 次。不刷新 OpenList、不自动重试或删除副本。会真实访问 115/CDN，存在限流、封禁、账号关联和链路失败风险。执行期间请保持来源文件不替换、不改名；异常立即停止。"}

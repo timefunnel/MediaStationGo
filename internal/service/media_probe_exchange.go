@@ -22,6 +22,13 @@ import (
 
 // ExportExchangeManifest reads MSG's database only. No cloud resolver is used.
 func (s *MediaProbeQueueService) ExportExchangeManifest(ctx context.Context, libraryIDs []string) (*ProbeExchangeManifest, error) {
+	return s.exportExchangeManifest(ctx, libraryIDs, 0)
+}
+
+func (s *MediaProbeQueueService) exportExchangeManifest(ctx context.Context, libraryIDs []string, maxFiles int) (*ProbeExchangeManifest, error) {
+	if maxFiles < 0 || maxFiles > 10 {
+		return nil, errors.New("小范围测试上限必须为 1 到 10；0 表示完整所选范围")
+	}
 	var media []model.Media
 	var roots []model.LibraryRoot
 	var libraries []model.Library
@@ -52,12 +59,19 @@ func (s *MediaProbeQueueService) ExportExchangeManifest(ctx context.Context, lib
 	}
 	m := &ProbeExchangeManifest{Version: ProbeExchangeVersion, ID: uuid.NewString(), CreatedAt: time.Now().UTC(), Items: []ProbeExchangeItem{}}
 	for _, row := range media {
+		metadata := probeMetadataFromMedia(&row)
+		if maxFiles > 0 && !probeWorkerNeedsProbe(metadata) {
+			continue
+		}
 		rootID, relative, err := exchangeRelativeSource(&row, libraries, roots)
 		if err != nil {
 			return nil, fmt.Errorf("媒体 %s 无法导出: %w", row.ID, err)
 		}
 		m.Items = append(m.Items, ProbeExchangeItem{MediaID: row.ID, LibraryID: row.LibraryID, RootID: rootID,
-			RelativePath: relative, SizeBytes: row.SizeBytes, Fingerprint: mediaProbeFingerprint(&row), Metadata: probeMetadataFromMedia(&row)})
+			RelativePath: relative, SizeBytes: row.SizeBytes, Fingerprint: mediaProbeFingerprint(&row), Metadata: metadata})
+		if maxFiles > 0 && len(m.Items) == maxFiles {
+			break
+		}
 	}
 	m.Digest, err = probeExchangeDigest(m)
 	if err != nil {

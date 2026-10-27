@@ -160,7 +160,7 @@ func waitCampaign(t *testing.T, f *campaignFixture) *ProbeCampaignView {
 
 func TestProbeCampaignSelectLibraryInitializesTransfersAndImports(t *testing.T) {
 	f := newCampaignFixture(t, 11)
-	plan, err := f.service.Plan(t.Context(), []string{"library-a"})
+	plan, err := f.service.Plan(t.Context(), []string{"library-a"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,11 +217,72 @@ func TestProbeCampaignSelectLibraryInitializesTransfersAndImports(t *testing.T) 
 	}
 }
 
+func TestProbeCampaignSmallSampleIsFixedAndRunsOnlyOneBatch(t *testing.T) {
+	f := newCampaignFixture(t, 13)
+	if err := f.service.queue.repo.DB.Model(&model.Media{}).Where("id = ?", "m00").Updates(map[string]any{
+		"duration_sec": 120, "width": 1920, "height": 1080, "video_codec": "hevc", "audio_codec": "aac", "bit_rate": 800000,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	plan, err := f.service.Plan(t.Context(), []string{"library-a"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.MaxFiles != 5 || plan.Files != 5 || plan.Batches != 1 || plan.ControlRequests != 85 || f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
+		t.Fatalf("sample plan expanded or contacted 115: %+v", plan)
+	}
+	state, err := f.service.load(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Manifest.Items) != 5 {
+		t.Fatalf("manifest contains more than the approved sample: %d", len(state.Manifest.Items))
+	}
+	for index, item := range state.Manifest.Items {
+		if item.MediaID != fmt.Sprintf("m%02d", index+1) {
+			t.Fatalf("sample included a complete or out-of-order file: %s", item.MediaID)
+		}
+	}
+	if err := f.service.queue.repo.DB.Create(&model.Media{Base: model.Base{ID: "new-before-start"}, LibraryID: "library-a", Title: "Synthetic", Path: "cloud://openlist/Synthetic/!new.mkv", SizeBytes: 12000000}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.Start(t.Context(), plan.ID, plan.Digest, true); err != nil {
+		t.Fatal(err)
+	}
+	view := waitCampaign(t, f)
+	if view.Status != "completed" || view.FinishedBatches != 1 || view.Counts["completed"] != 5 || f.runs.Load() != 1 {
+		t.Fatalf("sample did not stop after one batch: %+v runs=%d", view, f.runs.Load())
+	}
+	var unchanged int64
+	if err := f.service.queue.repo.DB.Model(&model.Media{}).Where("duration_sec = 0").Count(&unchanged).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged != 8 {
+		t.Fatalf("records outside the fixed sample were changed: %d remain unchanged", unchanged)
+	}
+}
+
+func TestProbeCampaignRejectsInvalidSampleSizeBeforePlanning(t *testing.T) {
+	f := newCampaignFixture(t, 2)
+	for _, limit := range []int{-1, 11} {
+		if _, err := f.service.Plan(t.Context(), nil, limit); err == nil {
+			t.Fatalf("invalid sample size accepted: %d", limit)
+		}
+	}
+	var plans int64
+	if err := f.service.queue.repo.DB.Model(&model.MediaProbeCampaign{}).Count(&plans).Error; err != nil {
+		t.Fatal(err)
+	}
+	if plans != 0 || f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
+		t.Fatal("invalid sample created a plan or contacted 115")
+	}
+}
+
 func TestProbeCampaignStopsOnShareOrIdentityFailureWithoutBWork(t *testing.T) {
 	for _, kind := range []string{"share", "identity", "root_changed"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newCampaignFixture(t, 1)
-			plan, err := f.service.Plan(t.Context(), nil)
+			plan, err := f.service.Plan(t.Context(), nil, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,7 +308,7 @@ func TestProbeCampaignStopsOnShareOrIdentityFailureWithoutBWork(t *testing.T) {
 
 func TestProbeCampaignRejectsSameAccountAndWrongApprovalWithout115(t *testing.T) {
 	f := newCampaignFixture(t, 1)
-	plan, err := f.service.Plan(t.Context(), nil)
+	plan, err := f.service.Plan(t.Context(), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +321,7 @@ func TestProbeCampaignRejectsSameAccountAndWrongApprovalWithout115(t *testing.T)
 	if _, err := f.service.storage.Save(t.Context(), StorageInput{Type: "cloud115", Config: map[string]any{"cookie": syntheticProbeCookie}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.Plan(t.Context(), nil); err == nil {
+	if _, err := f.service.Plan(t.Context(), nil, 0); err == nil {
 		t.Fatal("same A and B accepted")
 	}
 	if f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
@@ -277,7 +338,7 @@ func TestProbeCampaignFailureRetainsAppliedBatchAndNextPlanSkipsIt(t *testing.T)
 		}
 		return previous(ctx, m, p, o)
 	}
-	plan, err := f.service.Plan(t.Context(), nil)
+	plan, err := f.service.Plan(t.Context(), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +349,7 @@ func TestProbeCampaignFailureRetainsAppliedBatchAndNextPlanSkipsIt(t *testing.T)
 	if view.Status != "stopped" || view.FinishedBatches != 1 || view.Counts["completed"] != 10 {
 		t.Fatalf("lost completed batch or ignored failure: %+v", view)
 	}
-	next, err := f.service.Plan(t.Context(), nil)
+	next, err := f.service.Plan(t.Context(), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +360,7 @@ func TestProbeCampaignFailureRetainsAppliedBatchAndNextPlanSkipsIt(t *testing.T)
 
 func TestProbeCampaignRestartDoesNotResumeCloudOperations(t *testing.T) {
 	f := newCampaignFixture(t, 1)
-	plan, err := f.service.Plan(t.Context(), nil)
+	plan, err := f.service.Plan(t.Context(), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +434,7 @@ func TestProbeCampaignMatchesDecodedLibraryRoot(t *testing.T) {
 	if err := f.service.queue.repo.DB.Model(&model.LibraryRoot{}).Where("id = ?", "root-a").Update("path", "cloud://openlist/%53ynthetic").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.Plan(t.Context(), nil); err != nil {
+	if _, err := f.service.Plan(t.Context(), nil, 0); err != nil {
 		t.Fatalf("same encoded root rejected: %v", err)
 	}
 	for _, pair := range [][2]string{
@@ -396,7 +457,7 @@ func TestProbeCampaignMatchesDecodedLibraryRoot(t *testing.T) {
 
 func TestProbeCampaignAccountChangeStopsBeforeAShare(t *testing.T) {
 	f := newCampaignFixture(t, 1)
-	plan, err := f.service.Plan(t.Context(), nil)
+	plan, err := f.service.Plan(t.Context(), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
