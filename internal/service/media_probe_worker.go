@@ -19,6 +19,7 @@ type ProbeWorkerRunOptions struct {
 	ApprovedDigest  string
 	FFprobe         string
 	ToolVersion     string
+	SourcesFile     string
 }
 
 type probeWorkerCache struct {
@@ -36,20 +37,23 @@ type probeWorkerPage struct {
 }
 
 type probeWorkerState struct {
-	Version        int                         `json:"version"`
-	ManifestDigest string                      `json:"manifest_digest"`
-	AccountID      string                      `json:"b_account_id"`
-	BindingDigest  string                      `json:"binding_digest"`
-	BatchID        string                      `json:"batch_id"`
-	Pages          map[string]*probeWorkerPage `json:"pages"`
-	Files          map[string]probeWorkerFile  `json:"files"`
-	Cache          map[string]probeWorkerCache `json:"cache"`
-	Bundle         ProbeExchangeBundle         `json:"bundle"`
+	Version        int                             `json:"version"`
+	ManifestDigest string                          `json:"manifest_digest"`
+	AccountID      string                          `json:"b_account_id"`
+	BindingDigest  string                          `json:"binding_digest"`
+	BatchID        string                          `json:"batch_id"`
+	Pages          map[string]*probeWorkerPage     `json:"pages"`
+	Files          map[string]probeWorkerFile      `json:"files"`
+	Cache          map[string]probeWorkerCache     `json:"cache"`
+	Bundle         ProbeExchangeBundle             `json:"bundle"`
+	SourcesDigest  string                          `json:"sources_digest,omitempty"`
+	Transfers      map[string]*probeWorkerTransfer `json:"transfers,omitempty"`
 }
 
 type probeWorkerDependencies struct {
 	control, media, shared    *http.Client
 	base, authBase, sharedURL string
+	shareBase, cookieBase     string
 	validateURL               func(string) error
 	probe                     probeWorkerProber
 	wait                      func(context.Context, time.Duration) error
@@ -63,6 +67,7 @@ func RunProbeWorker(ctx context.Context, manifest *ProbeExchangeManifest, plan *
 	return runProbeWorker(ctx, manifest, plan, options, probeWorkerDependencies{
 		control: newProbeWorkerHTTPClient(), media: newProbeWorkerHTTPClient(), shared: newProbeWorkerHTTPClient(),
 		base: "https://proapi.115.com", authBase: "https://passportapi.115.com", sharedURL: "https://115server.ddsrem.com/emby_mediainfo_data/get",
+		shareBase: "https://115cdn.com/webapi", cookieBase: "https://webapi.115.com",
 		validateURL: validateProbeMediaURL, probe: probe})
 }
 
@@ -86,20 +91,44 @@ func runProbeWorker(ctx context.Context, manifest *ProbeExchangeManifest, plan *
 	if credentials.UserID != plan.Batch.AccountID {
 		return nil, errors.New("凭据文件不是计划中的 B 账号")
 	}
+	var sources *ProbeWorkerSources
+	if probeWorkerHasTransfers(plan.Batch) {
+		if err := validateProbeWorkerCookie(credentials.Cookie, plan.Batch.AccountID); err != nil {
+			return nil, err
+		}
+		sources, err = readProbeWorkerSources(options.SourcesFile)
+		if err != nil {
+			return nil, err
+		}
+		digest, err := probeWorkerSourcesDigest(plan.Batch, sources)
+		if err != nil {
+			return nil, err
+		}
+		if digest != plan.SourcesDigest {
+			return nil, errors.New("来源配置在计划批准后发生变化，请重新生成计划")
+		}
+	}
 	if !plan.Batch.RefreshBeforeRun && credentials.ExpiresAt > 0 && credentials.ExpiresAt <= time.Now().Unix()+int64(plan.Batch.Limits.RunSeconds) {
 		return nil, errors.New("访问令牌可能在本轮内到期，请单独安排明确的刷新范围")
 	}
 	bindingDigest, err := probeExchangeDigest(plan.Batch.Roots)
+	if plan.SourcesDigest != "" {
+		bindingDigest, err = probeExchangeDigest(struct {
+			Roots    []ProbeWorkerRoot
+			MediaIDs []string
+			Sources  string
+		}{plan.Batch.Roots, plan.Batch.MediaIDs, plan.SourcesDigest})
+	}
 	if err != nil {
 		return nil, err
 	}
 	state := &probeWorkerState{Version: ProbeExchangeVersion, ManifestDigest: manifest.Digest, AccountID: credentials.UserID,
-		BindingDigest: bindingDigest, BatchID: plan.Batch.ID, Pages: map[string]*probeWorkerPage{}, Files: map[string]probeWorkerFile{}, Cache: map[string]probeWorkerCache{}}
+		BindingDigest: bindingDigest, BatchID: plan.Batch.ID, SourcesDigest: plan.SourcesDigest, Pages: map[string]*probeWorkerPage{}, Files: map[string]probeWorkerFile{}, Cache: map[string]probeWorkerCache{}}
 	if _, err := os.Stat(options.StateFile); err == nil {
 		if err := ReadProbeWorkerJSON(options.StateFile, state); err != nil {
 			return nil, err
 		}
-		if state.Version != ProbeExchangeVersion || state.ManifestDigest != manifest.Digest || state.AccountID != credentials.UserID || state.BindingDigest != bindingDigest || state.BatchID != plan.Batch.ID || state.Pages == nil || state.Files == nil || state.Cache == nil {
+		if state.Version != ProbeExchangeVersion || state.ManifestDigest != manifest.Digest || state.AccountID != credentials.UserID || state.BindingDigest != bindingDigest || state.BatchID != plan.Batch.ID || state.SourcesDigest != plan.SourcesDigest || state.Pages == nil || state.Files == nil || state.Cache == nil {
 			return nil, errors.New("检查点不属于本轮来源、B 账号或目录绑定，请使用正确检查点")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -147,7 +176,12 @@ func runProbeWorker(ctx context.Context, manifest *ProbeExchangeManifest, plan *
 	defer cancel()
 	state.Bundle = ProbeExchangeBundle{Version: ProbeExchangeVersion, AccountID: plan.Batch.AccountID, ManifestID: manifest.ID, ManifestDigest: manifest.Digest,
 		PlanDigest: plan.Digest, BatchID: plan.Batch.ID, Provenance: plan.Batch.Provenance, ToolVersion: options.ToolVersion,
-		CreatedAt: time.Now().UTC(), Results: []ProbeExchangeResult{}}
+		CreatedAt: time.Now().UTC(), SourcesDigest: plan.SourcesDigest, Results: []ProbeExchangeResult{}}
+	// Every round reconstructs mappings. A failure before identity/inventory
+	// must not publish a previous round's files as freshly verified results.
+	for _, id := range plan.Batch.MediaIDs {
+		delete(state.Files, id)
+	}
 	items := map[string]ProbeExchangeItem{}
 	for _, item := range manifest.Items {
 		items[item.MediaID] = item
@@ -185,6 +219,10 @@ func runProbeWorker(ctx context.Context, manifest *ProbeExchangeManifest, plan *
 		}
 	}
 	if err := client.verifyAccount(ctx, plan.Batch.AccountID); err != nil {
+		return finish(err)
+	}
+	shareClient := &probeShareClient{client: deps.control, gate: gate, cookie: credentials.Cookie, base: deps.shareBase, identityBase: deps.cookieBase}
+	if err := prepareProbeWorkerTransfers(ctx, client, shareClient, manifest, plan, sources, state, save); err != nil {
 		return finish(err)
 	}
 	if err := inventoryProbeWorker(ctx, client, manifest, plan, state, save); err != nil {
@@ -351,6 +389,9 @@ func mergeProbeWorkerCache(cached probeWorkerCache, incoming *ProbeResult, size 
 }
 
 func validateProbeWorkerState(state *probeWorkerState) error {
+	if err := validateProbeWorkerTransfers(state); err != nil {
+		return err
+	}
 	for key, cached := range state.Cache {
 		parts := strings.Split(key, ":")
 		if len(parts) != 2 || !probeSHA1RE.MatchString(parts[0]) {
@@ -416,6 +457,12 @@ func populateProbeWorkerResults(state *probeWorkerState) {
 			continue
 		}
 		row.FileID, row.SHA1 = file.ID, strings.ToUpper(file.SHA1)
+		for _, slot := range state.Transfers {
+			if slot.Phase == "verified" && slot.FileID == file.ID {
+				row.Transfer = &ProbeExchangeTransfer{SourceID: slot.SourceID, SourceFileID: slot.Source.ID, SHA1: slot.Source.SHA1, SizeBytes: slot.Source.Size, DirectoryID: slot.DirectoryID}
+				break
+			}
+		}
 		cached, found := state.Cache[probeWorkerContentKey(file)]
 		if !found || row.Status == "failed" || row.Status == "unsupported" || row.Status == "mapping_conflict" {
 			continue
@@ -433,14 +480,15 @@ func populateProbeWorkerResults(state *probeWorkerState) {
 }
 
 func inventoryProbeWorker(ctx context.Context, client *probe115Client, manifest *ProbeExchangeManifest, plan *ProbeWorkerPlan, state *probeWorkerState, save func() error) error {
-	for _, id := range plan.Batch.MediaIDs {
-		delete(state.Files, id)
-	}
 	items := map[string]ProbeExchangeItem{}
 	for _, item := range manifest.Items {
 		items[item.MediaID] = item
 	}
 	for bindingIndex, binding := range plan.Batch.Roots {
+		// Automatic copies were already mapped and verified above.
+		if binding.SourceID != "" {
+			continue
+		}
 		wanted := map[string][]string{}
 		for _, id := range plan.Batch.MediaIDs {
 			index, relative, err := probeWorkerBinding(items[id], plan.Batch.Roots)

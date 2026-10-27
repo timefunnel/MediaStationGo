@@ -137,6 +137,9 @@ func (s *MediaProbeQueueService) previewExchange(ctx context.Context, db *gorm.D
 	if b == nil || b.Version != ProbeExchangeVersion || !probeDecimalID(b.AccountID) || b.AccountID == "0" || len(b.Results) == 0 || len(b.Results) > 100 || b.BatchID == "" || strings.TrimSpace(b.Provenance) == "" || !probeSHA256RE.MatchString(b.PlanDigest) {
 		return nil, errors.New("结果包版本、批次、来源证明或执行计划无效")
 	}
+	if b.SourcesDigest != "" && !probeSHA256RE.MatchString(b.SourcesDigest) {
+		return nil, errors.New("转存来源摘要格式无效")
+	}
 	bundleDigest, err := probeExchangeDigest(b)
 	if err != nil {
 		return nil, err
@@ -181,6 +184,11 @@ func (s *MediaProbeQueueService) previewExchange(ctx context.Context, db *gorm.D
 			return nil, errors.New("结果包存在重复媒体或不匹配的原文件身份")
 		}
 		seen[result.MediaID] = true
+		if proof := result.Transfer; proof != nil {
+			if b.SourcesDigest == "" || proof.SourceID == "" || len(proof.SourceID) > 128 || strings.ContainsAny(proof.SourceID, "/\\:\x00\r\n") || !probeDecimalID(proof.SourceFileID) || proof.SourceFileID == "0" || !probeDecimalID(proof.DirectoryID) || proof.DirectoryID == "0" || !strings.EqualFold(proof.SHA1, result.SHA1) || proof.SizeBytes != result.SizeBytes {
+				return nil, errors.New("转存证明与结果文件身份不一致")
+			}
+		}
 	}
 	ordered := append([]ProbeExchangeResult(nil), b.Results...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].MediaID < ordered[j].MediaID })

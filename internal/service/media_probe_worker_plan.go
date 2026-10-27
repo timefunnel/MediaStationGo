@@ -13,12 +13,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// A binding names a B directory containing an unchanged copy of RelativePrefix
-// from the exported root. It never contains a share URL or an A credential.
+// SourceID selects a private source share. DirectoryID is its B staging parent.
+// With no SourceID, DirectoryID contains an existing unchanged source copy.
 type ProbeWorkerRoot struct {
 	RootID         string `json:"root_id"`
 	RelativePrefix string `json:"relative_prefix"`
 	DirectoryID    string `json:"b_directory_id"`
+	SourceID       string `json:"source_id,omitempty"`
 }
 
 type ProbeWorkerLimits struct {
@@ -35,6 +36,16 @@ type ProbeWorkerLimits struct {
 	ProbeSeconds      int   `json:"probe_seconds"`
 	RunSeconds        int   `json:"run_seconds"`
 	SharedRequests    int   `json:"shared_requests"`
+	ShareRequests     int   `json:"share_requests,omitempty"`
+	ReceiveRequests   int   `json:"receive_requests,omitempty"`
+	MkdirRequests     int   `json:"mkdir_requests,omitempty"`
+}
+
+func DefaultProbeWorkerTransferLimits() ProbeWorkerLimits {
+	l := DefaultProbeWorkerLimits()
+	l.ControlRequests, l.ListRequests, l.RunSeconds = 80, 50, 900
+	l.ShareRequests, l.ReceiveRequests, l.MkdirRequests = 20, 10, 10
+	return l
 }
 
 func DefaultProbeWorkerLimits() ProbeWorkerLimits {
@@ -65,6 +76,7 @@ type ProbeWorkerPlan struct {
 	Targets        []string         `json:"targets"`
 	Notice         string           `json:"notice"`
 	Digest         string           `json:"digest"`
+	SourcesDigest  string           `json:"sources_digest,omitempty"`
 }
 
 type ProbeWorkerStats struct {
@@ -81,24 +93,40 @@ type ProbeWorkerStats struct {
 	SharedLookups    int   `json:"shared_lookups"`
 	ExistingHits     int   `json:"existing_hits"`
 	ProbeCalls       int   `json:"probe_calls"`
+	ShareRequests    int   `json:"share_requests,omitempty"`
+	ReceiveRequests  int   `json:"receive_requests,omitempty"`
+	MkdirRequests    int   `json:"mkdir_requests,omitempty"`
+	CookieIdentities int   `json:"cookie_identity_requests,omitempty"`
 }
 
 func CreateProbeWorkerPlan(m *ProbeExchangeManifest, batch ProbeWorkerBatch) (*ProbeWorkerPlan, error) {
+	return CreateProbeWorkerPlanWithSources(m, batch, nil)
+}
+
+func CreateProbeWorkerPlanWithSources(m *ProbeExchangeManifest, batch ProbeWorkerBatch, sources *ProbeWorkerSources) (*ProbeWorkerPlan, error) {
 	if err := m.CheckDigest(); err != nil {
 		return nil, err
 	}
 	if err := validateProbeWorkerBatch(m, &batch); err != nil {
 		return nil, err
 	}
+	sourceDigest, err := probeWorkerSourcesDigest(batch, sources)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	p := &ProbeWorkerPlan{Version: ProbeExchangeVersion, ID: uuid.NewString(), ManifestID: m.ID, ManifestDigest: m.Digest,
 		CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute), Batch: batch,
-		Targets: []string{"proapi.115.com/open/user/info", "proapi.115.com/open/ufile/files", "proapi.115.com/open/ufile/downurl", "115server.ddsrem.com/emby_mediainfo_data/get", "B 直链指定的 115 CDN"},
-		Notice:  "仅处理指定 B 转存目录。真实访问 115/CDN，可能限流、封禁、账号关联或链路失败。并发 1，失败即停，无重试、OpenList refresh、分享、转存或删除。请求、响应体字节、间隔和时限见 batch.limits；授权/转存不在本轮内。"}
+		Targets:       []string{"proapi.115.com/open/user/info", "proapi.115.com/open/ufile/files", "proapi.115.com/open/ufile/downurl", "115server.ddsrem.com/emby_mediainfo_data/get", "B 直链指定的 115 CDN"},
+		SourcesDigest: sourceDigest,
+		Notice:        "仅处理指定 B 目录和清单。真实访问 115/CDN，可能限流、封禁、账号关联或链路失败。并发 1，失败即停，无自动重试、OpenList refresh、创建 A 分享或删除。请求、响应体字节、间隔和时限见 batch.limits。"}
+	if sourceDigest != "" {
+		p.Targets = append(p.Targets, "webapi.115.com/files/uploadinfo（核对 B Cookie 身份一次）", "115cdn.com/webapi/share/snap（指定来源清单）", "115cdn.com/webapi/share/receive（仅将选中文件转存到 B）", "proapi.115.com/open/folder/add（B 专用文件暂存目录）")
+		p.Notice += "本轮包含自动转存和建目录；来源分享只从私密配置读取，不输出链接。转存结果不明时仅核对，不重复提交。"
+	}
 	if batch.RefreshBeforeRun {
 		p.Targets = append(p.Targets, "passportapi.115.com/open/refreshToken（最多一次，计入控制请求总量）")
 	}
-	var err error
 	p.Digest, err = probeExchangeDigest(p)
 	return p, err
 }
@@ -113,12 +141,15 @@ func (p ProbeWorkerPlan) Check(m *ProbeExchangeManifest) error {
 	if time.Now().After(p.ExpiresAt) || p.CreatedAt.After(time.Now().Add(time.Minute)) || p.ExpiresAt.Sub(p.CreatedAt) > 30*time.Minute {
 		return errors.New("执行计划已过期，请重新生成并审阅")
 	}
+	if probeWorkerHasTransfers(p.Batch) != (probeSHA256RE.MatchString(p.SourcesDigest)) || (!probeWorkerHasTransfers(p.Batch) && p.SourcesDigest != "") {
+		return errors.New("自动转存计划缺少有效来源配置摘要")
+	}
 	return validateProbeWorkerBatch(m, &p.Batch)
 }
 
 func validateProbeWorkerBatch(m *ProbeExchangeManifest, b *ProbeWorkerBatch) error {
 	if b.ID == "" || !probeDecimalID(b.AccountID) || b.AccountID == "0" || !b.OriginalCopy || strings.TrimSpace(b.Provenance) == "" || len(b.Provenance) > 1024 || strings.Contains(b.Provenance, "://") {
-		return errors.New("请指定 B 账号 ID、批次、原样转存确认和来源说明（不填写分享链接）")
+		return errors.New("请指定 B 账号 ID、批次、原样来源确认和来源说明（不填写分享链接）")
 	}
 	l := b.Limits
 	if len(b.MediaIDs) < 1 || len(b.MediaIDs) > 100 || len(b.Roots) == 0 || len(b.Roots) > 100 ||
@@ -139,6 +170,12 @@ func validateProbeWorkerBatch(m *ProbeExchangeManifest, b *ProbeWorkerBatch) err
 				return err
 			}
 		}
+		if root.SourceID != "" && (len(root.SourceID) > 128 || strings.TrimSpace(root.SourceID) != root.SourceID || strings.ContainsAny(root.SourceID, "/\\\x00\r\n") || strings.Contains(root.SourceID, ":")) {
+			return errors.New("来源别名无效，不能填写分享链接")
+		}
+	}
+	if probeWorkerHasTransfers(*b) && (l.ShareRequests < 1 || l.ShareRequests > 80 || l.ReceiveRequests < 1 || l.ReceiveRequests > 100 || l.MkdirRequests < 1 || l.MkdirRequests > 100 || l.ControlRequests > 80 || l.RunSeconds > 900) {
+		return errors.New("自动转存需显式分享/转存/建目录预算；本版每轮控制请求最多 80 次、15 分钟")
 	}
 	seen := map[string]bool{}
 	items := map[string]ProbeExchangeItem{}
@@ -195,16 +232,18 @@ func probeDecimalID(value string) bool {
 }
 
 func ProbeWorkerBatchTemplate(m *ProbeExchangeManifest) ProbeWorkerBatch {
-	b := ProbeWorkerBatch{ID: uuid.NewString(), Limits: DefaultProbeWorkerLimits(), MediaIDs: []string{}, Roots: []ProbeWorkerRoot{}}
+	b := ProbeWorkerBatch{ID: uuid.NewString(), Limits: DefaultProbeWorkerTransferLimits(), MediaIDs: []string{}, Roots: []ProbeWorkerRoot{}}
 	perLibrary, roots := map[string]int{}, map[string]bool{}
 	for _, item := range m.Items {
-		if len(b.MediaIDs) >= 10 || perLibrary[item.LibraryID] >= 2 || (probeExchangeBasicComplete(item.Metadata) && item.Metadata.BitRate > 0) {
+		if probeExchangeBasicComplete(item.Metadata) && item.Metadata.BitRate > 0 {
 			continue
 		}
-		b.MediaIDs = append(b.MediaIDs, item.MediaID)
-		perLibrary[item.LibraryID]++
+		if len(b.MediaIDs) < 10 && perLibrary[item.LibraryID] < 2 {
+			b.MediaIDs = append(b.MediaIDs, item.MediaID)
+			perLibrary[item.LibraryID]++
+		}
 		if !roots[item.RootID] {
-			b.Roots = append(b.Roots, ProbeWorkerRoot{RootID: item.RootID, DirectoryID: "SET_B_DIRECTORY_ID"})
+			b.Roots = append(b.Roots, ProbeWorkerRoot{RootID: item.RootID, DirectoryID: "SET_B_DIRECTORY_ID", SourceID: item.RootID})
 			roots[item.RootID] = true
 		}
 	}

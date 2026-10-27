@@ -20,6 +20,7 @@ func hashForCLI(data []byte) string { sum := sha256.Sum256(data); return hex.Enc
 func TestOfflineCommandsNeedNoCredentialsAndRejectOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath, batchPath, planPath := filepath.Join(dir, "manifest.json"), filepath.Join(dir, "batch.json"), filepath.Join(dir, "plan.json")
+	sourcesPath := filepath.Join(dir, "sources.json")
 	manifest := service.ProbeExchangeManifest{Version: 1, ID: "synthetic", CreatedAt: time.Now().UTC(), Items: []service.ProbeExchangeItem{{MediaID: "media-a", LibraryID: "library-a", RootID: "root-a", RelativePath: "A.mkv", SizeBytes: 1000, Fingerprint: strings.Repeat("a", 64), Metadata: &service.ProbeResult{}}}}
 	// Hash the canonical public wire format; no service internals or network.
 	data, err := json.Marshal(manifest)
@@ -38,7 +39,7 @@ func TestOfflineCommandsNeedNoCredentialsAndRejectOverwrite(t *testing.T) {
 	if err := service.ReadProbeWorkerJSON(batchPath, &batch); err != nil {
 		t.Fatal(err)
 	}
-	if batch.OriginalCopy || batch.AccountID != "" || len(batch.MediaIDs) != 1 || batch.Roots[0].DirectoryID != "SET_B_DIRECTORY_ID" {
+	if batch.OriginalCopy || batch.AccountID != "" || len(batch.MediaIDs) != 1 || batch.Roots[0].DirectoryID != "SET_B_DIRECTORY_ID" || batch.Roots[0].SourceID != "root-a" {
 		t.Fatalf("unsafe default template: %+v", batch)
 	}
 	batch.AccountID = "42"
@@ -48,7 +49,20 @@ func TestOfflineCommandsNeedNoCredentialsAndRejectOverwrite(t *testing.T) {
 	if err := service.WriteProbeWorkerJSON(batchPath, batch); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), []string{"plan", "-manifest", manifestPath, "-batch", batchPath, "-out", planPath}, &output); err != nil {
+	if err := run(context.Background(), []string{"sources-template", "-manifest", manifestPath, "-out", sourcesPath}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var sources service.ProbeWorkerSources
+	if err := service.ReadProbeWorkerJSON(sourcesPath, &sources); err != nil {
+		t.Fatal(err)
+	}
+	source := sources.Shares["root-a"]
+	source.ShareURL = "https://115.com/s/syntheticshare?password=abcd"
+	sources.Shares["root-a"] = source
+	if err := service.WriteProbeWorkerJSON(sourcesPath, sources); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(context.Background(), []string{"plan", "-manifest", manifestPath, "-batch", batchPath, "-sources", sourcesPath, "-credentials", filepath.Join(dir, "does-not-exist.json"), "-out", planPath}, &output); err != nil {
 		t.Fatal(err)
 	}
 	var plan service.ProbeWorkerPlan
@@ -58,8 +72,22 @@ func TestOfflineCommandsNeedNoCredentialsAndRejectOverwrite(t *testing.T) {
 	if err := plan.Check(&manifest); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "proapi.115.com") || plan.Batch.Limits.ControlRequests != 32 {
+	if !strings.Contains(output.String(), "share/receive") || strings.Contains(output.String(), "syntheticshare") || plan.SourcesDigest == "" || plan.Batch.Limits.ControlRequests != 80 {
 		t.Fatal("plan did not show finite real targets and budget")
+	}
+	setPath := filepath.Join(dir, "batches.json")
+	if err := run(context.Background(), []string{"batches", "-manifest", manifestPath, "-batch", batchPath, "-sources", sourcesPath, "-out", setPath}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var set service.ProbeWorkerBatchSet
+	if err := service.ReadProbeWorkerJSON(setPath, &set); err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Batches) != 1 || set.Batches[0].MediaIDs[0] != "media-a" {
+		t.Fatal("whole-library command lost media")
+	}
+	if err := run(context.Background(), []string{"plan", "-manifest", manifestPath, "-batch", setPath, "-batch-index", "0", "-sources", sourcesPath, "-out", filepath.Join(dir, "round-plan.json")}, &output); err != nil {
+		t.Fatal(err)
 	}
 	if err := run(context.Background(), []string{"init", "-manifest", manifestPath, "-out", batchPath}, &output); err == nil {
 		t.Fatal("existing user file overwritten")

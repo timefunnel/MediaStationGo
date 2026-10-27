@@ -66,6 +66,22 @@ func (g *probeWorkerGate) take(ctx context.Context, kind string) error {
 			if s.RefreshRequests >= 1 {
 				return errProbeWorkerBudget
 			}
+		case "share":
+			if s.ShareRequests >= l.ShareRequests {
+				return errProbeWorkerBudget
+			}
+		case "receive":
+			if s.ReceiveRequests >= l.ReceiveRequests {
+				return errProbeWorkerBudget
+			}
+		case "mkdir":
+			if s.MkdirRequests >= l.MkdirRequests {
+				return errProbeWorkerBudget
+			}
+		case "cookie_identity":
+			if s.CookieIdentities >= 1 {
+				return errProbeWorkerBudget
+			}
 		default:
 			return errors.New("未知请求类别")
 		}
@@ -97,6 +113,14 @@ func (g *probeWorkerGate) take(ctx context.Context, kind string) error {
 			s.IdentityRequests++
 		case "refresh":
 			s.RefreshRequests++
+		case "share":
+			s.ShareRequests++
+		case "receive":
+			s.ReceiveRequests++
+		case "mkdir":
+			s.MkdirRequests++
+		case "cookie_identity":
+			s.CookieIdentities++
 		}
 	}
 	if g.onRequest != nil {
@@ -142,6 +166,7 @@ type probeWorkerCredentials struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresAt    int64  `json:"expires_at,omitempty"`
+	Cookie       string `json:"cookie,omitempty"`
 }
 
 func readProbeWorkerCredentials(filename string) (*probeWorkerCredentials, error) {
@@ -158,6 +183,9 @@ func readProbeWorkerCredentials(filename string) (*probeWorkerCredentials, error
 	}
 	if !probeDecimalID(c.UserID) || c.AccessToken == "" || len(c.AccessToken) > 8192 || len(c.RefreshToken) > 8192 || strings.ContainsAny(c.AccessToken+c.RefreshToken, "\r\n") {
 		return nil, errors.New("凭据文件缺少 B 用户 ID 或有效令牌")
+	}
+	if len(c.Cookie) > 16384 || strings.ContainsAny(c.Cookie, "\r\n\x00") {
+		return nil, errors.New("B Cookie 格式无效")
 	}
 	return &c, nil
 }

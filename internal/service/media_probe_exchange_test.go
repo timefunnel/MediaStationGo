@@ -37,6 +37,32 @@ func exchangeTestBundle(m *ProbeExchangeManifest) *ProbeExchangeBundle {
 	return b
 }
 
+func TestProbeExchangeAutomaticTransferProofIsValidatedAndAudited(t *testing.T) {
+	queue, manifest := newExchangeFixture(t, "a")
+	b := exchangeTestBundle(manifest)
+	b.SourcesDigest = strings.Repeat("c", 64)
+	b.Results[0].Transfer = &ProbeExchangeTransfer{SourceID: "source-a", SourceFileID: "401", SHA1: b.Results[0].SHA1, SizeBytes: b.Results[0].SizeBytes, DirectoryID: "301"}
+	p, err := queue.PreviewExchange(t.Context(), b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Results[0].Transfer.SHA1 = strings.Repeat("D", 40)
+	if _, err := queue.PreviewExchange(t.Context(), b); err == nil {
+		t.Fatal("mismatched transfer identity accepted")
+	}
+	b.Results[0].Transfer.SHA1 = b.Results[0].SHA1
+	if _, err := queue.ApplyExchange(t.Context(), b, p.Digest, true); err != nil {
+		t.Fatal(err)
+	}
+	var audit model.MediaProbeExchange
+	if err := queue.repo.DB.First(&audit, "kind = ?", "import").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(audit.Payload, `"source_file_id":"401"`) || !strings.Contains(audit.Payload, `"sources_digest"`) {
+		t.Fatal("transfer provenance not audited")
+	}
+}
+
 func TestProbeExchangeExportKeepsCanonicalSnapshotAndNeverProbes(t *testing.T) {
 	queue, manifest := newExchangeFixture(t, "a", "b")
 	if len(manifest.Items) != 2 || manifest.Items[0].RelativePath != "a.mkv" || manifest.Items[0].RootID != "library-a" {

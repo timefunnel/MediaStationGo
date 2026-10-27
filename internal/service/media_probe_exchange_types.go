@@ -38,17 +38,26 @@ type ProbeExchangeManifest struct {
 }
 
 type ProbeExchangeResult struct {
-	UnknownFields    []string     `json:"unknown_fields,omitempty"`
-	MediaID          string       `json:"media_id"`
-	Fingerprint      string       `json:"fingerprint"`
-	FileID           string       `json:"b_file_id,omitempty"`
-	SHA1             string       `json:"sha1,omitempty"`
-	SizeBytes        int64        `json:"size_bytes"`
-	Source           string       `json:"source,omitempty"`
-	Status           string       `json:"status"`
-	Error            string       `json:"error,omitempty"`
-	Metadata         *ProbeResult `json:"metadata,omitempty"`
-	EstimatedBitRate bool         `json:"estimated_bit_rate,omitempty"`
+	Transfer         *ProbeExchangeTransfer `json:"transfer,omitempty"`
+	UnknownFields    []string               `json:"unknown_fields,omitempty"`
+	MediaID          string                 `json:"media_id"`
+	Fingerprint      string                 `json:"fingerprint"`
+	FileID           string                 `json:"b_file_id,omitempty"`
+	SHA1             string                 `json:"sha1,omitempty"`
+	SizeBytes        int64                  `json:"size_bytes"`
+	Source           string                 `json:"source,omitempty"`
+	Status           string                 `json:"status"`
+	Error            string                 `json:"error,omitempty"`
+	Metadata         *ProbeResult           `json:"metadata,omitempty"`
+	EstimatedBitRate bool                   `json:"estimated_bit_rate,omitempty"`
+}
+
+type ProbeExchangeTransfer struct {
+	SourceID     string `json:"source_id"`
+	SourceFileID string `json:"source_file_id"`
+	SHA1         string `json:"sha1"`
+	SizeBytes    int64  `json:"size_bytes"`
+	DirectoryID  string `json:"b_directory_id"`
 }
 
 type ProbeExchangeBundle struct {
@@ -64,6 +73,7 @@ type ProbeExchangeBundle struct {
 	StopReason     string                `json:"stop_reason,omitempty"`
 	Stats          ProbeWorkerStats      `json:"stats"`
 	Results        []ProbeExchangeResult `json:"results"`
+	SourcesDigest  string                `json:"sources_digest,omitempty"`
 }
 
 type ProbeExchangeChange struct {
