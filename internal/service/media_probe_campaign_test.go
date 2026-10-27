@@ -434,7 +434,8 @@ func TestProbeCampaignMatchesDecodedLibraryRoot(t *testing.T) {
 	if err := f.service.queue.repo.DB.Model(&model.LibraryRoot{}).Where("id = ?", "root-a").Update("path", "cloud://openlist/%53ynthetic").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.Plan(t.Context(), nil, 0); err != nil {
+	plan, err := f.service.Plan(t.Context(), nil, 0)
+	if err != nil {
 		t.Fatalf("same encoded root rejected: %v", err)
 	}
 	for _, pair := range [][2]string{
@@ -452,6 +453,12 @@ func TestProbeCampaignMatchesDecodedLibraryRoot(t *testing.T) {
 	}
 	if f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
 		t.Fatal("root matching contacted 115")
+	}
+	if err := f.service.Start(t.Context(), plan.ID, plan.Digest, true); err != nil {
+		t.Fatal(err)
+	}
+	if view := waitCampaign(t, f); view.Status != "completed" || view.Counts["completed"] != 1 {
+		t.Fatalf("execution rejected the same encoded root accepted during planning: %+v", view)
 	}
 }
 

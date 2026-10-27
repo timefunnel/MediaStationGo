@@ -654,7 +654,7 @@ func (s *MediaProbeCampaignService) checkRoots(ctx context.Context, state *probe
 		if err := s.queue.repo.DB.WithContext(ctx).First(&root, "id = ?", expected.RootID).Error; err != nil {
 			return err
 		}
-		if root.LibraryID != expected.LibraryID || root.Path != expected.Path {
+		if root.LibraryID != expected.LibraryID || !probeCampaignSameRootPath(root.Path, expected.Path) {
 			return errors.New("媒体库根在预览后发生变化，已停止")
 		}
 	}
