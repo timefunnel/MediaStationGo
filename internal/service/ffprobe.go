@@ -130,7 +130,7 @@ func (f *FFprobeService) probeLocal(ctx context.Context, path string, allowFallb
 			return parseProbeJSON(out)
 		}
 		if !allowFallback {
-			return nil, fmt.Errorf("ffprobe failed: %w", err)
+			return nil, mediaProbeCommandFailure(probeCtx, "ffprobe", err)
 		}
 		if f.log != nil {
 			f.log.Debug("ffprobe failed, trying ffmpeg fallback", zap.String("path", path), zap.Error(err))
@@ -178,7 +178,7 @@ func (f *FFprobeService) probeRemote(ctx context.Context, rawURL string, headers
 			return parseProbeJSON(out)
 		}
 		if !allowFallback {
-			return nil, fmt.Errorf("remote ffprobe failed: %w", err)
+			return nil, mediaProbeCommandFailure(probeCtx, "remote ffprobe", err)
 		}
 		if f.log != nil {
 			f.log.Debug("remote ffprobe failed, trying ffmpeg fallback", zap.Error(err))

@@ -97,7 +97,7 @@ func (s *MediaProbeQueueService) Start(ctx context.Context, planID string, confi
 		if err := s.repo.DB.WithContext(ctx).First(&current, "media_id = ?", expected.MediaID).Error; err != nil {
 			return err
 		}
-		if current.Status != "pending" || current.Fingerprint != expected.Fingerprint {
+		if current.Status != expected.Status || current.Fingerprint != expected.Fingerprint || current.Attempts != expected.Attempts {
 			return errors.New("队列已变化，请重新预览")
 		}
 		var media model.Media
@@ -118,6 +118,18 @@ func (s *MediaProbeQueueService) Start(ctx context.Context, planID string, confi
 			if !included {
 				return errors.New("媒体库范围已变化，请重新预览")
 			}
+		}
+	}
+	if s.plan.RetryMediaID != "" {
+		job := s.plan.jobs[0]
+		result := s.repo.DB.WithContext(ctx).Model(&model.MediaProbeJob{}).
+			Where("media_id = ? AND fingerprint = ? AND status = ?", job.MediaID, job.Fingerprint, "failed").
+			Update("status", "pending")
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("失败任务已变化，请重新预览此项")
 		}
 	}
 	plan := *s.plan
@@ -204,7 +216,7 @@ func (s *MediaProbeQueueService) runJob(ctx context.Context, job model.MediaProb
 		return s.finishJob(job, "completed", nil)
 	}
 	result := s.repo.DB.WithContext(ctx).Model(&model.MediaProbeJob{}).Where("media_id = ? AND fingerprint = ? AND status = ?", job.MediaID, job.Fingerprint, "pending").Updates(map[string]any{
-		"status": "running", "attempts": gorm.Expr("attempts + 1"), "started_at": time.Now(), "finished_at": nil, "error": "",
+		"status": "running", "attempts": gorm.Expr("attempts + 1"), "started_at": time.Now(), "finished_at": nil, "error": "", "failure_kind": "", "http_status": 0, "provider_code": "",
 	})
 	if result.Error != nil {
 		return result.Error
@@ -274,14 +286,18 @@ func (s *MediaProbeQueueService) finishJob(job model.MediaProbeJob, status strin
 	if taskErr != nil {
 		detail = safeMediaProbeQueueError(taskErr)
 	}
+	failure := classifyMediaProbeFailure(taskErr)
 	result := s.repo.DB.WithContext(ctx).Model(&model.MediaProbeJob{}).Where("media_id = ? AND fingerprint = ?", job.MediaID, job.Fingerprint).Updates(map[string]any{
-		"status": status, "error": detail, "finished_at": time.Now(),
+		"status": status, "error": detail, "finished_at": time.Now(), "failure_kind": failure.Kind, "http_status": failure.HTTPStatus, "provider_code": failure.ProviderCode,
 	})
 	if result.Error != nil {
 		return fmt.Errorf("保存探测任务状态失败: %w", result.Error)
 	}
 	if result.RowsAffected != 1 {
 		return errors.New("任务已变化，无法保存探测状态")
+	}
+	if taskErr != nil && s.log != nil {
+		s.log.Warn("media probe task failed", zap.String("media_id", job.MediaID), zap.String("failure_kind", failure.Kind), zap.Int("http_status", failure.HTTPStatus), zap.String("provider_code", failure.ProviderCode), zap.String("error", detail))
 	}
 	return taskErr
 }
@@ -309,9 +325,8 @@ func (s *MediaProbeQueueService) UpdateJob(ctx context.Context, mediaID, action 
 			return errors.New("当前任务不支持重新入队")
 		}
 		updates["status"] = "pending"
-		updates["error"] = ""
-		updates["finished_at"] = nil
-		updates["started_at"] = nil
+		// Requeueing is not a new attempt; retain the last diagnostic and its
+		// timestamp until an actual execution replaces them.
 	default:
 		return errors.New("无效的队列操作")
 	}
@@ -329,7 +344,7 @@ func (s *MediaProbeQueueService) UpdateJob(ctx context.Context, mediaID, action 
 var mediaProbeURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
 
 func safeMediaProbeQueueError(err error) string {
-	text := mediaProbeURLPattern.ReplaceAllString(err.Error(), "[媒体地址已隐藏]")
+	text := redactMediaProbeError(err.Error())
 	runes := []rune(text)
 	if len(runes) > 1200 {
 		text = string(runes[:1200])

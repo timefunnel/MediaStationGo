@@ -23,6 +23,7 @@ type explicitQueueProber struct {
 	release chan struct{}
 	result  *ProbeResult
 	fail    bool
+	failure error
 }
 
 func (p *explicitQueueProber) Probe(ctx context.Context, _ string) (*ProbeResult, error) {
@@ -41,6 +42,9 @@ func (p *explicitQueueProber) Probe(ctx context.Context, _ string) (*ProbeResult
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if p.failure != nil {
+		return nil, p.failure
 	}
 	if p.fail {
 		return nil, errors.New("media read failed https://private.example/file?token=secret")

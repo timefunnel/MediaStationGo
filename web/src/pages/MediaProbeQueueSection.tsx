@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Database, LoaderCircle, Pause, Play, RefreshCw, Save } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AlertTriangle, Database, LoaderCircle, Pause, Play, RefreshCw, Save } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { mediaProbeQueueAPI, type ProbeQueueConfig, type ProbeQueuePlan, type ProbeQueueSnapshot, type ProbeQueueStatus } from '../api/mediaProbeQueue'
 import { libraryAPI } from '../api/library'
 import type { Library } from '../types'
 
-const statusLabels: Record<ProbeQueueStatus, string> = {
-  pending: '待处理', running: '运行中', completed: '已完成', partial: '部分信息未知',
-  failed: '失败', canceled: '已取消', interrupted: '已中断',
-}
+import { MediaProbeQueueTable } from './MediaProbeQueueTable'
+import { probeQueueFailureLabel, probeQueueItemTitle, probeQueueStatusLabels as statusLabels } from './mediaProbeQueueModel'
 
 function errorMessage(cause: unknown): string {
   return (cause as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -28,6 +25,18 @@ export function MediaProbeQueueSection() {
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [plan, setPlan] = useState<ProbeQueuePlan | null>(null)
+  const [retryTitle, setRetryTitle] = useState('')
+  const lastRiskTime = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (!snapshot) return
+    const alert = snapshot.risk_alert
+    const time = alert ? Date.parse(alert.finished_at || alert.updated_at) : 0
+    if (lastRiskTime.current !== undefined && time > lastRiskTime.current && alert) {
+      toast.error(`${probeQueueFailureLabel(alert)}：${probeQueueItemTitle(alert)}。本轮已停止，请先处理上游限制。`, { duration: 8000 })
+    }
+    lastRiskTime.current = Math.max(lastRiskTime.current ?? 0, time)
+  }, [snapshot])
 
   useEffect(() => {
     if (snapshot && !dirty) setDraft(snapshot.config)
@@ -106,6 +115,13 @@ export function MediaProbeQueueSection() {
         </div>
         <p className="text-sm text-ink-100" aria-live="polite">{snapshot.message}</p>
         {snapshot.collect_error && <p role="alert" className="text-sm text-red-500">自动入队失败：{snapshot.collect_error}</p>}
+        {snapshot.risk_alert && <div role="alert" className="space-y-2 rounded-xl border border-red-400/50 bg-red-50/20 p-4 text-sm">
+          <p className="flex items-center gap-2 font-semibold text-red-500"><AlertTriangle size={17} />已记录{probeQueueFailureLabel(snapshot.risk_alert)}</p>
+          <p className="text-ink-600">{probeQueueItemTitle(snapshot.risk_alert)} · {new Date(snapshot.risk_alert.finished_at || snapshot.risk_alert.updated_at).toLocaleString()}</p>
+          {(snapshot.risk_alert.http_status || snapshot.risk_alert.provider_code) && <p className="text-xs text-red-500">{snapshot.risk_alert.http_status ? `HTTP ${snapshot.risk_alert.http_status}` : ''}{snapshot.risk_alert.provider_code ? ` 上游码 ${snapshot.risk_alert.provider_code}` : ''}</p>}
+          <p className="break-words text-xs text-red-500">{snapshot.risk_alert.error}</p>
+          <p className="text-xs text-ink-100">该任务曾收到上游风控或限流提示。发生失败时会停止当轮，不会自动重试；请先处理上游限制，再手动选择需要重试的任务。</p>
+        </div>}
 
         <details className="rounded-xl border border-gray-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-ink-600">队列配置{dirty ? ' · 有未保存更改' : ''}</summary>
@@ -143,13 +159,14 @@ export function MediaProbeQueueSection() {
         </div>
 
         {plan && !running && <div className="space-y-3 rounded-xl border border-primary-400/40 bg-brand-50/30 p-4" aria-label="本轮执行范围">
-          <h3 className="text-sm font-semibold text-ink-600">本轮最多 {plan.count} 部 · 并发 {plan.concurrency}</h3>
+          <h3 className="text-sm font-semibold text-ink-600">{plan.retry_media_id ? `仅重试此项：${retryTitle}` : `本轮最多 ${plan.count} 部`} · 并发 {plan.concurrency}</h3>
+          {plan.retry_media_id && <p className="text-sm text-ink-100">本次固定执行这一条失败任务；其他待处理影片不会加入此次重试。</p>}
           <p className="text-sm text-ink-100">OpenList {plan.openlist_count} 部、其他远程 {plan.remote_count} 部、本地 {plan.local_count} 部。OpenList 正常取链预计 {plan.openlist_count} 次，底层 115 文件查询及签发预计约 {plan.openlist_count}～{plan.openlist_count * 2} 次；缓存命中可能更少，Token 刷新或缓存恢复可能额外调用。</p>
           <p className="text-xs text-sand-600">目标：{plan.targets.join('；')}。每项最长 {plan.config.timeout_seconds} 秒，结束后间隔 {plan.config.interval_seconds} 秒，本轮最长 {plan.config.run_seconds} 秒。</p>
           <p className="text-xs leading-6 text-sand-600">{plan.notice}</p>
           <p className="text-xs text-sand-500">本轮预览有效至 {new Date(plan.expires_at).toLocaleTimeString()}；新入队影片留待下一轮。</p>
           <div className="flex gap-2">
-            <button type="button" disabled={busy || dirty || Date.now() >= Date.parse(plan.expires_at)} className="neon-button px-3 py-2 text-xs disabled:opacity-50" onClick={() => void act(async () => { await mediaProbeQueueAPI.start(plan.id); setPlan(null) }, '已启动已确认的一轮')}>确认范围并启动本轮</button>
+            <button type="button" disabled={busy || dirty || Date.now() >= Date.parse(plan.expires_at)} className="neon-button px-3 py-2 text-xs disabled:opacity-50" onClick={() => void act(async () => { await mediaProbeQueueAPI.start(plan.id); setPlan(null) }, plan.retry_media_id ? '已启动这一条失败任务的重试' : '已启动已确认的一轮')}>{plan.retry_media_id ? '确认仅重试此项' : '确认范围并启动本轮'}</button>
             <button type="button" className="btn-outline px-3 py-2 text-xs" onClick={() => setPlan(null)}>取消预览</button>
           </div>
         </div>}
@@ -159,19 +176,10 @@ export function MediaProbeQueueSection() {
           <span className="text-xs text-sand-500">共 {snapshot.total} 项</span>
         </div>
         <p className="text-xs text-sand-500">下方保留全部媒体库的队列历史；本轮执行只选取配置范围内的待处理影片。</p>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-left text-sm">
-            <thead className="text-xs text-sand-500"><tr><th className="py-2">影片</th><th>状态 / 次数</th><th>结果</th><th>更新时间</th><th>操作</th></tr></thead>
-            <tbody>{snapshot.items.map((item) => <tr key={item.media_id} className="border-t border-gray-200 align-top">
-              <td className="max-w-xs py-3 pr-3"><Link to={`/media/${item.media_id}`} className="text-brand-500 hover:underline">{item.title}</Link></td>
-              <td className="py-3 pr-3">{statusLabels[item.status]} · {item.attempts}</td>
-              <td className="max-w-xs break-words py-3 pr-3 text-xs">{item.error || (item.status === 'partial' ? '已探测并保存可用信息；部分基础字段仍未知，不自动重复探测' : item.status === 'completed' ? '信息已保存或复用现有结果' : '—')}</td>
-              <td className="whitespace-nowrap py-3 pr-3 text-xs text-sand-500">{new Date(item.updated_at).toLocaleString()}</td>
-              <td className="py-3">{item.status === 'pending' ? <button type="button" disabled={disabled} className="text-xs text-sand-600 disabled:opacity-50" onClick={() => void act(async () => { await mediaProbeQueueAPI.update(item.media_id, 'cancel'); setPlan(null) })}>取消</button> : ['failed', 'partial', 'interrupted', 'canceled'].includes(item.status) ? <button type="button" disabled={disabled} className="text-xs text-brand-500 disabled:opacity-50" onClick={() => void act(async () => { await mediaProbeQueueAPI.update(item.media_id, 'retry'); setPlan(null) }, '已重新入队，需在下一轮预览确认后执行')}>重新入队</button> : '—'}</td>
-            </tr>)}</tbody>
-          </table>
-          {snapshot.items.length === 0 && <p className="py-6 text-sm text-sand-500">当前筛选下没有任务。</p>}
-        </div>
+        <MediaProbeQueueTable items={snapshot.items} disabled={disabled || dirty}
+          onRetry={(item) => void act(async () => { const next = await mediaProbeQueueAPI.retryPlan(item.media_id); setRetryTitle(probeQueueItemTitle(item)); setPlan(next) })}
+          onRequeue={(id) => void act(async () => { await mediaProbeQueueAPI.update(id, 'retry'); setPlan(null) }, '已重新入队，需在下一轮预览确认后执行')}
+          onCancel={(id) => void act(async () => { await mediaProbeQueueAPI.update(id, 'cancel'); setPlan(null) })} />
         <div className="flex items-center justify-end gap-3 text-xs text-sand-600"><button type="button" disabled={page <= 1} className="disabled:opacity-40" onClick={() => setPage((value) => value - 1)}>上一页</button><span>第 {page} 页</span><button type="button" disabled={page * 50 >= snapshot.total} className="disabled:opacity-40" onClick={() => setPage((value) => value + 1)}>下一页</button></div>
       </>}
     </section>

@@ -75,6 +75,15 @@ func registerMediaProbeQueueRoutes(admin *gin.RouterGroup, svc *service.Containe
 	})
 	queue.POST("/pause", func(c *gin.Context) { svc.MediaProbeQueue.Pause(); c.Status(http.StatusAccepted) })
 	queue.POST("/:media_id/:action", func(c *gin.Context) {
+		if c.Param("action") == "retry-plan" {
+			plan, err := svc.MediaProbeQueue.CreateRetryPlan(c.Request.Context(), c.Param("media_id"))
+			if err != nil {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, plan)
+			return
+		}
 		if err := svc.MediaProbeQueue.UpdateJob(c.Request.Context(), c.Param("media_id"), c.Param("action")); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

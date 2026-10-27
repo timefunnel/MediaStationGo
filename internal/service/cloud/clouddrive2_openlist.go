@@ -32,6 +32,8 @@ func (e *openListAPIResponseError) Error() string {
 	return fmt.Sprintf("%s: api %s %s failed: %s", e.provider, e.action, e.target, e.message)
 }
 
+func (e *openListAPIResponseError) ResponseCode() int { return e.code }
+
 type openListParentWarmupFlight struct {
 	done chan struct{}
 	err  error

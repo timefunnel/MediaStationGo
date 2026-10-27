@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -38,8 +40,32 @@ func defaultMediaProbeQueueConfig() MediaProbeQueueConfig {
 
 type MediaProbeQueueItem struct {
 	model.MediaProbeJob
-	Title     string `json:"title"`
-	LibraryID string `json:"library_id"`
+	Title         string                   `json:"title"`
+	LibraryID     string                   `json:"library_id"`
+	SeasonNum     int                      `json:"season_num"`
+	EpisodeNum    int                      `json:"episode_num"`
+	EpisodeEndNum int                      `json:"episode_end_num"`
+	EpisodeTitle  string                   `json:"episode_title,omitempty"`
+	FileName      string                   `gorm:"-" json:"file_name,omitempty"`
+	SourcePath    string                   `json:"-"`
+	Metadata      MediaProbeQueueMetadata  `gorm:"embedded" json:"-"`
+	Result        *MediaProbeQueueMetadata `gorm:"-" json:"result,omitempty"`
+}
+
+type MediaProbeQueueMetadata struct {
+	MediaProbeVersion int     `json:"-"`
+	DurationSec       int     `json:"duration_sec"`
+	Width             int     `json:"width"`
+	Height            int     `json:"height"`
+	VideoCodec        string  `json:"video_codec"`
+	AudioCodec        string  `json:"audio_codec"`
+	Container         string  `json:"container"`
+	BitRate           int64   `json:"bit_rate"`
+	FrameRate         float64 `json:"frame_rate"`
+	VideoRange        string  `json:"video_range"`
+	VideoBitDepth     int     `json:"video_bit_depth"`
+	AudioChannels     int     `json:"audio_channels"`
+	AudioSampleRate   int     `json:"audio_sample_rate"`
 }
 
 type MediaProbeQueueSnapshot struct {
@@ -50,6 +76,7 @@ type MediaProbeQueueSnapshot struct {
 	Total        int64                 `json:"total"`
 	Message      string                `json:"message"`
 	CollectError string                `json:"collect_error,omitempty"`
+	RiskAlert    *MediaProbeQueueItem  `json:"risk_alert,omitempty"`
 }
 
 type MediaProbeQueuePlan struct {
@@ -63,6 +90,7 @@ type MediaProbeQueuePlan struct {
 	Concurrency   int                   `json:"concurrency"`
 	Targets       []string              `json:"targets"`
 	Notice        string                `json:"notice"`
+	RetryMediaID  string                `json:"retry_media_id,omitempty"`
 	jobs          []model.MediaProbeJob
 }
 
@@ -198,7 +226,7 @@ func (s *MediaProbeQueueService) Collect(ctx context.Context) (int64, error) {
 		}
 		result := s.repo.DB.WithContext(ctx).Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "media_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"fingerprint", "status", "attempts", "error", "updated_at", "started_at", "finished_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"fingerprint", "status", "attempts", "error", "failure_kind", "http_status", "provider_code", "updated_at", "started_at", "finished_at"}),
 			Where:     clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "media_probe_jobs.fingerprint <> excluded.fingerprint AND media_probe_jobs.status <> 'running'"}}},
 		}).Create(&jobs)
 		added += result.RowsAffected
@@ -236,13 +264,55 @@ func (s *MediaProbeQueueService) Snapshot(ctx context.Context, status string, pa
 	if err := query.Count(&snap.Total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Select("media_probe_jobs.*, COALESCE(media.title, '媒体已删除') AS title, COALESCE(media.library_id, '') AS library_id").Order("media_probe_jobs.updated_at DESC, media_probe_jobs.media_id").Offset((page - 1) * 50).Limit(50).Scan(&snap.Items).Error; err != nil {
+	if err := query.Select(mediaProbeQueueItemColumns).Order("media_probe_jobs.updated_at DESC, media_probe_jobs.media_id").Offset((page - 1) * 50).Limit(50).Scan(&snap.Items).Error; err != nil {
 		return nil, err
+	}
+	for i := range snap.Items {
+		prepareMediaProbeQueueItem(&snap.Items[i])
+	}
+	// A warning must remain visible even when the failing row is on another page.
+	var alerts []MediaProbeQueueItem
+	if err := s.repo.DB.WithContext(ctx).Table("media_probe_jobs").Joins("LEFT JOIN media ON media.id = media_probe_jobs.media_id").
+		Where("media_probe_jobs.failure_kind IN ? AND media_probe_jobs.status IN ?", []string{"risk_control", "rate_limited"}, []string{"failed", "interrupted", "pending"}).
+		Select(mediaProbeQueueItemColumns).Order("COALESCE(media_probe_jobs.finished_at, media_probe_jobs.updated_at) DESC").Limit(1).Scan(&alerts).Error; err != nil {
+		return nil, err
+	}
+	if len(alerts) > 0 {
+		prepareMediaProbeQueueItem(&alerts[0])
+		snap.RiskAlert = &alerts[0]
 	}
 	s.mu.Lock()
 	snap.Running, snap.Message, snap.CollectError = s.running, s.message, s.collectError
 	s.mu.Unlock()
 	return snap, nil
+}
+
+const mediaProbeQueueItemColumns = `media_probe_jobs.*, COALESCE(media.title, '媒体已删除') AS title, COALESCE(media.library_id, '') AS library_id,
+COALESCE(media.season_num, 0) AS season_num, COALESCE(media.episode_num, 0) AS episode_num,
+COALESCE(media.episode_end_num, 0) AS episode_end_num, COALESCE(media.episode_title, '') AS episode_title,
+COALESCE(media.path, '') AS source_path, COALESCE(media.media_probe_version, 0) AS media_probe_version,
+COALESCE(media.duration_sec, 0) AS duration_sec, COALESCE(media.width, 0) AS width, COALESCE(media.height, 0) AS height,
+COALESCE(media.video_codec, '') AS video_codec, COALESCE(media.audio_codec, '') AS audio_codec,
+COALESCE(media.container, '') AS container, COALESCE(media.bit_rate, 0) AS bit_rate, COALESCE(media.frame_rate, 0) AS frame_rate,
+COALESCE(media.video_range, '') AS video_range, COALESCE(media.video_bit_depth, 0) AS video_bit_depth,
+COALESCE(media.audio_channels, 0) AS audio_channels, COALESCE(media.audio_sample_rate, 0) AS audio_sample_rate`
+
+func prepareMediaProbeQueueItem(item *MediaProbeQueueItem) {
+	source := strings.ReplaceAll(item.SourcePath, `\`, "/")
+	if parsed, err := url.Parse(source); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		source = parsed.EscapedPath()
+	}
+	name := path.Base(source)
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = decoded
+	}
+	if name != "." && name != "/" {
+		item.FileName = name
+	}
+	if item.Metadata.MediaProbeVersion >= mediaProbeMetadataVersion && (item.Status == "completed" || item.Status == "partial") {
+		metadata := item.Metadata
+		item.Result = &metadata
+	}
 }
 
 func validMediaProbeStatus(status string) bool {
@@ -276,13 +346,55 @@ func (s *MediaProbeQueueService) CreatePlan(ctx context.Context) (*MediaProbeQue
 	if len(cfg.LibraryIDs) > 0 {
 		query = query.Where("media.library_id IN ?", cfg.LibraryIDs)
 	}
-	plan := &MediaProbeQueuePlan{ID: uuid.NewString(), ExpiresAt: time.Now().Add(5 * time.Minute), Config: cfg, Concurrency: 1, Targets: []string{}, Notice: "每项最多调用一次 MSG 取链流程；OpenList 正常为 1 次 /api/fs/link，430004 缓存恢复可能列父目录后再取链，不设置 refresh=true。底层 115 通常涉及文件查询和签发，Token 刷新可能增加请求；CDN 读取次数和流量由文件结构决定。并发 1，失败即停止本轮，无任务自动重试。真实访问 115/CDN 可能限流、封禁或链路失败。"}
-	if err := query.Select("media_probe_jobs.*").Order("media_probe_jobs.created_at, media_probe_jobs.media_id").Limit(cfg.BatchSize).Find(&plan.jobs).Error; err != nil {
+	var jobs []model.MediaProbeJob
+	if err := query.Select("media_probe_jobs.*").Order("media_probe_jobs.created_at, media_probe_jobs.media_id").Limit(cfg.BatchSize).Find(&jobs).Error; err != nil {
 		return nil, err
 	}
-	if len(plan.jobs) == 0 {
+	if len(jobs) == 0 {
 		return nil, errors.New("当前范围没有待处理影片")
 	}
+	return s.preparePlan(ctx, cfg, jobs, "")
+}
+
+// Preview a single failed job without requeueing it or touching its source.
+func (s *MediaProbeQueueService) CreateRetryPlan(ctx context.Context, mediaID string) (*MediaProbeQueuePlan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return nil, errors.New("请先暂停本轮，再重试单条任务")
+	}
+	cfg, err := s.Config(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var job model.MediaProbeJob
+	if err := s.repo.DB.WithContext(ctx).First(&job, "media_id = ?", mediaID).Error; err != nil {
+		return nil, err
+	}
+	if job.Status != "failed" {
+		return nil, errors.New("仅失败任务支持单独重试")
+	}
+	var media model.Media
+	if err := s.repo.DB.WithContext(ctx).First(&media, "id = ?", mediaID).Error; err != nil {
+		return nil, err
+	}
+	if mediaProbeFingerprint(&media) != job.Fingerprint {
+		return nil, errors.New("媒体文件已变化，请先刷新缺失信息队列")
+	}
+	if len(cfg.LibraryIDs) > 0 {
+		included := false
+		for _, id := range cfg.LibraryIDs {
+			included = included || media.LibraryID == id
+		}
+		if !included {
+			return nil, errors.New("此项不在当前媒体库范围，请先调整队列配置")
+		}
+	}
+	return s.preparePlan(ctx, cfg, []model.MediaProbeJob{job}, mediaID)
+}
+
+func (s *MediaProbeQueueService) preparePlan(ctx context.Context, cfg MediaProbeQueueConfig, jobs []model.MediaProbeJob, retryMediaID string) (*MediaProbeQueuePlan, error) {
+	plan := &MediaProbeQueuePlan{ID: uuid.NewString(), ExpiresAt: time.Now().Add(5 * time.Minute), Config: cfg, Concurrency: 1, Targets: []string{}, jobs: jobs, RetryMediaID: retryMediaID, Notice: "每项最多调用一次 MSG 取链流程；OpenList 正常为 1 次 /api/fs/link，430004 缓存恢复可能列父目录后再取链，不设置 refresh=true。底层 115 通常涉及文件查询和签发，Token 刷新可能增加请求；CDN 读取次数和流量由文件结构决定。并发 1，失败即停止本轮，无任务自动重试。真实访问 115/CDN 可能限流、封禁或链路失败。"}
 	targets := map[string]bool{}
 	for _, job := range plan.jobs {
 		var media model.Media
