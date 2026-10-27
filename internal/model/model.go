@@ -65,6 +65,7 @@ func AllModels() []interface{} {
 		&STRMRecord{},
 		&PlayProfile{},
 		&StorageConfig{},
+		&MediaProbeCampaign{},
 		&AssistantSession{},
 		&AssistantMessage{},
 		&RegistrationCode{},

@@ -3,6 +3,7 @@ import { Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { mediaProbeExchangeAPI, type ProbeExchangePreview } from '../api/mediaProbeExchange'
+import { MediaProbeCampaignSection } from './MediaProbeCampaignSection'
 
 const labels: Record<string, string> = {
   completed: '基础信息已补齐', partial: '部分信息未知', unchanged: '无需修改',
@@ -81,10 +82,10 @@ export function MediaProbeExchangeSection({ disabled, libraryIDs, onImported }: 
 
   const writeCount = preview?.changes.filter(change => change.after && Object.keys(change.after).length > 0).length ?? 0
 
-  return <details className="rounded-xl border border-gray-200 p-4">
-    <summary className="cursor-pointer text-sm font-semibold text-ink-600">第二账号离线补齐</summary>
+  return <div className="space-y-3"><MediaProbeCampaignSection disabled={disabled} libraryIDs={libraryIDs} onImported={onImported} /><details className="rounded-xl border border-gray-200 p-4">
+    <summary className="cursor-pointer text-sm font-semibold text-ink-600">高级：手动交换任务文件</summary>
     <div className="mt-3 space-y-3">
-      <p className="text-xs leading-6 text-sand-600">独立节点可按清单自动转存到第二账号，校验副本后补齐信息。首次需要配置来源分享和第二账号授权。导出只读取媒体记录并保存任务快照，不访问 115；导入只更新通过文件校验的技术信息。导出范围沿用已保存的媒体库选择，未选择时覆盖全部云端媒体库。</p>
+      <p className="text-xs leading-6 text-sand-600">手动交换用于离线审查或故障处理。日常使用上方自动补齐入口，无需创建分享、填写目录 ID 或操作任务文件。导出范围沿用已保存的媒体库选择。</p>
       <div className="flex flex-wrap gap-2">
         <button type="button" disabled={disabled || busy} className="btn-outline gap-1.5 px-3 py-2 text-xs disabled:opacity-50" onClick={() => void perform(exportManifest)}><Download size={14} />导出任务清单</button>
         <label className={`btn-outline gap-1.5 px-3 py-2 text-xs ${disabled || busy ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}><Upload size={14} />导入结果并预览<input type="file" accept="application/json,.json" className="sr-only" disabled={disabled || busy} aria-label="选择独立节点结果包" onChange={event => {
@@ -113,5 +114,5 @@ export function MediaProbeExchangeSection({ disabled, libraryIDs, onImported }: 
         <button type="button" className="btn-outline px-3 py-2 text-xs" onClick={() => { setPreview(null); setBundle(null); setSourceConfirmed(false) }}>关闭预览</button>
       </div>}
     </div>
-  </details>
+  </details></div>
 }

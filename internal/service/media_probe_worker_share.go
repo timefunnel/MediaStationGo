@@ -187,7 +187,10 @@ func (c *probeShareClient) request(ctx context.Context, kind, endpoint string, f
 	if kind == "receive" {
 		req.Header.Set("Origin", "https://115cdn.com")
 	}
-	if kind == "receive" || kind == "cookie_identity" {
+	if kind == "create_share" {
+		req.Header.Set("Referer", "https://webapi.115.com")
+	}
+	if kind == "receive" || kind == "cookie_identity" || kind == "create_share" {
 		req.Header.Set("Cookie", c.cookie)
 	}
 	if form != nil {
@@ -256,7 +259,7 @@ func (c *probeShareClient) verifyAccount(ctx context.Context, expected string) e
 		State json.RawMessage `json:"state"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil || result.Errno != 0 || strconv.FormatInt(int64(result.ID), 10) != expected || (len(result.State) > 0 && string(result.State) != "true" && string(result.State) != "1") {
-		return errors.New("B Cookie 的实际身份无效或不匹配，未转存")
+		return errors.New("Cookie 的实际身份无效或不匹配，未转存")
 	}
 	return nil
 }

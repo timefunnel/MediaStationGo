@@ -130,6 +130,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("license.public_key", defaultLicensePublicKey)
 
 	v.SetDefault("resource_import.enabled", false)
+	v.SetDefault("media_probe_worker.url", "")
+	v.SetDefault("media_probe_worker.token", "")
 	v.SetDefault("resource_import.pipeline_url", "")
 	v.SetDefault("resource_import.pipeline_token", "")
 	v.SetDefault("resource_import.max_concurrent", 3)

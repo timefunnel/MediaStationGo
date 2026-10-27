@@ -66,7 +66,7 @@ func (g *probeWorkerGate) take(ctx context.Context, kind string) error {
 			if s.RefreshRequests >= 1 {
 				return errProbeWorkerBudget
 			}
-		case "share":
+		case "share", "create_share":
 			if s.ShareRequests >= l.ShareRequests {
 				return errProbeWorkerBudget
 			}
@@ -113,7 +113,7 @@ func (g *probeWorkerGate) take(ctx context.Context, kind string) error {
 			s.IdentityRequests++
 		case "refresh":
 			s.RefreshRequests++
-		case "share":
+		case "share", "create_share":
 			s.ShareRequests++
 		case "receive":
 			s.ReceiveRequests++

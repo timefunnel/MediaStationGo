@@ -9,10 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
@@ -29,8 +31,11 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "serve" {
+		return serve(ctx, args[1:])
+	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
-		_, err := fmt.Fprintln(stdout, "media-probe-worker init|batches|plan|run|credentials-template|sources-template\ninit -manifest FILE -out BATCH\nsources-template -manifest FILE -out SOURCES\nbatches -manifest FILE -batch CONFIGURED_BATCH -sources SOURCES -batch-size 10 -out BATCHES\nplan -manifest FILE -batch BATCH_OR_BATCHES [-batch-index 0] -sources SOURCES -out PLAN\nrun -manifest FILE -plan PLAN -sources SOURCES -credentials SECRET -state CHECKPOINT -out RESULTS -approve DIGEST [-reuse-state PREVIOUS] [-ffprobe ffprobe]\ncredentials-template -out SECRET\ninit/batches/plan/template 均不联网；run 只执行已审阅的有限计划，需另行授权真实 115/CDN 请求。")
+		_, err := fmt.Fprintln(stdout, "media-probe-worker serve|init|batches|plan|run|credentials-template|sources-template\nserve -credentials SECRET -state-dir DIRECTORY [-listen 127.0.0.1:8786] [-ffprobe ffprobe] (MEDIA_PROBE_NODE_TOKEN from environment)\ninit -manifest FILE -out BATCH\nsources-template -manifest FILE -out SOURCES\nbatches -manifest FILE -batch CONFIGURED_BATCH -sources SOURCES -batch-size 10 -out BATCHES\nplan -manifest FILE -batch BATCH_OR_BATCHES [-batch-index 0] -sources SOURCES -out PLAN\nrun -manifest FILE -plan PLAN -sources SOURCES -credentials SECRET -state CHECKPOINT -out RESULTS -approve DIGEST [-reuse-state PREVIOUS] [-ffprobe ffprobe]\ncredentials-template -out SECRET\ninit/batches/plan/template 均不联网；run 只执行已审阅的有限计划，需另行授权真实 115/CDN 请求。")
 		return err
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
@@ -38,7 +43,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	manifestPath := flags.String("manifest", "", "MSG 导出的原始任务清单")
 	batchPath := flags.String("batch", "", "用户确认的 B 转存目录和任务批次")
 	planPath := flags.String("plan", "", "离线生成的有限执行计划")
-	secretPath := flags.String("credentials", "", "B 的私密令牌文件，仅 run 读取")
+	secretPath := flags.String("credentials", "", "B 的私密令牌文件")
 	sourcesPath := flags.String("sources", "", "私密来源分享配置，plan 固定摘要，run 核对")
 	batchSize := flags.Int("batch-size", 10, "整库离线分批大小，最多 100")
 	batchIndex := flags.Int("batch-index", -1, "从离线批次集合选择索引，从 0 开始")
@@ -160,4 +165,36 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	default:
 		return errors.New("未知命令，请使用 help")
 	}
+}
+
+func serve(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	listen := flags.String("listen", "127.0.0.1:8786", "私有监听地址；公网访问应由 HTTPS 代理保护")
+	secret := flags.String("credentials", "", "B 凭据文件")
+	directory := flags.String("state-dir", "", "私密状态目录")
+	binary := flags.String("ffprobe", "ffprobe", "ffprobe 路径")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("不支持额外位置参数")
+	}
+	node, err := service.NewProbeNode(os.Getenv("MEDIA_PROBE_NODE_TOKEN"), *secret, *directory, *binary, version)
+	if err != nil {
+		return err
+	}
+	lockPath := filepath.Join(*directory, ".node.lock")
+	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return errors.New("节点状态目录已被使用；异常退出后需核对锁")
+	}
+	lock.Close()
+	defer os.Remove(lockPath)
+	server := &http.Server{Addr: *listen, Handler: node, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, WriteTimeout: 16 * time.Minute, IdleTimeout: 30 * time.Second}
+	go func() { <-ctx.Done(); _ = server.Close() }()
+	err = server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
