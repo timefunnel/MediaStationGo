@@ -24,6 +24,7 @@ type accountFixture struct {
 	cookieID, cookieActual, tokenID string
 	status                          int
 	failPath                        string
+	replies                         map[string]string
 	calls                           []string
 	challenge                       string
 	clock                           time.Time
@@ -40,7 +41,7 @@ func newAccountFixture(t *testing.T) *accountFixture {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, r.URL.Path)
 		cookie, token := r.Header.Get("Cookie"), r.Header.Get("Authorization")
-		if r.URL.Path == "/files/uploadinfo" {
+		if r.URL.Path == "/files/uploadinfo" || r.URL.Path == "/api/2.0/prompt.php" || r.URL.Path == "/api/2.0/slogin.php" {
 			if !strings.Contains(cookie, "UID="+f.cookieID+"_") || token != "" {
 				t.Error("wrong Cookie boundary")
 			}
@@ -54,6 +55,10 @@ func newAccountFixture(t *testing.T) *accountFixture {
 		if r.URL.Path == f.failPath {
 			w.WriteHeader(429)
 			io.WriteString(w, "private-upstream-details")
+			return
+		}
+		if body, ok := f.replies[r.URL.Path]; ok {
+			io.WriteString(w, body)
 			return
 		}
 		switch r.URL.Path {
@@ -84,6 +89,14 @@ func newAccountFixture(t *testing.T) *accountFixture {
 				t.Error("invalid PKCE device request")
 			}
 			io.WriteString(w, `{"code":0,"data":{"uid":"open-qr","time":123,"sign":"open-sign"}}`)
+		case "/api/2.0/prompt.php", "/api/2.0/slogin.php":
+			if r.Method != "GET" || r.URL.Query().Get("uid") != "open-qr" {
+				t.Error("wrong automatic grant QR")
+			}
+			if r.URL.Path == "/api/2.0/slogin.php" && (r.URL.Query().Get("key") != "open-qr" || r.URL.Query().Get("client") != "0") {
+				t.Error("wrong automatic grant confirmation")
+			}
+			io.WriteString(w, `{"state":1}`)
 		case "/open/deviceCodeToToken":
 			r.ParseForm()
 			verifier := r.Form.Get("code_verifier")
@@ -173,7 +186,19 @@ func pollAccountTest(t *testing.T, f *accountFixture, id string) (int, ProbeAcco
 	return accountCall(t, f, "/v1/account/poll", map[string]any{"session_id": id}, true)
 }
 
-func TestProbeAccountTwoGrantsSaveOnlyVerifiedB(t *testing.T) {
+func finishAccountTest(t *testing.T, f *accountFixture, id string) (int, ProbeAccountView, string) {
+	t.Helper()
+	for range 3 {
+		code, view, body := pollAccountTest(t, f, id)
+		if code != 200 || !probeAccountPending(view.Phase) {
+			return code, view, body
+		}
+	}
+	t.Fatal("automatic authorization did not finish in three bounded steps")
+	return 0, ProbeAccountView{}, ""
+}
+
+func TestProbeAccountOneHumanScanSavesOnlyVerifiedB(t *testing.T) {
 	f := newAccountFixture(t)
 	code, view, _ := accountCall(t, f, "/v1/status", nil, true)
 	if code != 200 || view.Configured || len(f.calls) != 0 {
@@ -181,15 +206,28 @@ func TestProbeAccountTwoGrantsSaveOnlyVerifiedB(t *testing.T) {
 	}
 	view = startAccountTest(t, f)
 	code, view, body := pollAccountTest(t, f, view.SessionID)
-	if code != 200 || view.Phase != "open_wait" || view.Configured || view.PendingAccountID != "42" || view.AccountID != "" {
+	if code != 200 || view.Phase != "open_prepare" || view.Image != "" || view.Configured || view.PendingAccountID != "42" || view.AccountID != "" {
 		t.Fatalf("first grant: %d %s", code, body)
 	}
 	if _, err := os.Stat(f.node.credentials); !os.IsNotExist(err) {
 		t.Fatal("partial grant must remain in RAM")
 	}
+	for _, phase := range []string{"open_confirm", "open_token"} {
+		code, view, body = pollAccountTest(t, f, view.SessionID)
+		if code != 200 || view.Phase != phase || view.Image != "" || view.Configured {
+			t.Fatalf("automatic phase: %d %s", code, body)
+		}
+		if _, err := os.Stat(f.node.credentials); !os.IsNotExist(err) {
+			t.Fatal("incomplete automatic grant saved credentials")
+		}
+	}
 	code, view, body = pollAccountTest(t, f, view.SessionID)
 	if code != 200 || view.Phase != "ready" || view.AccountID != "42" || !view.Configured || view.Image != "" || view.Requests != 10 || len(f.calls) != 10 {
-		t.Fatalf("second grant: %d %s calls=%d", code, body, len(f.calls))
+		t.Fatalf("automatic grant: %d %s calls=%d", code, body, len(f.calls))
+	}
+	want := []string{"/api/1.0/web/1.0/token/", "/api/1.0/web/1.0/qrcode", "/get/status/", "/app/1.0/web/1.0/login/qrcode/", "/files/uploadinfo", "/open/authDeviceCode", "/api/2.0/prompt.php", "/api/2.0/slogin.php", "/open/deviceCodeToToken", "/open/user/info"}
+	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("unexpected authorization sequence: %v", f.calls)
 	}
 	credentials, err := readProbeWorkerCredentials(f.node.credentials)
 	if err != nil || credentials.UserID != "42" || credentials.AccessToken != "new-access" || credentials.RefreshToken != "new-refresh" || credentials.Cookie == "" || credentials.ExpiresAt <= f.clock.Unix() {
@@ -237,7 +275,7 @@ func TestProbeAccountRejectsWrongAccountsPreservesExistingB(t *testing.T) {
 				if code != 200 || next.AccountID != "90" || next.PendingAccountID != "42" {
 					t.Fatalf("saved B identity changed before commit: %s", body)
 				}
-				code, _, body = pollAccountTest(t, f, view.SessionID)
+				code, _, body = finishAccountTest(t, f, view.SessionID)
 			}
 			if code == 200 {
 				t.Fatalf("wrong account accepted: %s", body)
@@ -373,5 +411,131 @@ func TestProbeAccountGuardsCancellationAndLocalLogout(t *testing.T) {
 	}
 	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "existing-task" {
 		t.Fatal("logout affected task state")
+	}
+}
+
+func TestProbeAccountAutomaticGrantErrorsStopWithoutAnotherQR(t *testing.T) {
+	for _, endpoint := range []string{"/open/authDeviceCode", "/api/2.0/prompt.php", "/api/2.0/slogin.php", "/open/deviceCodeToToken", "/open/user/info"} {
+		t.Run(endpoint, func(t *testing.T) {
+			f := newAccountFixture(t)
+			old := probeWorkerCredentials{UserID: "90", AccessToken: "old-access", Cookie: "UID=90_session; CID=old-cid; SEID=old-seid"}
+			if err := WriteProbeWorkerJSON(f.node.credentials, old); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(f.node.credentials)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := startAccountTest(t, f)
+			code, view, body := pollAccountTest(t, f, view.SessionID)
+			if code != 200 || view.Phase != "open_prepare" {
+				t.Fatalf("cookie confirmation: %s", body)
+			}
+			f.failPath = endpoint
+			code, _, body = finishAccountTest(t, f, view.SessionID)
+			if code == 200 || strings.Contains(body, "private-upstream-details") {
+				t.Fatalf("automatic failure hidden or leaked: %s", body)
+			}
+			after, err := os.ReadFile(f.node.credentials)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("failed automatic authorization changed old credentials")
+			}
+			count := len(f.calls)
+			_, failed, _ := pollAccountTest(t, f, view.SessionID)
+			if len(f.calls) != count || failed.Phase != "failed" || failed.Image != "" || failed.PendingAccountID != "" {
+				t.Fatal("automatic failure retried or requested another scan")
+			}
+			for _, path := range f.calls[2:] {
+				if path == "/api/1.0/web/1.0/qrcode" || path == "/api/1.0/web/1.0/token/" {
+					t.Fatal("automatic failure fell back to manual QR")
+				}
+			}
+		})
+	}
+}
+
+func TestProbeAccountRejectsUnconfirmedAutomaticAcknowledgements(t *testing.T) {
+	for _, body := range []string{`{"state":false,"errno":911}`, `{"data":{}}`, `{"state":true,"code":1}`, `{"state":true,"errno":911}`, `not-json`} {
+		t.Run(body, func(t *testing.T) {
+			f := newAccountFixture(t)
+			view := startAccountTest(t, f)
+			code, view, _ := pollAccountTest(t, f, view.SessionID)
+			if code != 200 {
+				t.Fatal("cookie grant failed")
+			}
+			f.replies = map[string]string{"/api/2.0/prompt.php": body}
+			code, _, _ = pollAccountTest(t, f, view.SessionID)
+			if code == 200 {
+				t.Fatal("unconfirmed automatic scan accepted")
+			}
+			if _, err := os.Stat(f.node.credentials); !os.IsNotExist(err) {
+				t.Fatal("unconfirmed grant was saved")
+			}
+		})
+	}
+}
+
+func TestProbeAccountLastAllowedScanStillCompletesWithin29Requests(t *testing.T) {
+	f := newAccountFixture(t)
+	view := startAccountTest(t, f)
+	f.status = 0
+	for range probeAccountMaxPolls - 1 {
+		code, _, body := pollAccountTest(t, f, view.SessionID)
+		if code != 200 {
+			t.Fatal(body)
+		}
+	}
+	f.status = 2
+	code, view, body := pollAccountTest(t, f, view.SessionID)
+	if code != 200 {
+		t.Fatal(body)
+	}
+	code, view, body = finishAccountTest(t, f, view.SessionID)
+	if code != 200 || view.Phase != "ready" || view.Requests != 29 || len(f.calls) != 29 {
+		t.Fatalf("last allowed scan cannot complete: %s calls=%d", body, len(f.calls))
+	}
+}
+
+func TestProbeAccountCancellationExpiryAndBudgetDuringAutomaticGrant(t *testing.T) {
+	for _, action := range []string{"cancel", "expire", "budget"} {
+		t.Run(action, func(t *testing.T) {
+			f := newAccountFixture(t)
+			view := startAccountTest(t, f)
+			code, view, body := pollAccountTest(t, f, view.SessionID)
+			if code != 200 {
+				t.Fatal(body)
+			}
+			code, view, body = pollAccountTest(t, f, view.SessionID)
+			if code != 200 || view.Phase != "open_confirm" {
+				t.Fatal(body)
+			}
+			partial := f.node.login.session
+			before := len(f.calls)
+			switch action {
+			case "cancel":
+				code, view, body = accountCall(t, f, "/v1/account/cancel", map[string]any{"session_id": view.SessionID}, true)
+				if code != 200 || view.Phase != "logged_out" {
+					t.Fatal(body)
+				}
+			case "expire":
+				f.clock = f.clock.Add(6 * time.Minute)
+				code, view, body = pollAccountTest(t, f, view.SessionID)
+				if code != 200 || view.Phase != "failed" {
+					t.Fatal(body)
+				}
+			case "budget":
+				partial.view.Requests = probeAccountMaxRequests
+				code, _, _ = pollAccountTest(t, f, view.SessionID)
+				if code == 200 {
+					t.Fatal("automatic grant exceeded request budget")
+				}
+			}
+			if len(f.calls) != before || partial.candidate.Cookie != "" || partial.verifier != "" || partial.qr.UID != "" {
+				t.Fatal("stopped automatic grant called 115 or retained secrets")
+			}
+			if _, err := os.Stat(f.node.credentials); !os.IsNotExist(err) {
+				t.Fatal("stopped automatic grant saved credentials")
+			}
+		})
 	}
 }

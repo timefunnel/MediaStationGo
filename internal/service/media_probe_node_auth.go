@@ -23,8 +23,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const probeAccountMaxRequests = 48
-const probeAccountMaxPolls = 20 // Per QR; two distinct grants, not two accounts.
+const probeAccountMaxRequests = 29 // One QR + image, 20 status checks, 7 grant/identity requests.
+const probeAccountMaxPolls = 20
 
 type ProbeAccountView struct {
 	Available        bool      `json:"available"`
@@ -66,9 +66,17 @@ func newProbeAccountLogin() *probeAccountLogin {
 	return &probeAccountLogin{qrBase: "https://qrcodeapi.115.com", passportBase: "https://passportapi.115.com", webBase: "https://webapi.115.com", appID: "100197303", now: time.Now}
 }
 
+func probeAccountPending(phase string) bool {
+	switch phase {
+	case "cookie_wait", "open_prepare", "open_confirm", "open_token":
+		return true
+	}
+	return false
+}
+
 func (n *ProbeNode) accountActive() bool {
 	s := n.login.session
-	if s == nil || (s.view.Phase != "cookie_wait" && s.view.Phase != "open_wait") {
+	if s == nil || !probeAccountPending(s.view.Phase) {
 		return false
 	}
 	if !n.login.now().Before(s.view.ExpiresAt) {
@@ -90,9 +98,7 @@ func (n *ProbeNode) accountView() (ProbeAccountView, error) {
 		return view, err
 	}
 	if s := n.login.session; s != nil {
-		if (s.view.Phase == "cookie_wait" || s.view.Phase == "open_wait") && !n.login.now().Before(s.view.ExpiresAt) {
-			n.failAccount(errors.New("授权已过期，请重新开始"))
-		}
+		n.accountActive() // Expire partial grants before exposing local state.
 		current := s.view
 		current.Configured = view.Configured
 		current.AccountID = view.AccountID
@@ -205,6 +211,17 @@ func (n *ProbeNode) accountJSON(ctx context.Context, endpoint string, form url.V
 	if err != nil {
 		return nil, err
 	}
+	data, err = decodeProbeAccountResponse(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || string(data) == "null" {
+		return nil, errors.New("B 授权响应缺少数据")
+	}
+	return data, nil
+}
+
+func decodeProbeAccountResponse(data []byte) (json.RawMessage, error) {
 	var result struct {
 		State json.RawMessage  `json:"state"`
 		Code  *probeWireNumber `json:"code"`
@@ -218,33 +235,37 @@ func (n *ProbeNode) accountJSON(ctx context.Context, endpoint string, form url.V
 	if !stateOK || result.Code != nil && *result.Code != 0 || result.Errno != 0 {
 		return nil, errors.New("B 授权未确认成功，已停止；请在 115 中核对登录和授权状态")
 	}
-	if len(result.Data) == 0 || string(result.Data) == "null" {
-		return nil, errors.New("B 授权响应缺少数据")
-	}
 	return result.Data, nil
 }
 
-func (n *ProbeNode) accountQR(ctx context.Context, open bool) error {
-	s := n.login.session
-	endpoint := n.login.qrBase + "/api/1.0/web/1.0/token/"
-	var form url.Values
-	if open {
-		secret := make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			return err
-		}
-		s.verifier = hex.EncodeToString(secret)
-		digest := sha256.Sum256([]byte(s.verifier))
-		form = url.Values{"client_id": {n.login.appID}, "code_challenge": {base64.StdEncoding.EncodeToString(digest[:])}, "code_challenge_method": {"sha256"}}
-		endpoint = n.login.qrBase + "/open/authDeviceCode"
-	}
-	data, err := n.accountJSON(ctx, endpoint, form, "", "", false)
+// Scan/confirm are acknowledgements; unlike token responses, data may be absent.
+func (n *ProbeNode) accountAck(ctx context.Context, endpoint string) error {
+	body, err := n.accountRequest(ctx, endpoint, nil, n.login.session.candidate.Cookie, "", false, false)
 	if err != nil {
 		return err
 	}
+	_, err = decodeProbeAccountResponse(body)
+	return err
+}
+
+func parseProbeAccountQR(data []byte) (probeAccountQR, error) {
 	var qr probeAccountQR
 	if err := json.Unmarshal(data, &qr); err != nil || qr.UID == "" || len(qr.UID) > 256 || qr.Time <= 0 || qr.Sign == "" || len(qr.Sign) > 256 {
-		return errors.New("B 授权二维码响应无效")
+		return qr, errors.New("B 授权二维码响应无效")
+	}
+	return qr, nil
+}
+
+func (n *ProbeNode) accountQR(ctx context.Context) error {
+	s := n.login.session
+	endpoint := n.login.qrBase + "/api/1.0/web/1.0/token/"
+	data, err := n.accountJSON(ctx, endpoint, nil, "", "", false)
+	if err != nil {
+		return err
+	}
+	qr, err := parseProbeAccountQR(data)
+	if err != nil {
+		return err
 	}
 	image, err := n.accountRequest(ctx, n.login.qrBase+"/api/1.0/web/1.0/qrcode?uid="+url.QueryEscape(qr.UID), nil, "", "", false, true)
 	if err != nil {
@@ -256,9 +277,6 @@ func (n *ProbeNode) accountQR(ctx context.Context, open bool) error {
 	}
 	s.qr, s.polls = qr, 0
 	s.view.Phase = "cookie_wait"
-	if open {
-		s.view.Phase = "open_wait"
-	}
 	s.view.Image = "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
 	return nil
 }
@@ -286,7 +304,7 @@ func (n *ProbeNode) startAccount(ctx context.Context, aID string) (*ProbeAccount
 	})
 	work, cancel := context.WithDeadline(ctx, n.login.session.view.ExpiresAt)
 	defer cancel()
-	if err := n.accountQR(work, false); err != nil {
+	if err := n.accountQR(work); err != nil {
 		n.failAccount(err)
 		return nil, err
 	}
@@ -305,6 +323,29 @@ func (n *ProbeNode) pollAccount(ctx context.Context, id string) (*ProbeAccountVi
 	}
 	work, cancel := context.WithDeadline(ctx, s.view.ExpiresAt)
 	defer cancel()
+	// Advance one bounded step per UI request. Only cookie_wait polls 115.
+	// This keeps each request cancellable and avoids a second human QR scan.
+	if s.view.Phase != "cookie_wait" {
+		var err error
+		switch s.view.Phase {
+		case "open_prepare":
+			err = n.prepareAccountOpen(work)
+		case "open_confirm":
+			query := url.Values{"key": {s.qr.UID}, "uid": {s.qr.UID}, "client": {"0"}}
+			err = n.accountAck(work, n.login.qrBase+"/api/2.0/slogin.php?"+query.Encode())
+			if err == nil {
+				s.view.Phase = "open_token"
+			}
+		case "open_token":
+			err = n.finishAccountToken(work)
+		}
+		if err != nil {
+			n.failAccount(err)
+			return nil, err
+		}
+		view := s.view
+		return &view, nil
+	}
 	query := url.Values{"uid": {s.qr.UID}, "time": {strconv.FormatInt(int64(s.qr.Time), 10)}, "sign": {s.qr.Sign}}
 	data, err := n.accountJSON(work, n.login.qrBase+"/get/status/?"+query.Encode(), nil, "", "", true)
 	if err != nil {
@@ -322,11 +363,7 @@ func (n *ProbeNode) pollAccount(ctx context.Context, id string) (*ProbeAccountVi
 			view := s.view
 			return &view, nil
 		case 2:
-			if s.view.Phase == "cookie_wait" {
-				err = n.finishAccountCookie(work)
-			} else {
-				err = n.finishAccountToken(work)
-			}
+			err = n.finishAccountCookie(work)
 		case -1, -2:
 			err = errors.New("B 授权二维码已过期或已取消")
 		default:
@@ -391,7 +428,33 @@ func (n *ProbeNode) finishAccountCookie(ctx context.Context) error {
 	}
 	s.candidate = probeWorkerCredentials{UserID: id, Cookie: cookie}
 	s.view.PendingAccountID = id
-	return n.accountQR(ctx, true)
+	s.view.Phase, s.view.Image, s.qr = "open_prepare", "", probeAccountQR{}
+	return nil
+}
+
+func (n *ProbeNode) prepareAccountOpen(ctx context.Context) error {
+	s := n.login.session
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return err
+	}
+	s.verifier = hex.EncodeToString(secret)
+	digest := sha256.Sum256([]byte(s.verifier))
+	form := url.Values{"client_id": {n.login.appID}, "code_challenge": {base64.StdEncoding.EncodeToString(digest[:])}, "code_challenge_method": {"sha256"}}
+	data, err := n.accountJSON(ctx, n.login.qrBase+"/open/authDeviceCode", form, "", "", false)
+	if err != nil {
+		return err
+	}
+	qr, err := parseProbeAccountQR(data)
+	if err != nil {
+		return err
+	}
+	s.qr = qr
+	if err := n.accountAck(ctx, n.login.qrBase+"/api/2.0/prompt.php?"+url.Values{"uid": {qr.UID}}.Encode()); err != nil {
+		return err
+	}
+	s.view.Phase = "open_confirm"
+	return nil
 }
 
 func (n *ProbeNode) finishAccountToken(ctx context.Context) error {
@@ -416,7 +479,7 @@ func (n *ProbeNode) finishAccountToken(ctx context.Context) error {
 		ID probeWireNumber `json:"user_id"`
 	}
 	if err := json.Unmarshal(identity, &actual); err != nil || strconv.FormatInt(int64(actual.ID), 10) != s.candidate.UserID || s.candidate.UserID == s.aID {
-		return errors.New("两次扫码不是同一个 B 账号，未保存任何新凭据")
+		return errors.New("B 登录与开放平台授权的账号不一致，未保存任何新凭据")
 	}
 	s.candidate.AccessToken, s.candidate.RefreshToken, s.candidate.ExpiresAt = result.Access, result.Refresh, n.login.now().Unix()+int64(result.Expires)
 	owner, err := os.OpenFile(n.credentials+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
