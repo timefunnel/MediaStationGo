@@ -24,6 +24,7 @@ type ProbeNode struct {
 	client                                         *http.Client
 	base                                           string
 	wait                                           func(context.Context, time.Duration) error
+	login                                          *probeAccountLogin
 }
 
 type ProbeNodeBatch struct {
@@ -47,14 +48,21 @@ func NewProbeNode(token, credentials, directory, binary, version string) (*Probe
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, err
 	}
-	if _, err := readProbeWorkerCredentials(credentials); err != nil {
+	if _, err := os.Lstat(credentials); err == nil {
+		if _, err := readProbeWorkerCredentials(credentials); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, errors.New("B 凭据路径不可访问")
+	}
+	if err := os.MkdirAll(filepath.Dir(credentials), 0700); err != nil {
 		return nil, err
 	}
 	if _, err := newProbeWorkerProber(binary); err != nil {
 		return nil, err
 	}
 	return &ProbeNode{token: token, credentials: credentials, directory: directory, binary: binary, version: version,
-		run: RunProbeWorker, client: newProbeWorkerHTTPClient(), base: "https://proapi.115.com"}, nil
+		run: RunProbeWorker, client: newProbeWorkerHTTPClient(), base: "https://proapi.115.com", login: newProbeAccountLogin()}, nil
 }
 
 func (n *ProbeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,13 +79,27 @@ func (n *ProbeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(value)
 	}
-	credentials, err := readProbeWorkerCredentials(n.credentials)
-	if err != nil {
-		respond(nil, err)
+	if r.URL.Path == "/v1/account" || strings.HasPrefix(r.URL.Path, "/v1/account/") {
+		n.serveAccount(w, r, respond)
 		return
 	}
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/status" {
-		if err := validateProbeWorkerCookie(credentials.Cookie, credentials.UserID); err != nil {
+		if !n.mu.TryLock() {
+			respond(nil, errors.New("独立节点已有任务运行"))
+			return
+		}
+		defer n.mu.Unlock()
+		view, err := n.accountView()
+		if err != nil {
+			respond(nil, err)
+			return
+		}
+		if !view.Configured || n.accountActive() {
+			respond(map[string]any{"configured": false, "account_id": view.AccountID}, nil)
+			return
+		}
+		credentials, err := readProbeWorkerCredentials(n.credentials)
+		if err != nil {
 			respond(nil, err)
 			return
 		}
@@ -97,6 +119,15 @@ func (n *ProbeNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer n.mu.Unlock()
+	if n.accountActive() {
+		respond(nil, errors.New("请先完成或取消 B 授权"))
+		return
+	}
+	credentials, err := readProbeWorkerCredentials(n.credentials)
+	if err != nil {
+		respond(nil, err)
+		return
+	}
 	decode := func(dst any) error {
 		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, ProbeExchangeMaxBytes))
 		d.DisallowUnknownFields()

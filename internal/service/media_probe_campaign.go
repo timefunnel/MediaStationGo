@@ -118,14 +118,18 @@ func newProbeCampaignSourceClient(storage *StorageConfigService) *http.Client {
 	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
-func (s *MediaProbeCampaignService) configured() bool {
+func (s *MediaProbeCampaignService) nodeConfigured() bool {
 	u, err := url.Parse(s.nodeURL)
 	if err != nil {
 		return false
 	}
 	ip := net.ParseIP(u.Hostname())
 	secure := u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "localhost" || ip != nil && (ip.IsLoopback() || ip.IsPrivate())))
-	return u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && secure && len(s.nodeToken) >= 32 && s.pipeline != nil && s.crypto != nil && s.crypto.aead != nil
+	return u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && secure && len(s.nodeToken) >= 32
+}
+
+func (s *MediaProbeCampaignService) configured() bool {
+	return s.nodeConfigured() && s.pipeline != nil && s.crypto != nil && s.crypto.aead != nil
 }
 
 func (s *MediaProbeCampaignService) node(ctx context.Context, endpoint string, request, response any) error {
@@ -343,7 +347,7 @@ func (s *MediaProbeCampaignService) Plan(ctx context.Context, libraryIDs []strin
 		}
 		matches := []ProbeCampaignRoot{}
 		for _, candidate := range configured.Roots {
-			if candidate.RootID == id && candidate.LibraryID == root.LibraryID && candidate.Path == root.Path && probeDecimalID(candidate.DirectoryID) && candidate.DirectoryID != "0" {
+			if candidate.RootID == id && candidate.LibraryID == root.LibraryID && probeCampaignSameRootPath(candidate.Path, root.Path) && probeDecimalID(candidate.DirectoryID) && candidate.DirectoryID != "0" {
 				matches = append(matches, candidate)
 			}
 		}
@@ -469,6 +473,16 @@ func (s *MediaProbeCampaignService) execute(ctx context.Context, state *probeCam
 	}
 	if aID != state.AAccountID || aID == state.View.Plan.AccountID {
 		return errors.New("来源账号在预览后变化")
+	}
+	var status struct {
+		Configured bool   `json:"configured"`
+		AccountID  string `json:"account_id"`
+	}
+	if err := s.node(ctx, "/v1/status", nil, &status); err != nil {
+		return err
+	}
+	if !status.Configured || status.AccountID != state.View.Plan.AccountID {
+		return errors.New("B 账号在预览后发生变化或正在授权，未创建 A 分享")
 	}
 	var uploaded struct {
 		Digest string `json:"digest"`
@@ -602,6 +616,12 @@ func (s *MediaProbeCampaignService) execute(ctx context.Context, state *probeCam
 		}
 	}
 	return nil
+}
+
+func probeCampaignSameRootPath(a, b string) bool {
+	left, e1 := exchangeSourcePath(a)
+	right, e2 := exchangeSourcePath(b)
+	return e1 == nil && e2 == nil && left == right
 }
 
 func addProbeCampaignStats(a *ProbeWorkerStats, b ProbeWorkerStats) {

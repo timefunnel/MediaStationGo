@@ -26,7 +26,7 @@ media-probe-worker init -manifest /private/manifest.json -out /private/config.js
 
 凭据文件填写 B 的 user_id、access_token、refresh_token、可选 expires_at（Unix 秒，未知填 0），以及 cookie。自动转存使用 B Cookie；列 B 目录、建目录、取链使用 B OpenAPI Token，二者必须属于同一用户。运行前分别请求实际身份核验，不仅检查文件中的用户 ID。已有副本模式不需要 Cookie。
 
-用户按 [OpenList 开放平台授权说明](https://doc.oplist.org/guide/drivers/115_open)完成官方授权，通过自己的登录会话取得 B Cookie。CLI 不轮询二维码，不接收密码或验证码。不要将 Cookie/Token 放进聊天、Git、命令参数或日志，只提供私密文件路径。Linux 凭据及来源文件权限须 0600 或更严格，目录建议 0700；Windows 由用户限制私密目录 ACL。一个实例独占同一凭据文件，不与其他实例并行刷新同一令牌。
+日常自动任务使用 [管理页面的 B 独立授权](secondary-account-media-probe-campaign.md)：两次扫码成功后凭据直接保存到节点，无需手工填写。上面的模板仅供离线 CLI 诊断；CLI 不轮询二维码，不接收密码或验证码。不要将 Cookie/Token 放进聊天、Git、命令参数或日志，只提供私密文件路径。Linux 凭据及来源文件权限须 0600 或更严格，目录建议 0700；Windows 由用户限制私密目录 ACL。一个实例独占同一凭据文件，不与其他实例并行刷新同一令牌。
 
 在 sources.json 中按库根填写分享来源，以下标识均为占位值：
 

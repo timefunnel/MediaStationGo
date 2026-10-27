@@ -367,3 +367,64 @@ func TestProbeCampaignSourceKeepsExistingEgress(t *testing.T) {
 		t.Fatal("A egress changed or request became unbounded")
 	}
 }
+
+func TestProbeCampaignMatchesDecodedLibraryRoot(t *testing.T) {
+	f := newCampaignFixture(t, 1)
+	if err := f.service.queue.repo.DB.Model(&model.LibraryRoot{}).Where("id = ?", "root-a").Update("path", "cloud://openlist/%53ynthetic").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Plan(t.Context(), nil); err != nil {
+		t.Fatalf("same encoded root rejected: %v", err)
+	}
+	for _, pair := range [][2]string{
+		{"cloud://openlist/115%2F%E7%94%B2", "cloud://openlist/115/甲"},
+		{"cloud://openlist/Synthetic/", "cloud://openlist/Synthetic"},
+	} {
+		if !probeCampaignSameRootPath(pair[0], pair[1]) {
+			t.Fatal("equivalent root paths differ")
+		}
+	}
+	for _, other := range []string{"cloud://openlist/Synthetic2", "cloud://other/Synthetic", "cloud://openlist/Synthetic/child", "cloud://openlist/Synthetic?x=1", "cloud://openlist/%xx"} {
+		if probeCampaignSameRootPath("cloud://openlist/Synthetic", other) {
+			t.Fatalf("different root accepted: %s", other)
+		}
+	}
+	if f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
+		t.Fatal("root matching contacted 115")
+	}
+}
+
+func TestProbeCampaignAccountChangeStopsBeforeAShare(t *testing.T) {
+	f := newCampaignFixture(t, 1)
+	plan, err := f.service.Plan(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProbeWorkerJSON(f.node.credentials, probeWorkerCredentials{UserID: "43", AccessToken: "changed-access", Cookie: "UID=43_session; CID=changed-cid; SEID=changed-seid"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.Start(t.Context(), plan.ID, plan.Digest, true); err != nil {
+		t.Fatal(err)
+	}
+	view := waitCampaign(t, f)
+	if view.Status != "stopped" || view.Error == "" || f.aCalls.Load() != 0 || f.bCalls.Load() != 0 || f.runs.Load() != 0 {
+		t.Fatalf("account change did not stop before cloud calls: %+v", view)
+	}
+}
+
+func TestProbeCampaignAccountProxyIsIndependentAndDoesNotUse115ForStatus(t *testing.T) {
+	f := newCampaignFixture(t, 1)
+	f.service.pipeline = nil
+	view, err := f.service.Account(t.Context())
+	if err != nil || !view.Available || view.AccountID != "42" || !view.Configured {
+		t.Fatalf("account status depends on pipeline: %+v %v", view, err)
+	}
+	for _, action := range []string{"start", "logout", "unknown"} {
+		if _, err := f.service.AccountAction(t.Context(), action, "", false); err == nil {
+			t.Fatalf("unconfirmed action accepted: %s", action)
+		}
+	}
+	if f.aCalls.Load() != 0 || f.bCalls.Load() != 0 {
+		t.Fatal("status or rejected actions contacted 115")
+	}
+}

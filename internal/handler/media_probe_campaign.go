@@ -10,6 +10,29 @@ import (
 func registerProbeCampaignRoutes(queue *gin.RouterGroup, svc *service.MediaProbeCampaignService) {
 	group := queue.Group("/campaign")
 	group.Use(func(c *gin.Context) { c.Header("Cache-Control", "no-store"); c.Next() })
+	group.GET("/account", func(c *gin.Context) {
+		view, err := svc.Account(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, view)
+	})
+	group.POST("/account/:action", func(c *gin.Context) {
+		var req struct {
+			SessionID string `json:"session_id"`
+			Confirmed bool   `json:"confirmed"`
+		}
+		if !bindProbeExchange(c, &req) {
+			return
+		}
+		view, err := svc.AccountAction(c.Request.Context(), c.Param("action"), req.SessionID, req.Confirmed)
+		if err != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, view)
+	})
 	group.GET("", func(c *gin.Context) {
 		view, err := svc.Snapshot(c.Request.Context())
 		if err != nil {

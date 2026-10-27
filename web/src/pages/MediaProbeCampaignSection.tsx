@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, LONG_REQUEST_TIMEOUT } from '../api/client'
+import { ProbeAccountSection } from './ProbeAccountSection'
 
 interface CampaignPlan {
   id: string; digest: string; files: number; batches: number; b_account_id: string
@@ -22,6 +23,8 @@ export function MediaProbeCampaignSection({ disabled, libraryIDs, onImported }: 
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [accountReady, setAccountReady] = useState(false)
+  const accountChanged = useCallback(() => { setPlan(null); setConfirmed(false) }, [])
   const scopeKey = [...libraryIDs].sort().join(',')
   useEffect(() => { setPlan(null); setConfirmed(false) }, [scopeKey])
   const refresh = useCallback(async () => { const { data } = await api.get<CampaignView>(base); setView(data); return data }, [])
@@ -43,12 +46,13 @@ export function MediaProbeCampaignSection({ disabled, libraryIDs, onImported }: 
   return <section className="space-y-3 rounded-xl border border-gray-200 p-4" aria-label="第二账号自动补齐">
     <h4 className="text-sm font-semibold text-ink-600">第二账号自动补齐</h4>
     <p className="text-xs leading-6 text-sand-600">维护好 B 账号后，沿用上方已保存的媒体库选择；未选择时覆盖全部云端库。系统自动准备来源分享与暂存目录，分批转存、补齐并回填。A 账号沿用已有登录，B 账号与探测负载由独立节点管理。</p>
+    <ProbeAccountSection disabled={busy || running} onChanged={accountChanged} onAvailabilityChange={setAccountReady} />
     {view && <p className="text-xs text-sand-600">{statusLabels[view.status] || view.status}{view.phase ? ` · ${phaseLabels[view.phase] || view.phase}` : ''}{view.plan ? ` · 已回填 ${view.finished_batches}/${view.plan.batches} 批` : ''}</p>}
     {view && !view.configured && <p className="text-xs text-amber-600">独立节点尚未配置；节点部署和服务连接由管理员完成。</p>}
     {view?.error && <p role="alert" className="text-xs text-red-500">{view.error}</p>}
     {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
     <div className="flex flex-wrap gap-2">
-      <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || running || !view?.configured} onClick={() => void perform(async () => {
+      <button type="button" className="btn-outline px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || running || !view?.configured || !accountReady} onClick={() => void perform(async () => {
         setPlan(null); setConfirmed(false)
         const { data } = await api.post<CampaignPlan>(`${base}/plan`, { library_ids: libraryIDs }, { timeout: LONG_REQUEST_TIMEOUT })
         setPlan(data); await refresh()
@@ -62,7 +66,7 @@ export function MediaProbeCampaignSection({ disabled, libraryIDs, onImported }: 
       <p>{plan.notice}</p>
       <details><summary className="cursor-pointer">请求目标</summary>{plan.targets.map(target => <p key={target} className="break-words">{target}</p>)}</details>
       <label className="flex items-start gap-2"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />确认此范围和总预算，并在执行期间保持来源文件稳定。</label>
-      <button type="button" className="neon-button px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || !confirmed || view?.status !== 'planned' || view.plan?.id !== plan.id} onClick={() => void perform(async () => {
+      <button type="button" className="neon-button px-3 py-2 text-xs disabled:opacity-50" disabled={disabled || busy || !accountReady || !confirmed || view?.status !== 'planned' || view.plan?.id !== plan.id} onClick={() => void perform(async () => {
         await api.post(`${base}/start`, { id: plan.id, digest: plan.digest, confirmed: true }); setPlan(null); setConfirmed(false); await refresh()
       })}>启动自动补齐</button>
     </div>}

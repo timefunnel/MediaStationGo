@@ -8,7 +8,11 @@
 
 程序自动完成：读取 MSG 固定快照 → 匹配已有入库库根 → A 核验身份并创建库根分享 → B 创建本任务专用暂存目录 → 每批 10 项自动转存、校验、复用/共享查询/必要的 probe → MSG 校验并回填 → 下一批。完整信息不会因版本旧而单独排入任务。
 
-普通用户无需维护节点连接参数。以下配置由部署管理员完成。B 授权更新只替换节点的私密凭据文件，不复制 A 凭据，不在聊天、Git、命令参数或日志中传递凭据。首次登录仍需账号持有人完成官方授权；本实现没有新增扫码轮询。
+普通用户无需维护节点连接参数。以下配置由部署管理员完成。在页面的「B 账号授权」确认本次授权预算，然后使用 B 账号的 115 手机客户端依次扫描两个二维码：网页登录用于自动转存，开放平台授权用于目录、建目录和取链。两次实际身份必须相同且不是 A；全部成功后节点原子保存私密凭据文件。失败或取消保留原 B 登录，临时凭据仅在内存，最长 5 分钟后清除。无需提取 Cookie、Token 或手建私密文件。
+
+每次授权固定上限 48 次 115 请求：二维码获取 2 次、图片 2 次、状态查询每阶段最多 20 次共 40 次、授权兑换与身份核验共 4 次。请求串行、间隔至少 5 秒、会话最长 5 分钟；遇错停止、不重试，不访问影片或 refresh OpenList。仅页面打开且会话有效时查询扫码状态；页面关闭中断当前请求，节点不会后台轮询。二维码图片由节点按预算读取一次后内联返回，浏览器不向 115 加载图片。授权期间补齐任务不能启动。
+
+授权直接访问 `qrcodeapi.115.com`、`passportapi.115.com`、`webapi.115.com`、`proapi.115.com`，使用公开的 OpenList 应用 ID `100197303` 和设备码 PKCE（不经过第三方 OAuth 中转）。Cookie 和 Token 不进入前端、聊天、Git、命令参数或日志；页面只接收二维码及账号状态。扫码仍可能使 B 同类设备/应用旧登录失效，也存在限流、账号和链路风险。清除本地 B 登录只删除节点凭据，不撤销 115 上的授权、不删除云端副本；远端撤销由账号持有人在 115 管理。
 
 ## 管理员部署
 
@@ -18,7 +22,7 @@
 media-probe-worker serve -listen 127.0.0.1:8786 -credentials /private/115-b.json -state-dir /private/probe-state -ffprobe /usr/bin/ffprobe
 ```
 
-节点从环境变量 `MEDIA_PROBE_NODE_TOKEN` 读取至少 32 字符的服务密钥。默认仅监听回环；跨主机应通过 HTTPS 代理连接，或走已有私网。反向代理的上游读写超时须覆盖 16 分钟，禁止自动重试 POST，且不要记录请求体和 Authorization。镜像运行时须覆盖默认 entrypoint，并禁用针对 MSG Web 服务的原 healthcheck。一个状态目录只运行一个实例；异常退出保留锁，核对旧进程后由管理员处理。节点启动前检查 B 私密文件和本地 ffprobe 可执行路径。
+节点从环境变量 `MEDIA_PROBE_NODE_TOKEN` 读取至少 32 字符的服务密钥。默认仅监听回环；跨主机应通过 HTTPS 代理连接，或走已有私网。反向代理的上游读写超时须覆盖 16 分钟，禁止自动重试 POST，且不要记录请求体和 Authorization。镜像运行时须覆盖默认 entrypoint，并禁用针对 MSG Web 服务的原 healthcheck。一个状态目录只运行一个实例；异常退出保留锁，核对旧进程后由管理员处理。节点允许尚无 B 私密文件时启动，已有文件无效则明确失败；启动时仍检查本地 ffprobe 可执行路径。
 
 MSG 配置 `media_probe_worker.url`、`media_probe_worker.token`，对应环境变量 `MEDIASTATION_MEDIA_PROBE_WORKER_URL`、`MEDIASTATION_MEDIA_PROBE_WORKER_TOKEN`。远程公网 URL 必须使用 HTTPS；HTTP 仅允许回环或私网 IP。MSG 使用现有 `resource_import.pipeline_url/token` 访问 media-pipeline 的鉴权接口 `GET /v1/media-probe/roots`。该接口只返回现有库根配置，不列目录、不刷新 OpenList、不访问 115。两个服务须同时升级；缺接口或库根 ID/路径不一致时明确失败，不自动搜索云盘修补配置。
 
@@ -50,4 +54,4 @@ MSG 的任务检查点使用已有 CryptoService 加密；公开状态不含 Coo
 
 B 副本和 A 来源分享默认保留，不实施自动删除或取消分享。节点磁盘或 B 容量不足时停止。本轮未验证真实账号、分享响应、转存配额、CDN 或真实 ffprobe 链路；本地测试使用本机 HTTP 模拟服务及模拟 probe。
 
-创建分享协议参考 [p115client 源码](https://github.com/ChenyangGao/p115client/blob/main/p115client/client.py)，复用本项目已有分享清单/转存协议，不引入新的 SDK 依赖。
+创建分享、二维码和 PKCE 协议参考 [p115client 源码](https://github.com/ChenyangGao/p115client/blob/main/p115client/client.py)及其 [Open 应用授权示例](https://github.com/ChenyangGao/p115client/blob/main/docs/example/01.%E6%8E%88%E6%9D%83%E7%99%BB%E5%BD%95open%E5%BA%94%E7%94%A8.md)，复用本项目已有分享清单/转存协议，不引入新的 SDK 依赖。本轮只做本机模拟授权和任务验证，真实 115 请求为 0；尚未部署或验证真实扫码、CDN 与 ffprobe。
