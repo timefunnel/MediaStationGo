@@ -167,7 +167,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 }
 
-func serve(ctx context.Context, args []string) error {
+func serve(ctx context.Context, args []string) (resultErr error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := flags.String("listen", "127.0.0.1:8786", "私有监听地址；公网访问应由 HTTPS 代理保护")
 	secret := flags.String("credentials", "", "B 凭据文件")
@@ -183,13 +183,11 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	lockPath := filepath.Join(*directory, ".node.lock")
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	lock, err := lockNodeState(*directory)
 	if err != nil {
-		return errors.New("节点状态目录已被使用；异常退出后需核对锁")
+		return err
 	}
-	lock.Close()
-	defer os.Remove(lockPath)
+	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
 	server := &http.Server{Addr: *listen, Handler: node, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, WriteTimeout: 16 * time.Minute, IdleTimeout: 30 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Close() }()
 	err = server.ListenAndServe()
