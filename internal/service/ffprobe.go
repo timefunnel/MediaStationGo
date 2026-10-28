@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/config"
+	"github.com/ShukeBta/MediaStationGo/internal/model"
 )
 
 const mediaProbeMetadataVersion = 1
@@ -113,6 +114,10 @@ func (f *FFprobeService) probeLocal(ctx context.Context, path string, allowFallb
 		return nil, err
 	}
 	defer f.release(token)
+	return f.probeLocalAcquired(ctx, path, allowFallback)
+}
+
+func (f *FFprobeService) probeLocalAcquired(ctx context.Context, path string, allowFallback bool) (*ProbeResult, error) {
 	if bin, err := resolveLocalExecutable(f.cfg.App.FFprobePath, "ffprobe"); err == nil {
 		f.cfg.App.FFprobePath = bin
 		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -191,13 +196,28 @@ func (f *FFprobeService) probeRemote(ctx context.Context, rawURL string, headers
 
 // The explicit queue performs one probe attempt, without a second media read
 // through ffmpeg after failure. Other existing probe entry points keep their policy.
-type mediaProbeQueueFFprobe struct{ service *FFprobeService }
+type mediaProbeQueueFFprobe struct {
+	service *FFprobeService
+	mkv     bool
+	size    int64
+}
+
+// Bind the source format before resolving a signed URL, whose path may have no
+// extension. This value belongs to one inspection, not the shared queue prober.
+func (p mediaProbeQueueFFprobe) forMedia(media *model.Media) mediaTrackProber {
+	p.mkv = mediaProbeSourceIsMKV(media)
+	p.size = media.SizeBytes
+	return p
+}
 
 func (p mediaProbeQueueFFprobe) Probe(ctx context.Context, path string) (*ProbeResult, error) {
 	return p.service.probeLocal(ctx, path, false)
 }
 
 func (p mediaProbeQueueFFprobe) ProbeHTTP(ctx context.Context, rawURL string, headers map[string]string) (*ProbeResult, error) {
+	if p.mkv {
+		return p.service.probeRemoteMKV(ctx, rawURL, headers, p.size)
+	}
 	return p.service.probeRemote(ctx, rawURL, headers, false)
 }
 

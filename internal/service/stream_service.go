@@ -202,6 +202,11 @@ func (s *StreamService) probeMediaSource(ctx context.Context, media *model.Media
 	if media == nil {
 		return nil, ErrMediaNotFound
 	}
+	if scoped, ok := probe.(interface {
+		forMedia(*model.Media) mediaTrackProber
+	}); ok {
+		probe = scoped.forMedia(media)
+	}
 	if typ, ref, ok := parseCloudMediaPlaybackURL(media.STRMURL); ok {
 		if s.storage == nil {
 			return nil, errors.New("cloud media probe unavailable: storage service not configured")

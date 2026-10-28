@@ -394,7 +394,7 @@ func (s *MediaProbeQueueService) CreateRetryPlan(ctx context.Context, mediaID st
 }
 
 func (s *MediaProbeQueueService) preparePlan(ctx context.Context, cfg MediaProbeQueueConfig, jobs []model.MediaProbeJob, retryMediaID string) (*MediaProbeQueuePlan, error) {
-	plan := &MediaProbeQueuePlan{ID: uuid.NewString(), ExpiresAt: time.Now().Add(5 * time.Minute), Config: cfg, Concurrency: 1, Targets: []string{}, jobs: jobs, RetryMediaID: retryMediaID, Notice: "每项最多调用一次 MSG 取链流程；OpenList 正常为 1 次 /api/fs/link，430004 缓存恢复可能列父目录后再取链，不设置 refresh=true。底层 115 通常涉及文件查询和签发，Token 刷新可能增加请求；CDN 读取次数和流量由文件结构决定。并发 1，失败即停止本轮，无任务自动重试。真实访问 115/CDN 可能限流、封禁或链路失败。"}
+	plan := &MediaProbeQueuePlan{ID: uuid.NewString(), ExpiresAt: time.Now().Add(5 * time.Minute), Config: cfg, Concurrency: 1, Targets: []string{}, jobs: jobs, RetryMediaID: retryMediaID, Notice: "每项最多调用一次 MSG 取链流程；OpenList 正常为 1 次 /api/fs/link，430004 缓存恢复可能列父目录后再取链，不设置 refresh=true。底层 115 通常涉及文件查询和签发，Token 刷新可能增加请求。远程 MKV 跳过附件，最多 6 次 CDN GET、应用读取 4 MiB、请求间隔至少 1 秒，超限明确失败；其他格式 CDN 读取由原探测流程决定。并发 1，失败即停止本轮，无任务自动重试。真实访问 115/CDN 可能限流、封禁或链路失败。"}
 	targets := map[string]bool{}
 	for _, job := range plan.jobs {
 		var media model.Media

@@ -214,7 +214,7 @@ func (b *serviceContainerBuilder) initAccessAndStorageServices() {
 	b.c.Stream.SetCloudTrackProbe(b.c.FFprobe)
 	b.c.Stream.SetRuntimeCache(b.c.Cache)
 	b.c.Stream.SetGeneratedArtworkService(b.c.GeneratedArtwork)
-	b.c.MediaProbeQueue = NewMediaProbeQueueService(b.repos, b.c.Stream, mediaProbeQueueFFprobe{b.c.FFprobe}, b.log)
+	b.c.MediaProbeQueue = NewMediaProbeQueueService(b.repos, b.c.Stream, mediaProbeQueueFFprobe{service: b.c.FFprobe}, b.log)
 	b.c.Media.SetCloudMediaDeleter(b.c.StorageCfg)
 	b.c.STRM = NewSTRMService(b.log, b.repos, b.cfg)
 	b.c.Scan.SetStorageConfig(b.c.StorageCfg)
