@@ -5,6 +5,18 @@ export const probeQueueStatusLabels: Record<ProbeQueueStatus, string> = {
   failed: '失败', canceled: '已取消', interrupted: '已中断',
 }
 
+export function probeQueueElapsedLabel(item: ProbeQueueItem, now: number): string {
+  if (item.status === 'pending' || item.status === 'canceled') return '—'
+  // Restart recovery records when the service noticed the interruption, not
+  // when the probe actually stopped, so it cannot provide a reliable duration.
+  if (item.status === 'interrupted' || !item.started_at) return '未记录'
+  const started = Date.parse(item.started_at)
+  const finished = item.status === 'running' ? now : Date.parse(item.finished_at || '')
+  if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return '未记录'
+  const duration = `${((finished - started) / 1000).toFixed(2)} 秒`
+  return item.status === 'running' ? `已用 ${duration}` : duration
+}
+
 export function probeQueueItemTitle(item: ProbeQueueItem): string {
   const parts = [item.title]
   if (item.episode_num > 0) {

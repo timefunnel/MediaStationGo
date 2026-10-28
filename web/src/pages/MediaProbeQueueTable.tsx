@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ProbeQueueItem } from '../api/mediaProbeQueue'
-import { probeQueueFailureLabel, probeQueueItemTitle, probeQueueResolution, probeQueueResultDetails, probeQueueStatusLabels } from './mediaProbeQueueModel'
+import { probeQueueElapsedLabel, probeQueueFailureLabel, probeQueueItemTitle, probeQueueResolution, probeQueueResultDetails, probeQueueStatusLabels } from './mediaProbeQueueModel'
 
 interface Props {
   items: ProbeQueueItem[]
@@ -11,15 +12,25 @@ interface Props {
 }
 
 export function MediaProbeQueueTable({ items, disabled, onRetry, onRequeue, onCancel }: Props) {
+  const [now, setNow] = useState(() => Date.now())
+  const hasRunning = items.some((item) => item.status === 'running')
+  useEffect(() => {
+    if (!hasRunning) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [hasRunning])
+
   return <div className="overflow-x-auto">
-    <table className="w-full min-w-[780px] text-left text-sm">
-      <thead className="text-xs text-sand-500"><tr><th className="py-2">影片 / 剧集</th><th>状态</th><th>探测结果</th><th>更新时间</th><th>操作</th></tr></thead>
+    <table className="w-full min-w-[900px] text-left text-sm">
+      <thead className="text-xs text-sand-500"><tr><th className="py-2">影片 / 剧集</th><th>状态</th><th title="包含取链、探测和结果保存，不含排队等待及任务间隔">实际耗时</th><th>探测结果</th><th>更新时间</th><th>操作</th></tr></thead>
       <tbody>{items.map((item) => <tr key={item.media_id} className="border-t border-gray-200 align-top">
         <td className="max-w-xs py-3 pr-3">
           <Link to={`/media/${item.media_id}`} className="text-brand-500 hover:underline">{probeQueueItemTitle(item)}</Link>
           {item.file_name && <p className="mt-1 break-all text-xs text-sand-500">{item.file_name}</p>}
         </td>
         <td className="whitespace-nowrap py-3 pr-3">{probeQueueStatusLabels[item.status]}</td>
+        <td className="whitespace-nowrap py-3 pr-3 text-xs tabular-nums text-sand-500">{probeQueueElapsedLabel(item, now)}</td>
         <td className="max-w-sm break-words py-3 pr-3 text-xs">
           {item.error && <div className="space-y-1 text-red-500">
             <p className="font-medium">{probeQueueFailureLabel(item)}{item.http_status ? ` · HTTP ${item.http_status}` : ''}{item.provider_code ? ` · 上游码 ${item.provider_code}` : ''}</p>

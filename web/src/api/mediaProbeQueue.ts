@@ -26,6 +26,7 @@ export interface ProbeQueueItem {
   episode_end_num: number
   episode_title?: string
   file_name?: string
+  started_at?: string
   finished_at?: string
   result?: ProbeQueueResult
   updated_at: string

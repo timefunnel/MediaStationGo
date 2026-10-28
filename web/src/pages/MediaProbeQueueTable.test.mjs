@@ -12,6 +12,7 @@ const code = ts.transpileModule(readFileSync(new URL('./MediaProbeQueueTable.tsx
 }).outputText
 const component = {}
 new Function('require', 'exports', code)((name) => {
+  if (name === 'react') return React
   if (name === 'react/jsx-runtime') return jsx
   if (name === './mediaProbeQueueModel') return model
   if (name === 'react-router-dom') return { Link: ({ to, children, ...props }) => React.createElement('a', { href: to, ...props }, children) }
@@ -50,4 +51,17 @@ test('没有探测结果时不会按文件名中的1080p生成参数', () => {
   const html = render(base)
   assert.match(html, /没有已保存的探测参数/)
   assert.doesNotMatch(html, /1080p ·|1920×1080|已保存的探测参数<\/p>/)
+})
+
+test('每条已执行记录展示实际耗时，失败也保留耗时', () => {
+  const timestamps = { started_at: '2026-10-28T00:00:00.000Z', finished_at: '2026-10-28T00:00:06.044Z' }
+  for (const status of ['completed', 'partial', 'failed']) {
+    const html = render({ ...base, ...timestamps, status })
+    assert.match(html, /实际耗时/)
+    assert.match(html, />6\.04 秒<\/td>/)
+  }
+})
+
+test('历史记录没有开始时间时显示未记录，不借更新时间猜耗时', () => {
+  assert.match(render({ ...base, finished_at: '2026-10-28T00:00:06Z' }), />未记录<\/td>/)
 })

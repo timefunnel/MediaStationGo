@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { probeQueueFailureLabel, probeQueueItemTitle, probeQueueResolution, probeQueueResultDetails } from './mediaProbeQueueModel.ts'
+import { probeQueueElapsedLabel, probeQueueFailureLabel, probeQueueItemTitle, probeQueueResolution, probeQueueResultDetails } from './mediaProbeQueueModel.ts'
 
 const item = { title: 'Synthetic Show', season_num: 2, episode_num: 7, episode_end_num: 0, episode_title: 'Episode Seven' }
 
@@ -30,4 +30,30 @@ test('风控、限流、403和超时提示明确区分', () => {
   assert.equal(probeQueueFailureLabel({ failure_kind: 'rate_limited' }), '上游限流')
   assert.equal(probeQueueFailureLabel({ failure_kind: 'timeout' }), '探测超时，未确认风控')
   assert.equal(probeQueueFailureLabel({ failure_kind: 'access_denied' }), '访问被拒绝，未确认风控')
+})
+
+const timedItem = { started_at: '2026-10-28T00:00:00.000Z', finished_at: '2026-10-28T00:00:30.061Z' }
+
+test('已结束任务只用记录的起止时间，刷新页面不会继续增长', () => {
+  for (const status of ['completed', 'partial', 'failed']) {
+    assert.equal(probeQueueElapsedLabel({ ...timedItem, status }, Date.parse('2026-10-28T01:00:00Z')), '30.06 秒')
+  }
+  assert.equal(probeQueueElapsedLabel({ status: 'completed', started_at: '2026-10-28T08:00:00+08:00', finished_at: '2026-10-28T00:00:06.044Z' }, 0), '6.04 秒')
+})
+
+test('运行中按当前时间显示已用耗时，新一轮只计算新的开始时间', () => {
+  const running = { status: 'running', started_at: timedItem.started_at }
+  assert.equal(probeQueueElapsedLabel(running, Date.parse('2026-10-28T00:00:08.125Z')), '已用 8.13 秒')
+  assert.equal(probeQueueElapsedLabel({ ...running, started_at: '2026-10-28T00:00:08Z' }, Date.parse('2026-10-28T00:00:09Z')), '已用 1.00 秒')
+})
+
+test('缺失、无效、倒置时间和重启中断不伪造耗时，未执行任务不使用上次时间', () => {
+  for (const item of [
+    { status: 'completed', finished_at: timedItem.finished_at },
+    { status: 'failed', started_at: timedItem.started_at },
+    { ...timedItem, status: 'completed', started_at: 'invalid' },
+    { ...timedItem, status: 'failed', finished_at: '2026-10-27T23:00:00Z' },
+    { ...timedItem, status: 'interrupted' },
+  ]) assert.equal(probeQueueElapsedLabel(item, Date.now()), '未记录')
+  for (const status of ['pending', 'canceled']) assert.equal(probeQueueElapsedLabel({ ...timedItem, status }, Date.now()), '—')
 })
