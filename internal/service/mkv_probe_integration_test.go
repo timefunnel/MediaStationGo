@@ -70,7 +70,7 @@ func TestMKVRealFFprobeMetadata(t *testing.T) {
 				args = append(args, "-preset", "ultrafast")
 			}
 			if fixture.codec == "libx265" {
-				args = append(args, "-preset", "ultrafast", "-x265-params", "pools=1:frame-threads=1:log-level=error")
+				args = append(args, "-preset", "ultrafast", "-x265-params", "pools=1:frame-threads=1:log-level=error:colorprim=9:transfer=16:colormatrix=9:hdr10=1")
 			}
 			if fixture.bit10 {
 				args = append(args, "-pix_fmt", "yuv420p10le")
