@@ -4,6 +4,7 @@ import type { DanmakuStatus } from '../player/useDanmaku'
 import type { PlayerMode } from './playerPageModel'
 
 type PlayerTopBarProps = {
+  showDanmaku: boolean
   directOnly: boolean
   mode: PlayerMode
   danmakuEnabled: boolean
@@ -33,6 +34,7 @@ function danmakuHint(status: DanmakuStatus): string {  switch (status) {
 }
 
 export function PlayerTopBar({
+  showDanmaku,
   directOnly,
   mode,
   danmakuEnabled,
@@ -55,21 +57,23 @@ export function PlayerTopBar({
       </button>
 
       <div className="pointer-events-auto flex items-center gap-2">
-        <button
-          onClick={onToggleDanmaku}
-          title={hint || (danmakuEnabled ? '关闭弹幕' : '开启弹幕')}
-          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl backdrop-blur transition ${
-            danmakuEnabled && hasDanmaku
-              ? 'border-white/15 bg-black/70 text-white hover:bg-black/85'
-              : 'border-white/10 bg-black/60 text-white/60 hover:bg-black/75'
-          }`}
-        >
-          {danmakuEnabled ? <MessageSquare size={14} /> : <MessageSquareOff size={14} />}
-          弹幕
-          {hint ? <span className="text-xs text-white/50">· {hint}</span> : null}
-        </button>
+        {showDanmaku && (
+          <button
+            onClick={onToggleDanmaku}
+            title={hint || (danmakuEnabled ? '关闭弹幕' : '开启弹幕')}
+            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl backdrop-blur transition ${
+              danmakuEnabled && hasDanmaku
+                ? 'border-white/15 bg-black/70 text-white hover:bg-black/85'
+                : 'border-white/10 bg-black/60 text-white/60 hover:bg-black/75'
+            }`}
+          >
+            {danmakuEnabled ? <MessageSquare size={14} /> : <MessageSquareOff size={14} />}
+            弹幕
+            {hint ? <span className="text-xs text-white/50">· {hint}</span> : null}
+          </button>
+        )}
 
-        {danmakuEnabled && hasDanmaku ? (
+        {showDanmaku && danmakuEnabled && hasDanmaku ? (
           <span
             className="flex items-center gap-1 rounded-full border border-white/15 bg-black/70 px-2 py-1 text-xs text-white shadow-xl backdrop-blur"
             title="弹幕时间轴偏移（仅本机播放页生效）"

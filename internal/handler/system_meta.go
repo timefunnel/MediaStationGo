@@ -14,6 +14,7 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+	"go.uber.org/zap"
 
 	"github.com/ShukeBta/MediaStationGo/internal/service"
 )
@@ -30,6 +31,23 @@ func systemInfoHandler(svc *service.Container) gin.HandlerFunc {
 				directOnly = service.ParseBoolSetting(v, false)
 			}
 		}
+		webFeatures := gin.H{"ai_subtitles": false, "danmaku": false}
+		if svc.Repo != nil && svc.Repo.Setting != nil {
+			for feature, key := range map[string]string{
+				"ai_subtitles": "ui.ai_subtitles_enabled",
+				"danmaku":      "ui.danmaku_enabled",
+			} {
+				value, err := svc.Repo.Setting.Get(c.Request.Context(), key)
+				if err != nil {
+					if svc.Log != nil {
+						svc.Log.Error("read web feature setting", zap.String("key", key), zap.Error(err))
+					}
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "页面功能开关读取失败"})
+					return
+				}
+				webFeatures[feature] = service.ParseBoolSetting(value, false)
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"name":             "MediaStationGo",
 			"version":          "0.1.0",
@@ -39,6 +57,7 @@ func systemInfoHandler(svc *service.Container) gin.HandlerFunc {
 			"data_dir":         svc.Cfg.App.DataDir,
 			"cache_dir":        svc.Cfg.Cache.CacheDir,
 			"direct_play_only": directOnly,
+			"web_features":     webFeatures,
 		})
 	}
 }

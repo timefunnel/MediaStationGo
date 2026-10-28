@@ -22,6 +22,7 @@ import { isSubtitleCandidateApplied } from './librarySeriesSubtitleModel'
 import { SubHDCandidateDetails } from './SubHDCandidateDetails'
 
 type MediaDetailSubtitlesProps = {
+  aiSubtitlesEnabled: boolean
   mediaId: string
   versions: MediaVersion[]
   versionsLoading: boolean
@@ -34,7 +35,7 @@ type PreviewState = {
   error: string
 } | null
 
-export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: MediaDetailSubtitlesProps) {
+export function MediaDetailSubtitles({ aiSubtitlesEnabled, mediaId, versions, versionsLoading }: MediaDetailSubtitlesProps) {
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
   const defaultMediaId = useMemo(
     () => versions.find((version) => version.is_current)?.id || mediaId,
@@ -83,6 +84,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   }, [selectedMediaId])
 
   useEffect(() => {
+    if (!aiSubtitlesEnabled) return
     subtitlesAPI.listASRProfiles()
       .then((profiles) => {
         setAsrProfiles(profiles)
@@ -90,9 +92,10 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
         setAsrProfilesError(profiles.length > 0 ? '' : '没有可用的 AI 字幕翻译模型')
       })
       .catch((error) => setAsrProfilesError(errorMessage(error, 'AI 字幕翻译模型加载失败')))
-  }, [])
+  }, [aiSubtitlesEnabled])
 
   useEffect(() => {
+    if (!aiSubtitlesEnabled) return
     subtitlesAPI.listASRModels()
       .then((models) => {
         setAsrModels(models)
@@ -100,7 +103,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
         setAsrModelsError(models.length > 0 ? '' : '没有可用的 ASR 识别模型')
       })
       .catch((error) => setAsrModelsError(errorMessage(error, 'ASR 识别模型加载失败')))
-  }, [])
+  }, [aiSubtitlesEnabled])
 
   useEffect(() => {
     if (!versions.some((version) => version.id === selectedMediaId)) {
@@ -132,7 +135,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
   }, [loadTracks])
 
   useEffect(() => {
-    if (!asrPollingTaskID || !asrPolling || asrUpdating) return
+    if (!aiSubtitlesEnabled || !asrPollingTaskID || !asrPolling || asrUpdating) return
     let stopped = false
     let timer = 0
     const poll = async () => {
@@ -155,10 +158,10 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
       stopped = true
       window.clearTimeout(timer)
     }
-  }, [asrPolling, asrPollingTaskID, asrUpdating, selectedMediaId])
+  }, [aiSubtitlesEnabled, asrPolling, asrPollingTaskID, asrUpdating, selectedMediaId])
 
   useEffect(() => {
-    if (!asrTask || announcedASRTask.current === asrTask.id) return
+    if (!aiSubtitlesEnabled || !asrTask || announcedASRTask.current === asrTask.id) return
     if (asrTask.status === 'completed') {
       announcedASRTask.current = asrTask.id
       toast.success('AI 简体中文字幕已保存到当前片源')
@@ -167,7 +170,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
       announcedASRTask.current = asrTask.id
       toast.error(asrTask.error || 'AI 字幕生成失败')
     }
-  }, [asrTask, loadTracks])
+  }, [aiSubtitlesEnabled, asrTask, loadTracks])
 
   const openExistingPreview = useCallback(async (track: SubtitleTrack) => {
     setPreview({ title: track.name || track.label, content: '', loading: true, error: '' })
@@ -385,58 +388,62 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
             <Search size={14} />
             搜索字幕
           </button>
-          <select
-            value={asrModel}
-            disabled={asrCreating || asrUpdating || asrModels.length === 0 || asrTask?.status === 'running'}
-            onChange={(event) => setAsrModel(event.target.value)}
-            className="h-9 max-w-60 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
-            aria-label="ASR 识别模型"
-          >
-            {asrModels.map((model) => (
-              <option key={model} value={model}>{subtitleASRModelLabel(model)}</option>
-            ))}
-          </select>
-          <select
-            value={asrProfileKey}
-            disabled={asrCreating || asrUpdating || asrProfiles.length === 0 || asrTask?.status === 'running'}
-            onChange={(event) => setAsrProfileKey(event.target.value)}
-            className="h-9 max-w-72 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
-            aria-label="AI 字幕翻译模型"
-          >
-            {asrProfiles.map((profile) => (
-              <option key={asrProfileValue(profile)} value={asrProfileValue(profile)}>
-                {profile.provider_label} · {profile.model}
-              </option>
-            ))}
-          </select>
-          <select
-            value={asrLanguage}
-            disabled={asrCreating || asrUpdating || !asrModel || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
-            onChange={(event) => setAsrLanguage(event.target.value as SubtitleASRSourceLanguage)}
-            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
-            aria-label="AI 字幕源语言"
-          >
-            <option value="auto">自动识别</option>
-            <option value="ja">日语</option>
-            <option value="en">英语</option>
-            <option value="zh">中文</option>
-            <option value="ko">韩语</option>
-          </select>
-          <button
-            type="button"
-            onClick={() => void createASR()}
-            disabled={asrCreating || asrUpdating || !asrModel || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
-            className="btn-outline h-9 gap-1.5 px-3 text-xs"
-          >
-            {asrCreating || ['queued', 'running'].includes(asrTask?.status || '')
-              ? <LoaderCircle size={14} className="animate-spin" />
-              : <Sparkles size={14} />}
-            AI 生成字幕
-          </button>
+          {aiSubtitlesEnabled && (
+            <>
+              <select
+                value={asrModel}
+                disabled={asrCreating || asrUpdating || asrModels.length === 0 || asrTask?.status === 'running'}
+                onChange={(event) => setAsrModel(event.target.value)}
+                className="h-9 max-w-60 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+                aria-label="ASR 识别模型"
+              >
+                {asrModels.map((model) => (
+                  <option key={model} value={model}>{subtitleASRModelLabel(model)}</option>
+                ))}
+              </select>
+              <select
+                value={asrProfileKey}
+                disabled={asrCreating || asrUpdating || asrProfiles.length === 0 || asrTask?.status === 'running'}
+                onChange={(event) => setAsrProfileKey(event.target.value)}
+                className="h-9 max-w-72 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+                aria-label="AI 字幕翻译模型"
+              >
+                {asrProfiles.map((profile) => (
+                  <option key={asrProfileValue(profile)} value={asrProfileValue(profile)}>
+                    {profile.provider_label} · {profile.model}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={asrLanguage}
+                disabled={asrCreating || asrUpdating || !asrModel || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
+                onChange={(event) => setAsrLanguage(event.target.value as SubtitleASRSourceLanguage)}
+                className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs text-ink-600 outline-none focus:border-brand-400"
+                aria-label="AI 字幕源语言"
+              >
+                <option value="auto">自动识别</option>
+                <option value="ja">日语</option>
+                <option value="en">英语</option>
+                <option value="zh">中文</option>
+                <option value="ko">韩语</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => void createASR()}
+                disabled={asrCreating || asrUpdating || !asrModel || !selectedASRProfile || ['queued', 'running'].includes(asrTask?.status || '')}
+                className="btn-outline h-9 gap-1.5 px-3 text-xs"
+              >
+                {asrCreating || ['queued', 'running'].includes(asrTask?.status || '')
+                  ? <LoaderCircle size={14} className="animate-spin" />
+                  : <Sparkles size={14} />}
+                AI 生成字幕
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {(asrTask || asrError) && (
+      {aiSubtitlesEnabled && (asrTask || asrError) && (
         <div className={`rounded-lg px-3 py-2 text-xs ${asrTask?.status === 'failed' || asrError ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-ink-600'}`}>
           {asrTask && asrTask.status !== 'failed' && (
             <span>
@@ -485,7 +492,7 @@ export function MediaDetailSubtitles({ mediaId, versions, versionsLoading }: Med
           )}
         </div>
       )}
-      {asrCapabilityHint && (
+      {aiSubtitlesEnabled && asrCapabilityHint && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-sand-500" title={asrCapabilityHint}>
           <Info size={13} className="shrink-0" />
           AI 字幕服务当前未就绪，需要使用时再启动本机 ASR。

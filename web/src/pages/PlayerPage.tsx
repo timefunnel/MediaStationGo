@@ -7,7 +7,7 @@ import { mediaAPI } from '../api/library'
 import { api, hlsURL, streamURL } from '../api/client'
 import { playbackAPI } from '../api/playback'
 import { subtitlesAPI, type SubtitleTrack } from '../api/subtitles'
-import { systemAPI } from '../api/system'
+import { useSystemInfo } from '../hooks/useSystemInfo'
 import { DEFAULT_DANMAKU_SETTINGS, useDanmaku } from '../player/useDanmaku'
 import type { Media } from '../types'
 import { getSeriesKey, isEpisodeLike } from '../utils/groupSeries'
@@ -42,10 +42,12 @@ export function PlayerPage() {
   const [hlsUnavailable, setHlsUnavailable] = useState(false)
   const [playerError, setPlayerError] = useState('')
   // 「客户端直连解码」模式：宿主机不转码，播放器强制 direct play、隐藏 HLS 切换。
-  const [directOnly, setDirectOnly] = useState(false)
+  const systemInfo = useSystemInfo()
+  const directOnly = Boolean(systemInfo?.direct_play_only)
+  const showDanmaku = systemInfo?.web_features.danmaku === true
   // 弹幕设置：服务端负责匹配与清洗，这里只控制渲染行为。
   const [danmakuSettings, setDanmakuSettings] = useState(DEFAULT_DANMAKU_SETTINGS)
-  const danmaku = useDanmaku(media?.id ?? '', ref, danmakuSettings)
+  const danmaku = useDanmaku(showDanmaku ? media?.id ?? '' : '', ref, danmakuSettings)
 
   const teardownHls = useCallback((mediaId?: string, stopServer = false) => {
     if (hlsRef.current) {
@@ -70,14 +72,6 @@ export function PlayerPage() {
   const goBack = useCallback(() => {
     navigate(backTarget(), { replace: true })
   }, [backTarget, navigate])
-
-  // 读取宿主机的「直连解码」开关。开启时全程 direct play，不走 HLS。
-  useEffect(() => {
-    systemAPI
-      .info()
-      .then((info) => setDirectOnly(Boolean(info.direct_play_only)))
-      .catch(() => setDirectOnly(false))
-  }, [])
 
   // Load metadata and pick a default mode.
   useEffect(() => {
@@ -208,6 +202,7 @@ export function PlayerPage() {
   return (
     <div className="relative -m-6 flex min-h-screen flex-col overflow-hidden bg-black md:-m-8">
       <PlayerTopBar
+        showDanmaku={showDanmaku}
         directOnly={directOnly}
         mode={mode}
         danmakuEnabled={danmakuSettings.enabled}
@@ -224,6 +219,7 @@ export function PlayerPage() {
         onToggleMode={toggleMode}
       />
       <PlayerVideoStage
+        showDanmaku={showDanmaku}
         media={media}
         playerError={playerError}
         subs={subs}

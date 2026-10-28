@@ -3,8 +3,22 @@ import type { SettingGroup } from './settingsGroupTypes'
 export const generalSettingsGroup: SettingGroup = {
   key: 'general',
   label: '常规',
-  description: '语言 / 转码引擎参数（API 密钥请在管理后台 → 外部API 配置）',
+  description: '页面功能 / 语言 / 转码引擎参数（API 密钥请在管理后台 → 外部API 配置）',
   items: [
+    {
+      key: 'ui.ai_subtitles_enabled',
+      label: '显示 AI 字幕功能',
+      type: 'toggle',
+      hint: '默认关闭。开启后显示详情页的 AI 生成字幕入口和系统任务中的 AI 字幕任务。关闭不影响已有字幕或已提交的任务。',
+      defaultValue: 'false',
+    },
+    {
+      key: 'ui.danmaku_enabled',
+      label: '显示网页弹幕功能',
+      type: 'toggle',
+      hint: '默认关闭。开启后显示详情页的弹幕管理和网页播放器的弹幕控件；Windows 播放器自带弹幕独立使用。',
+      defaultValue: 'false',
+    },
     {
       key: 'tmdb.language',
       label: 'TMDb 元数据语言',

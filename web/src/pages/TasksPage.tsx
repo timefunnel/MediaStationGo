@@ -5,6 +5,7 @@ import { Activity, Copy } from 'lucide-react'
 import { tasksAPI, type BackgroundTask, type TasksSnapshot } from '../api/tasks'
 import { subtitlesAPI, type SubtitleASRTask } from '../api/subtitles'
 import { useAuthStore } from '../stores/auth'
+import { useSystemInfo } from '../hooks/useSystemInfo'
 import { SubtitleASRTasksSection } from './SubtitleASRTasksSection'
 import { TorrentTaskTable, TranscodeTaskTable } from './TaskRuntimeTables'
 import { MediaProbeQueueSection } from './MediaProbeQueueSection'
@@ -166,6 +167,8 @@ export function TasksPage() {
   const [subtitleTasks, setSubtitleTasks] = useState<SubtitleASRTask[] | null>(null)
   const [subtitleTaskError, setSubtitleTaskError] = useState('')
   const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
+  const systemInfo = useSystemInfo()
+  const aiSubtitlesEnabled = systemInfo?.web_features.ai_subtitles === true
 
   const refreshSubtitleTasks = useCallback(async () => {
     try {
@@ -192,13 +195,13 @@ export function TasksPage() {
   }, [isAdmin])
 
   useEffect(() => {
-    if (!isAdmin) return
+    if (!isAdmin || !aiSubtitlesEnabled) return
     void refreshSubtitleTasks()
     const id = window.setInterval(() => void refreshSubtitleTasks(), 3_000)
     return () => {
       window.clearInterval(id)
     }
-  }, [isAdmin, refreshSubtitleTasks])
+  }, [isAdmin, aiSubtitlesEnabled, refreshSubtitleTasks])
 
   const torrents = snap?.torrents ?? []
   const background = snap?.background_tasks ?? { active: [], recent: [] }
@@ -228,7 +231,7 @@ export function TasksPage() {
         </div>
       </section>}
 
-      {isAdmin && (
+      {isAdmin && aiSubtitlesEnabled && (
         <SubtitleASRTasksSection
           tasks={subtitleTasks}
           error={subtitleTaskError}

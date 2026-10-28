@@ -6,6 +6,7 @@ import { ManualScrapeDialog } from '../components/ManualScrapeDialog'
 import { MetadataEditDialog } from '../components/MetadataEditDialog'
 import { MoveMediaLibraryDialog } from '../components/MoveMediaLibraryDialog'
 import { OrganizeMediaDialog } from '../components/OrganizeMediaDialog'
+import { useSystemInfo } from '../hooks/useSystemInfo'
 import type { Media, MediaPart, MediaVersion } from '../types'
 import { MediaDetailAdminPanel } from './MediaDetailAdminPanel'
 import { MediaDetailPoster } from './MediaDetailArtwork'
@@ -204,6 +205,7 @@ export function MediaDetailMainContent({
   versionDeletingID,
   onDeleteVersion,
 }: MediaDetailMainContentProps) {
+  const systemInfo = useSystemInfo()
   return (
     <div className="relative z-10 p-6 sm:p-10 flex flex-col md:flex-row gap-8 lg:gap-12">
       <MediaDetailPoster media={media} />
@@ -234,16 +236,19 @@ export function MediaDetailMainContent({
           />
           {isAdmin && (
             <MediaDetailSubtitles
+              aiSubtitlesEnabled={systemInfo?.web_features.ai_subtitles === true}
               mediaId={media.id}
               versions={versions}
               versionsLoading={versionsLoading}
             />
           )}
-          <MediaDetailDanmaku
-            mediaId={media.id}
-            versions={versions}
-            versionsLoading={versionsLoading}
-          />
+          {systemInfo?.web_features.danmaku && (
+            <MediaDetailDanmaku
+              mediaId={media.id}
+              versions={versions}
+              versionsLoading={versionsLoading}
+            />
+          )}
           <MediaDetailParts parts={parts} loading={partsLoading} />
           {isAdmin && (
             <MediaDetailAdminPanel

@@ -6,6 +6,7 @@ import type { DanmakuController } from '../player/useDanmaku'
 import type { Media } from '../types'
 
 type PlayerVideoStageProps = {
+  showDanmaku: boolean
   media: Media | null
   playerError: string
   subs: SubtitleTrack[]
@@ -16,6 +17,7 @@ type PlayerVideoStageProps = {
 }
 
 export function PlayerVideoStage({
+  showDanmaku,
   media,
   playerError,
   subs,
@@ -47,13 +49,15 @@ export function PlayerVideoStage({
               />
             ))}
           </video>
-          <DanmakuOverlay
-            containerRef={danmaku.containerRef}
-            status={danmaku.status}
-            message={danmaku.message}
-            payload={danmaku.payload}
-            onRetry={onDanmakuRetry}
-          />
+          {showDanmaku && (
+            <DanmakuOverlay
+              containerRef={danmaku.containerRef}
+              status={danmaku.status}
+              message={danmaku.message}
+              payload={danmaku.payload}
+              onRetry={onDanmakuRetry}
+            />
+          )}
         </>
       ) : (
         <p className="text-sand-500">加载中…</p>

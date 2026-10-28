@@ -14,6 +14,7 @@ export const systemAPI = {
         data_dir: string
         cache_dir: string
         direct_play_only?: boolean
+        web_features: { ai_subtitles: boolean; danmaku: boolean }
       }>('/system/info')
       .then((r) => r.data),
 
