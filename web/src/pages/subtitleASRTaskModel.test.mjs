@@ -40,7 +40,7 @@ test('字幕生产任务按运行中和已结束分区', () => {
 })
 
 test('成功与失败任务都提供明确结果摘要', () => {
-  assert.equal(subtitleASRStageLabel('transcribing'), 'SenseVoice 正在识别')
+  assert.equal(subtitleASRStageLabel('transcribing'), 'ASR 正在识别')
   assert.equal(subtitleASRResultSummary({
     ...baseTask,
     status: 'completed',
