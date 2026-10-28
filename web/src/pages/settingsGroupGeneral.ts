@@ -14,9 +14,9 @@ export const generalSettingsGroup: SettingGroup = {
     },
     {
       key: 'ui.danmaku_enabled',
-      label: '显示网页弹幕功能',
+      label: '显示弹幕相关功能',
       type: 'toggle',
-      hint: '默认关闭。开启后显示详情页的弹幕管理和网页播放器的弹幕控件；Windows 播放器自带弹幕独立使用。',
+      hint: '默认关闭。统一控制弹幕匹配、导入、整季预热、偏移与关联管理，以及网页播放弹幕；关闭后隐藏全部相关入口。Windows 播放器自带弹幕不受影响。',
       defaultValue: 'false',
     },
     {

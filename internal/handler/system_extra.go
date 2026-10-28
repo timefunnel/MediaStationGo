@@ -63,7 +63,7 @@ func schemaHandler(_ *service.Container) gin.HandlerFunc {
 					"label": "常规",
 					"items": []gin.H{
 						{"key": "ui.ai_subtitles_enabled", "type": "toggle", "label": "显示 AI 字幕功能", "defaultValue": "false"},
-						{"key": "ui.danmaku_enabled", "type": "toggle", "label": "显示网页弹幕功能", "defaultValue": "false"},
+						{"key": "ui.danmaku_enabled", "type": "toggle", "label": "显示弹幕相关功能", "defaultValue": "false"},
 						{"key": "tmdb.language", "type": "select", "label": "TMDb 元数据语言"},
 						{"key": "app.server_url", "type": "text", "label": "公开访问域名 / STRM 域名"},
 						{"key": "transcode.enabled", "type": "toggle", "label": "启用转码"},
