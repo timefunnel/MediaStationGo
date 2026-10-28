@@ -148,6 +148,7 @@ func mkvReadTracks(data []byte) ([]mkvProbeTrack, error) {
 			return nil
 		}
 		var track mkvProbeTrack
+		hasEncodings := false
 		if err := mkvChildren(body, func(child mkvElement, value []byte) error {
 			var target *uint64
 			switch child.id {
@@ -160,7 +161,11 @@ func mkvReadTracks(data []byte) ([]mkvProbeTrack, error) {
 			case 0x23e383:
 				target = &track.defaultDuration
 			case 0x6d80:
-				return errors.New("MKV: 轨道含加密或压缩 ContentEncodings，未进行轻量探测")
+				if hasEncodings {
+					return errors.New("MKV: 轨道 ContentEncodings 重复，未进行轻量探测")
+				}
+				hasEncodings = true
+				return mkvValidateContentEncodings(value)
 			}
 			if target != nil {
 				var err error
@@ -182,6 +187,68 @@ func mkvReadTracks(data []byte) ([]mkvProbeTrack, error) {
 		err = errors.New("MKV: 未找到轨道")
 	}
 	return tracks, err
+}
+
+// Tracks and Block payloads are copied unchanged into the sample, so ffprobe
+// can undo supported compression itself. Do not mistake compression for DRM
+// or accept combinations ffprobe can silently ignore.
+func mkvValidateContentEncodings(data []byte) error {
+	count := 0
+	err := mkvChildren(data, func(e mkvElement, body []byte) error {
+		if e.id != 0x6240 {
+			return nil
+		}
+		count++
+		if count > 1 {
+			return errors.New("不支持多层 ContentEncoding")
+		}
+		kind, scope, algo := uint64(0), uint64(1), uint64(0)
+		compression, encryption := false, false
+		if err := mkvChildren(body, func(field mkvElement, value []byte) error {
+			var err error
+			switch field.id {
+			case 0x5032:
+				scope, err = mkvUInt(value)
+			case 0x5033:
+				kind, err = mkvUInt(value)
+			case 0x5035:
+				encryption = true
+			case 0x5034:
+				compression = true
+				err = mkvChildren(value, func(setting mkvElement, payload []byte) error {
+					if setting.id == 0x4254 {
+						var err error
+						algo, err = mkvUInt(payload)
+						return err
+					}
+					return nil
+				})
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+		if kind != 0 || encryption {
+			return fmt.Errorf("不支持加密或未知编码（ContentEncodingType=%d，ContentEncryption=%t）", kind, encryption)
+		}
+		if scope == 0 || scope > 3 {
+			return fmt.Errorf("不支持的压缩范围 ContentEncodingScope=%d", scope)
+		}
+		if !compression {
+			return errors.New("压缩轨道缺少 ContentCompression")
+		}
+		if algo != 0 && algo != 3 {
+			return fmt.Errorf("不支持的压缩算法 ContentCompAlgo=%d", algo)
+		}
+		return nil
+	})
+	if err == nil && count == 0 {
+		err = errors.New("缺少 ContentEncoding")
+	}
+	if err != nil {
+		return fmt.Errorf("MKV: 轨道 ContentEncodings: %w", err)
+	}
+	return nil
 }
 
 func mkvWrap(id uint64, body []byte) []byte {

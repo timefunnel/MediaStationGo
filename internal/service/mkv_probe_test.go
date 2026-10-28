@@ -42,7 +42,7 @@ func mkvTestFixture(fontSizes []int, missingDuration, unknownCluster, largeClust
 	info = mkvWrap(mkvInfo, info)
 	video := mkvTestJoin(mkvTestUInt(0xd7, 1), mkvTestUInt(0x73c5, 11), mkvTestUInt(0x83, 1), mkvTestUInt(0x23e383, 40000000), mkvWrap(0x86, []byte("V_MPEG4/ISO/AVC")))
 	if encrypted {
-		video = append(video, mkvWrap(0x6d80, mkvWrap(0x6240, nil))...)
+		video = append(video, mkvWrap(0x6d80, mkvWrap(0x6240, mkvTestUInt(0x5033, 1)))...)
 	}
 	audio := mkvTestJoin(mkvTestUInt(0xd7, 2), mkvTestUInt(0x73c5, 22), mkvTestUInt(0x83, 2), mkvWrap(0x86, []byte("A_AAC")))
 	tracks := mkvWrap(mkvTracks, mkvTestJoin(mkvWrap(0xae, video), mkvWrap(0xae, audio)))
@@ -178,7 +178,7 @@ func TestMKVLargeAndUnknownClustersOnlyKeepCompleteBlocks(t *testing.T) {
 	}
 }
 
-func TestMKVMissingDurationStaysUnknownAndContentEncodingIsRejected(t *testing.T) {
+func TestMKVMissingDurationStaysUnknownAndEncryptionIsRejected(t *testing.T) {
 	for _, encrypted := range []bool{false, true} {
 		data := mkvTestFixture(nil, true, false, false, encrypted)
 		server, _ := serveMKVFixture(t, data)

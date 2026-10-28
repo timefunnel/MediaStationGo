@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
@@ -36,6 +37,8 @@ func TestMKVRealFFprobeMetadata(t *testing.T) {
 	for _, fixture := range []struct {
 		name, codec, audio             string
 		hdr, bit10, vfr, missing, dovi bool
+		compression                    string
+		compressionScope               uint64
 	}{
 		{name: "ffv1-aac-subtitles", codec: "ffv1", audio: "aac"},
 		{name: "ffv1-10bit-eac3-multi-audio", codec: "ffv1", audio: "eac3", bit10: true},
@@ -44,6 +47,10 @@ func TestMKVRealFFprobeMetadata(t *testing.T) {
 		{name: "hevc-10bit-HDR10-eac3", codec: "libx265", audio: "eac3", hdr: true, bit10: true},
 		{name: "vfr-without-default-duration", codec: "ffv1", audio: "aac", vfr: true},
 		{name: "missing-source-duration", codec: "ffv1", audio: "aac", missing: true},
+		{name: "header-stripped-eac3", codec: "ffv1", audio: "eac3", compression: "header-stripping", compressionScope: 1},
+		{name: "zlib-frames", codec: "ffv1", audio: "eac3", compression: "zlib", compressionScope: 1},
+		{name: "zlib-codec-private", codec: "ffv1", audio: "eac3", compression: "zlib", compressionScope: 2},
+		{name: "zlib-frames-and-private", codec: "ffv1", audio: "eac3", compression: "zlib", compressionScope: 3},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			if !strings.Contains(string(encoders), " "+fixture.codec+" ") {
@@ -75,6 +82,9 @@ func TestMKVRealFFprobeMetadata(t *testing.T) {
 			if fixture.bit10 {
 				args = append(args, "-pix_fmt", "yuv420p10le")
 			}
+			if fixture.compression == "zlib" {
+				args = append(args, "-level:v", "3") // FFV1 v3 has real CodecPrivate data.
+			}
 			if fixture.hdr {
 				args = append(args, "-color_trc", "smpte2084", "-color_primaries", "bt2020", "-colorspace", "bt2020nc")
 			}
@@ -89,6 +99,23 @@ func TestMKVRealFFprobeMetadata(t *testing.T) {
 			data, err := os.ReadFile(mediaPath)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if fixture.compression != "" {
+				decode := func() []byte {
+					output, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", mediaPath, "-map", "0:v:0", "-map", "0:a:0", "-frames:v", "1", "-frames:a", "1", "-f", "framemd5", "-").CombinedOutput()
+					if err != nil {
+						t.Fatalf("decode compression fixture: %v: %s", err, output)
+					}
+					return output
+				}
+				baseline := decode()
+				data = mkvTestCompressTracks(t, data, fixture.compression, fixture.compressionScope)
+				if err := os.WriteFile(mediaPath, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if actual := decode(); !bytes.Equal(baseline, actual) {
+					t.Fatalf("compression changed decoded frames:\nwant %s\ngot %s", baseline, actual)
+				}
 			}
 			if fixture.dovi {
 				data = mkvTestAddDOVIConfiguration(t, data)
