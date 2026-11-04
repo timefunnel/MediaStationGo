@@ -73,7 +73,9 @@ export function ResourceImportTaskView({
                 {resourceImportTitle(task)}
               </h3>
             )}
-            <span className={`shrink-0 text-xs font-semibold ${status.color}`}>{status.label}</span>
+            <span className={`shrink-0 text-xs font-semibold ${status.color}`}>
+              {active && task.subscription_follow && task.outcome === 'imported' ? '已入库，后续处理中' : status.label}
+            </span>
           </div>
 
           {showCreator && (
@@ -115,7 +117,7 @@ export function ResourceImportTaskView({
               {task.scan_added !== undefined ? (
                 <div className="flex min-w-0 gap-2">
                   <dt className="shrink-0 font-medium text-ink-100">扫描新增</dt>
-                  <dd>{task.scan_added} 集</dd>
+                  <dd>{task.scan_added} 个文件</dd>
                 </div>
               ) : null}
               {task.verified_episodes?.length ? (
@@ -179,7 +181,9 @@ export function ResourceImportTaskView({
                   onClick={() => onRetry(task)}
                 >
                   <RefreshCw size={15} />
-                  {busyAction === 'retry' ? '重试中…' : completedWithWarning ? '重试告警阶段' : '重试'}
+                  {busyAction === 'retry' ? '重试中…' : completedWithWarning
+                    ? task.subscription_follow && task.outcome === 'imported' ? '重试后续处理' : '重试告警阶段'
+                    : '重试'}
                 </button>
               )}
               {failed && onDelete && (

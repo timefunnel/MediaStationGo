@@ -31,24 +31,27 @@ func NewPipelineScrapeService(repos *repository.Container, scraper *ScraperServi
 }
 
 type PipelineScrapeRequest struct {
-	Category        string                          `json:"category,omitempty"`
-	Title           string                          `json:"title,omitempty"`
-	Queries         []string                        `json:"queries,omitempty"`
-	Provider        string                          `json:"provider,omitempty"`
-	MediaType       string                          `json:"media_type,omitempty"`
-	MediaIDs        []string                        `json:"media_ids,omitempty"`
-	EpisodeMappings map[string]ManualEpisodeMapping `json:"episode_mappings,omitempty"`
+	Category                   string                          `json:"category,omitempty"`
+	Title                      string                          `json:"title,omitempty"`
+	Queries                    []string                        `json:"queries,omitempty"`
+	Provider                   string                          `json:"provider,omitempty"`
+	MediaType                  string                          `json:"media_type,omitempty"`
+	MediaIDs                   []string                        `json:"media_ids,omitempty"`
+	EpisodeMappings            map[string]ManualEpisodeMapping `json:"episode_mappings,omitempty"`
+	UseExistingEpisodeIdentity bool                            `json:"use_existing_episode_identity,omitempty"`
+	VerifyOnly                 bool                            `json:"verify_only,omitempty"`
 }
 
 type PipelineScrapeResult struct {
-	Mode         string               `json:"mode"`
-	Query        string               `json:"query,omitempty"`
-	MatchCount   int                  `json:"match_count,omitempty"`
-	Match        *ExternalMediaResult `json:"match,omitempty"`
-	MediaID      string               `json:"media_id"`
-	MediaTitle   string               `json:"media_title,omitempty"`
-	AppliedCount int                  `json:"applied_count,omitempty"`
-	ScrapeStatus string               `json:"scrape_status,omitempty"`
+	Mode          string               `json:"mode"`
+	Query         string               `json:"query,omitempty"`
+	MatchCount    int                  `json:"match_count,omitempty"`
+	Match         *ExternalMediaResult `json:"match,omitempty"`
+	MediaID       string               `json:"media_id"`
+	MediaTitle    string               `json:"media_title,omitempty"`
+	AppliedCount  int                  `json:"applied_count,omitempty"`
+	VerifiedCount int                  `json:"verified_count,omitempty"`
+	ScrapeStatus  string               `json:"scrape_status,omitempty"`
 }
 
 func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req PipelineScrapeRequest) (PipelineScrapeResult, error) {
@@ -69,6 +72,25 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 	}
 	provider := strings.TrimSpace(req.Provider)
 	mediaType := strings.TrimSpace(req.MediaType)
+	if req.VerifyOnly && !req.UseExistingEpisodeIdentity {
+		return PipelineScrapeResult{}, errors.New("只读刮削核验需要明确的剧集身份")
+	}
+	if req.UseExistingEpisodeIdentity {
+		query, err := s.confirmedEpisodeIdentityQuery(ctx, media, req)
+		if err != nil {
+			return PipelineScrapeResult{}, err
+		}
+		if req.VerifyOnly {
+			return s.verifyConfirmedEpisodeMetadata(ctx, media, req, query)
+		}
+		if query != "" {
+			match, err := s.confirmedEpisodeMatch(ctx, query, provider)
+			if err != nil {
+				return PipelineScrapeResult{}, err
+			}
+			return s.applyBatchMatchResult(ctx, mediaID, req, query, 1, match)
+		}
+	}
 	queries, enforceAdultCode := pipelineScrapeAdultExactQueries(req.Category, provider, mediaType, queries)
 	options := pipelineScrapeOptions()
 
@@ -87,24 +109,7 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 			}
 			match := matches[0]
 			if len(req.EpisodeMappings) > 0 || len(req.MediaIDs) > 0 {
-				applied, err := s.applySelectedMatchBatch(ctx, mediaID, req, match)
-				if err != nil {
-					return PipelineScrapeResult{}, err
-				}
-				refreshed, _ := s.repos.Media.FindByID(ctx, mediaID)
-				result := PipelineScrapeResult{
-					Mode:         PipelineScrapeModeApply,
-					Query:        query,
-					MatchCount:   len(matches),
-					Match:        &match,
-					MediaID:      mediaID,
-					AppliedCount: applied,
-				}
-				if refreshed != nil {
-					result.MediaTitle = pipelineMediaDisplayTitle(*refreshed)
-					result.ScrapeStatus = strings.TrimSpace(refreshed.ScrapeStatus)
-				}
-				return result, nil
+				return s.applyBatchMatchResult(ctx, mediaID, req, query, len(matches), match)
 			}
 			refreshed, err := s.applySelectedMatch(ctx, media, match, options)
 			if err != nil {
@@ -158,6 +163,20 @@ func (s *PipelineScrapeService) Scrape(ctx context.Context, mediaID string, req 
 		}
 	}
 	return result, nil
+}
+
+func (s *PipelineScrapeService) applyBatchMatchResult(ctx context.Context, mediaID string, req PipelineScrapeRequest, query string, matchCount int, match ExternalMediaResult) (PipelineScrapeResult, error) {
+	applied, err := s.applySelectedMatchBatch(ctx, mediaID, req, match)
+	if err != nil {
+		return PipelineScrapeResult{}, err
+	}
+	refreshed, err := s.repos.Media.FindByID(ctx, mediaID)
+	if err != nil {
+		return PipelineScrapeResult{}, err
+	}
+	return PipelineScrapeResult{Mode: PipelineScrapeModeApply, Query: query, MatchCount: matchCount,
+		Match: &match, MediaID: mediaID, AppliedCount: applied,
+		MediaTitle: pipelineMediaDisplayTitle(*refreshed), ScrapeStatus: strings.TrimSpace(refreshed.ScrapeStatus)}, nil
 }
 
 func (s *PipelineScrapeService) applySelectedMatchBatch(ctx context.Context, anchorID string, req PipelineScrapeRequest, match ExternalMediaResult) (int, error) {

@@ -435,7 +435,7 @@ func (s *PipelineIngestService) runJob(ctx context.Context, id string, task *Tas
 		if scanErr != nil {
 			return scanErr
 		}
-		appliedIdentities, err := s.verifyPipelineIngestMediaIdentities(ctx, req.TargetMediaIdentities)
+		appliedIdentities, err := s.verifyPipelineIngestMediaIdentities(ctx, target, req.TargetMediaIdentities)
 		if err != nil {
 			return err
 		}
@@ -535,6 +535,14 @@ func (s *PipelineIngestService) scanForPipelineIngestWithOptions(ctx context.Con
 }
 
 func (s *PipelineIngestService) findMedia(ctx context.Context, target pipelineResolvedTarget, req PipelineIngestRequest) (model.Media, []model.Media, string, string, error) {
+	if len(req.TargetMediaIdentities) > 0 {
+		rows, err := s.findMediaByIdentities(ctx, target, req.TargetMediaIdentities)
+		if err != nil {
+			return model.Media{}, nil, "", "", err
+		}
+		row := choosePipelineIngestMedia(rows, target.RootOpenListPath, target.Category)
+		return row, rows, "path", pipelineMatchedOpenListPath(row.Path, req.TargetOpenListPaths), nil
+	}
 	if len(req.TargetOpenListPaths) > 0 {
 		rows, err := s.findMediaByOpenListPaths(ctx, target, req.TargetOpenListPaths)
 		if err != nil {

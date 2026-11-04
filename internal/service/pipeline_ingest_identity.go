@@ -112,7 +112,14 @@ func validateCloudTargetMediaIdentities(candidates []cloudCandidate, identities 
 	return nil
 }
 
-func (s *PipelineIngestService) verifyPipelineIngestMediaIdentities(ctx context.Context, expected []PipelineIngestMediaIdentity) ([]PipelineIngestMediaIdentity, error) {
+func (s *PipelineIngestService) verifyPipelineIngestMediaIdentities(ctx context.Context, target pipelineResolvedTarget, expected []PipelineIngestMediaIdentity) ([]PipelineIngestMediaIdentity, error) {
+	if _, err := s.findMediaByIdentities(ctx, target, expected); err != nil {
+		return nil, err
+	}
+	return append([]PipelineIngestMediaIdentity(nil), expected...), nil
+}
+
+func (s *PipelineIngestService) findMediaByIdentities(ctx context.Context, target pipelineResolvedTarget, expected []PipelineIngestMediaIdentity) ([]model.Media, error) {
 	if len(expected) == 0 {
 		return nil, nil
 	}
@@ -121,14 +128,14 @@ func (s *PipelineIngestService) verifyPipelineIngestMediaIdentities(ctx context.
 		paths = append(paths, pipelineOpenListPathToCloudPath(identity.OpenListPath))
 	}
 	var rows []model.Media
-	if err := s.repos.DB.WithContext(ctx).Where("deleted_at IS NULL AND path IN ?", paths).Find(&rows).Error; err != nil {
+	if err := s.repos.DB.WithContext(ctx).Where("library_id = ? AND library_root_id = ? AND path IN ?", target.LibraryID, target.RootID, paths).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	byPath := make(map[string]model.Media, len(rows))
 	for _, row := range rows {
 		byPath[row.Path] = row
 	}
-	applied := make([]PipelineIngestMediaIdentity, 0, len(expected))
+	selected := make([]model.Media, 0, len(expected))
 	for _, identity := range expected {
 		cloudPath := pipelineOpenListPathToCloudPath(identity.OpenListPath)
 		row, ok := byPath[cloudPath]
@@ -138,7 +145,7 @@ func (s *PipelineIngestService) verifyPipelineIngestMediaIdentities(ctx context.
 		if row.SeasonNum != identity.SeasonNum || row.EpisodeNum != identity.EpisodeNum {
 			return nil, fmt.Errorf("target media identity persistence mismatch for %s: expected %d/%d actual %d/%d", identity.OpenListPath, identity.SeasonNum, identity.EpisodeNum, row.SeasonNum, row.EpisodeNum)
 		}
-		applied = append(applied, identity)
+		selected = append(selected, row)
 	}
-	return applied, nil
+	return selected, nil
 }

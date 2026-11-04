@@ -152,6 +152,15 @@ func (s *ScannerService) scanCloudLibraryRootTargetsFilteredWithOptions(ctx cont
 	if err := validateCloudTargetMediaIdentities(candidates, options.targetMediaIdentities); err != nil {
 		return res, ignored, combineCloudTreeManifests(manifests), err
 	}
+	if len(options.targetMediaIdentities) > 0 {
+		planned := make([]cloudCandidate, 0, len(options.targetMediaIdentities))
+		for _, candidate := range candidates {
+			if _, ok := options.targetMediaIdentities[candidate.path]; ok {
+				planned = append(planned, candidate)
+			}
+		}
+		candidates = planned
+	}
 	sortCloudCandidatesByRefreshPriority(candidates, existingMedia)
 	writeBatch := newLocalMediaWriteBatch(s, ctx, res, 100)
 	imported, err := s.importCloudScanCandidates(ctx, lib, cloudScanImportRequest{

@@ -1143,11 +1143,14 @@ func (s *ResourceImportService) Retry(ctx context.Context, requesterID string, i
 	job.FinishedAt = nil
 	if job.SubscriptionFollow {
 		job.Message, job.PublicError, job.Error = "", "", ""
-		job.MediaID, job.MediaTitle, job.ResultJSON, job.Outcome = "", "", "", ""
-		if err := s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{
-			"message": "", "public_error": "", "error": "", "media_id": "", "media_title": "",
-			"result_json": "", "outcome": "", "started_at": nil, "finished_at": nil,
-		}).Error; err != nil {
+		updates := map[string]any{"message": "", "public_error": "", "error": "", "started_at": nil, "finished_at": nil}
+		if job.Outcome != "imported" {
+			job.MediaID, job.MediaTitle, job.ResultJSON, job.Outcome = "", "", "", ""
+			for _, field := range []string{"media_id", "media_title", "result_json", "outcome"} {
+				updates[field] = ""
+			}
+		}
+		if err := s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
 			return ResourceImportTask{}, err
 		}
 	}

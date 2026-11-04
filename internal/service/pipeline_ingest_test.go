@@ -928,12 +928,16 @@ func TestPipelineIngestPreservesAuthoritativeEpisodeFormatPair(t *testing.T) {
 				{Name: "Show.S01E115.2160p.mkv", Size: 5000},
 				{Name: "Show.S01E115.2160p.mp4", Size: 4000},
 			}
+			listed := append([]openListTestEntry(nil), files...)
+			if authoritative {
+				listed = append(listed, openListTestEntry{Name: "Show.S01E114.mkv", Size: 9000})
+			}
 			upstream := newOpenListAPIServer(t, func(path string, page, perPage int) ([]openListTestEntry, int) {
 				switch path {
 				case "/115/anime":
 					return []openListTestEntry{{Name: "Show", IsDir: true}}, 1
 				case targetPath:
-					return files, len(files)
+					return listed, len(listed)
 				default:
 					t.Errorf("unexpected OpenList path %q", path)
 					return nil, 0
@@ -948,6 +952,14 @@ func TestPipelineIngestPreservesAuthoritativeEpisodeFormatPair(t *testing.T) {
 				t.Fatal(err)
 			}
 			lib, root := createPipelineMaintenanceRoot(t, db, "anime", "/115/anime")
+			historical := model.Media{LibraryID: lib.ID, LibraryRootID: root.ID,
+				Path: cloudMediaPath("openlist", targetPath+"/Show.S01E114.mkv"), Title: "Show",
+				SeasonNum: 1, EpisodeNum: 114, TMDbID: 12345, ScrapeStatus: "matched"}
+			if authoritative {
+				if err := db.Create(&historical).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
 			scanner := NewScannerService(&config.Config{}, log, repos, NewHub(log), nil, nil)
 			scanner.SetStorageConfig(storage)
 			svc := NewPipelineIngestService(log, repos, scanner, NewPipelineMaintenanceService(log, repos), nil)
@@ -981,6 +993,13 @@ func TestPipelineIngestPreservesAuthoritativeEpisodeFormatPair(t *testing.T) {
 			}
 			if len(job.Result.AppliedMediaIdentities) != len(files) {
 				t.Fatalf("applied identities=%+v, want both formats", job.Result.AppliedMediaIdentities)
+			}
+			var unchanged model.Media
+			if err := db.First(&unchanged, "id = ?", historical.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if unchanged.TMDbID != historical.TMDbID || unchanged.ScrapeStatus != historical.ScrapeStatus || !unchanged.UpdatedAt.Equal(historical.UpdatedAt) {
+				t.Fatal("explicit ingest modified a historical episode outside its plan")
 			}
 			for _, file := range files {
 				var media model.Media
