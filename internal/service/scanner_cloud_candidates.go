@@ -33,19 +33,20 @@ func normalizeCloudScanMaxConcurrent(n int) int {
 }
 
 type cloudScanCandidateRequest struct {
-	provider         string
-	rootDir          string
-	rootDisplayDir   string
-	exactFileName    string
-	refreshRoot      bool
-	refreshDepth     int
-	refreshDirs      map[string]struct{}
-	strictListErrors bool
-	autoCategoryRoot bool
-	existingMedia    map[string]existingCloudMedia
-	externalMetadata *cloudExternalMetadataCache
-	progress         *cloudScanProgressState
-	result           *ScanResult
+	provider              string
+	rootDir               string
+	rootDisplayDir        string
+	exactFileName         string
+	refreshRoot           bool
+	refreshDepth          int
+	refreshDirs           map[string]struct{}
+	strictListErrors      bool
+	autoCategoryRoot      bool
+	existingMedia         map[string]existingCloudMedia
+	externalMetadata      *cloudExternalMetadataCache
+	progress              *cloudScanProgressState
+	result                *ScanResult
+	targetMediaIdentities map[string]PipelineIngestMediaIdentity
 }
 
 type cloudScanCandidateCollection struct {
@@ -356,6 +357,10 @@ func (c *cloudScanCandidateCollector) markRefSeen(ref string) bool {
 
 func (c *cloudScanCandidateCollector) addCandidate(displayDir string, entry cloud.FileEntry, candidate cloudCandidate) {
 	key := cloudMediaDedupeKey(c.lib, displayDir, entry.Name, entry.Size)
+	if _, expected := c.req.targetMediaIdentities[candidate.path]; expected {
+		// An ingest plan may require both MP4 and MKV for the same episode.
+		key = "target:" + candidate.path
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if key != "" {

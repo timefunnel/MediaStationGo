@@ -916,6 +916,85 @@ func TestPipelineIngestAppliesAuthoritativeTargetMediaIdentity(t *testing.T) {
 	}
 }
 
+func TestPipelineIngestPreservesAuthoritativeEpisodeFormatPair(t *testing.T) {
+	for _, authoritative := range []bool{true, false} {
+		name := "ordinary_scan"
+		if authoritative {
+			name = "authoritative_format_pair"
+		}
+		t.Run(name, func(t *testing.T) {
+			const targetPath = "/115/anime/Show"
+			files := []openListTestEntry{
+				{Name: "Show.S01E115.2160p.mkv", Size: 5000},
+				{Name: "Show.S01E115.2160p.mp4", Size: 4000},
+			}
+			upstream := newOpenListAPIServer(t, func(path string, page, perPage int) ([]openListTestEntry, int) {
+				switch path {
+				case "/115/anime":
+					return []openListTestEntry{{Name: "Show", IsDir: true}}, 1
+				case targetPath:
+					return files, len(files)
+				default:
+					t.Errorf("unexpected OpenList path %q", path)
+					return nil, 0
+				}
+			})
+			defer upstream.Close()
+			db := newServiceTestDB(t, &model.Library{}, &model.LibraryRoot{}, &model.Media{}, &model.Setting{}, &model.StorageConfig{}, &model.PipelineIngestJobRecord{})
+			repos := repository.New(db)
+			log := zap.NewNop()
+			storage := NewStorageConfigService(log, repos, NewCryptoService("", log))
+			if _, err := storage.Save(t.Context(), StorageInput{Type: "openlist", Config: map[string]any{"server": upstream.URL, "token": "openlist-token"}}); err != nil {
+				t.Fatal(err)
+			}
+			lib, root := createPipelineMaintenanceRoot(t, db, "anime", "/115/anime")
+			scanner := NewScannerService(&config.Config{}, log, repos, NewHub(log), nil, nil)
+			scanner.SetStorageConfig(storage)
+			svc := NewPipelineIngestService(log, repos, scanner, NewPipelineMaintenanceService(log, repos), nil)
+			req := PipelineIngestRequest{
+				PipelineMaintenanceTarget: PipelineMaintenanceTarget{Category: "anime", LibraryID: lib.ID, RootID: root.ID, RootOpenListPath: "/115/anime"},
+				Title:                     "Show",
+				TargetOpenListPaths:       []string{targetPath},
+				RequireTargetPath:         true,
+				Scan:                      true,
+			}
+			want := 1
+			if authoritative {
+				want = len(files)
+				for _, file := range files {
+					req.TargetMediaIdentities = append(req.TargetMediaIdentities, PipelineIngestMediaIdentity{OpenListPath: targetPath + "/" + file.Name, SeasonNum: 1, EpisodeNum: 115})
+				}
+			}
+			job, err := svc.Start(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			job = waitPipelineIngestJob(t, svc, job.ID)
+			if job.Status != PipelineIngestStatusCompleted {
+				t.Fatalf("job status=%s error=%s", job.Status, job.Error)
+			}
+			if job.Result.Scan == nil || job.Result.Scan.Added != want || len(job.Result.MediaItems) != want {
+				t.Fatalf("scan=%+v media items=%+v, want %d imported files", job.Result.Scan, job.Result.MediaItems, want)
+			}
+			if !authoritative {
+				return
+			}
+			if len(job.Result.AppliedMediaIdentities) != len(files) {
+				t.Fatalf("applied identities=%+v, want both formats", job.Result.AppliedMediaIdentities)
+			}
+			for _, file := range files {
+				var media model.Media
+				if err := db.First(&media, "path = ?", cloudMediaPath("openlist", targetPath+"/"+file.Name)).Error; err != nil {
+					t.Fatal(err)
+				}
+				if media.SeasonNum != 1 || media.EpisodeNum != 115 {
+					t.Fatalf("file=%s season/episode=%d/%d", file.Name, media.SeasonNum, media.EpisodeNum)
+				}
+			}
+		})
+	}
+}
+
 func TestPipelineIngestTargetMediaIdentityDoesNotDependOnFilenameParsing(t *testing.T) {
 	identity := PipelineIngestMediaIdentity{
 		OpenListPath: "/115/anime/Show/Show.S01E180.mkv",

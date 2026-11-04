@@ -123,19 +123,20 @@ func (s *ScannerService) scanCloudLibraryRootTargetsFilteredWithOptions(ctx cont
 			}
 		}
 		collection, err := s.collectCloudScanCandidateCollection(ctx, lib, cloudScanCandidateRequest{
-			provider:         typ,
-			rootDir:          target.scanDir,
-			rootDisplayDir:   target.displayDir,
-			exactFileName:    target.exactFileName,
-			refreshRoot:      !target.resolved || target.refreshRoot,
-			refreshDepth:     options.refreshDepth,
-			refreshDirs:      options.refreshDirs,
-			strictListErrors: options.strictListErrors,
-			autoCategoryRoot: autoCategoryRoot,
-			existingMedia:    existingMedia,
-			externalMetadata: externalMetadataCache,
-			progress:         progress,
-			result:           res,
+			provider:              typ,
+			rootDir:               target.scanDir,
+			rootDisplayDir:        target.displayDir,
+			exactFileName:         target.exactFileName,
+			refreshRoot:           !target.resolved || target.refreshRoot,
+			refreshDepth:          options.refreshDepth,
+			refreshDirs:           options.refreshDirs,
+			strictListErrors:      options.strictListErrors,
+			autoCategoryRoot:      autoCategoryRoot,
+			existingMedia:         existingMedia,
+			externalMetadata:      externalMetadataCache,
+			progress:              progress,
+			result:                res,
+			targetMediaIdentities: options.targetMediaIdentities,
 		})
 		manifests[target.displayDir] = collection.manifest
 		if err != nil {
