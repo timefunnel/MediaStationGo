@@ -43,6 +43,8 @@ var resourceImportFinalStatuses = []string{
 
 var ErrResourceImportDeleteNotAllowed = errors.New("only failed resource import tasks can be deleted")
 
+var errResourceImportSupersededPoll = errors.New("resource import poll was superseded by a retry")
+
 type ResourceImportService struct {
 	cfg    config.ResourceImportConfig
 	log    *zap.Logger
@@ -954,12 +956,24 @@ func (s *ResourceImportService) Recover(ctx context.Context) (int, error) {
 	if s == nil || s.repos == nil || s.repos.DB == nil {
 		return 0, nil
 	}
-	var jobs []model.ResourceImportJob
+	var candidates []model.ResourceImportJob
 	err := s.repos.DB.WithContext(ctx).
-		Where("status NOT IN ?", resourceImportFinalStatuses).
-		Order("created_at ASC").Find(&jobs).Error
+		Where("(status NOT IN ? OR (status IN ? AND result_json LIKE ?))",
+			resourceImportFinalStatuses, []string{ResourceImportStatusCompleted, ResourceImportStatusCompletedWithWarning},
+			`%"post_enhancement_status"%`).
+		Order("created_at ASC").Find(&candidates).Error
 	if err != nil {
 		return 0, err
+	}
+	jobs := make([]model.ResourceImportJob, 0, len(candidates))
+	for _, job := range candidates {
+		needed, err := resourceImportNeedsMonitoring(job)
+		if err != nil {
+			return 0, err
+		}
+		if needed {
+			jobs = append(jobs, job)
+		}
 	}
 	for i := range jobs {
 		if strings.TrimSpace(jobs[i].PipelineJobID) == "" {
@@ -1210,18 +1224,42 @@ func (s *ResourceImportService) monitor(id string) {
 	if err != nil {
 		return
 	}
-	if !s.acquire(ctx, job.UserID) {
-		return
-	}
-	defer s.release(job.UserID)
+	userID := job.UserID
+	acquired := false
+	defer func() {
+		if acquired {
+			s.release(userID)
+		}
+	}()
 	ticker := time.NewTicker(time.Duration(s.cfg.PollSeconds) * time.Second)
 	defer ticker.Stop()
 	invalidStateCount := 0
 	for {
 		waitForStateRecovery := false
 		job, err = s.loadOwnedJob(ctx, "", true, id)
-		if err != nil || resourceImportStatusFinal(job.Status) {
+		if err != nil {
 			return
+		}
+		needed, monitorErr := resourceImportNeedsMonitoring(job)
+		if monitorErr != nil {
+			if s.log != nil {
+				s.log.Error("resource import postprocess state invalid", zap.String("job_id", job.ID), zap.Error(monitorErr))
+			}
+			return
+		}
+		if !needed {
+			return
+		}
+		if resourceImportStatusFinal(job.Status) {
+			if acquired {
+				s.release(userID)
+				acquired = false
+			}
+		} else if !acquired {
+			if !s.acquire(ctx, userID) {
+				return
+			}
+			acquired = true
 		}
 		var child resourcePipelineTask
 		if job.CancelRequested {
@@ -1241,7 +1279,7 @@ func (s *ResourceImportService) monitor(id string) {
 			if s.log != nil {
 				s.log.Warn("resource import poll failed", zap.String("job_id", job.ID), zap.Error(err))
 			}
-		} else if applyErr := s.applyPipelineTask(ctx, &job, child); applyErr != nil {
+		} else if applyErr := s.applyPipelineTaskForAttempt(ctx, &job, child, &job.Attempt); applyErr != nil && !errors.Is(applyErr, errResourceImportSupersededPoll) {
 			if s.log != nil {
 				s.log.Error(
 					"resource import state persistence failed",
@@ -1275,8 +1313,22 @@ func (s *ResourceImportService) monitor(id string) {
 			// before applyPipelineTask returns. Reload the row so that the old
 			// in-memory terminal status cannot stop monitoring the queued retry.
 			current, loadErr := s.loadOwnedJob(ctx, "", true, id)
-			if loadErr != nil || resourceImportStatusFinal(current.Status) {
+			if loadErr != nil {
 				return
+			}
+			needed, monitorErr := resourceImportNeedsMonitoring(current)
+			if monitorErr != nil {
+				if s.log != nil {
+					s.log.Error("resource import postprocess state invalid", zap.String("job_id", current.ID), zap.Error(monitorErr))
+				}
+				return
+			}
+			if !needed {
+				return
+			}
+			if resourceImportStatusFinal(current.Status) && acquired {
+				s.release(userID)
+				acquired = false
 			}
 		}
 		select {
@@ -1320,6 +1372,10 @@ func (s *ResourceImportService) release(userID string) {
 }
 
 func (s *ResourceImportService) applyPipelineTask(ctx context.Context, job *model.ResourceImportJob, child resourcePipelineTask) error {
+	return s.applyPipelineTaskForAttempt(ctx, job, child, nil)
+}
+
+func (s *ResourceImportService) applyPipelineTaskForAttempt(ctx context.Context, job *model.ResourceImportJob, child resourcePipelineTask, expectedAttempt *int) error {
 	if job == nil {
 		return errors.New("resource import job is nil")
 	}
@@ -1359,8 +1415,17 @@ func (s *ResourceImportService) applyPipelineTask(ctx context.Context, job *mode
 			job.ResultJSON = string(encoded)
 		}
 	}
-	if err := s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
-		return err
+	query := s.repos.DB.WithContext(ctx).Model(&model.ResourceImportJob{}).Where("id = ?", job.ID)
+	if expectedAttempt != nil {
+		// A manual retry can finish while the previous attempt's GET is in flight.
+		query = query.Where("attempt = ?", *expectedAttempt)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if expectedAttempt != nil && result.RowsAffected == 0 {
+		return errResourceImportSupersededPoll
 	}
 	job.Status, job.Stage = status, stage
 	job.Message, job.PublicError, job.Error = safePipelineMessage(child.Message), safePipelineMessage(child.Error), child.Error
@@ -1996,6 +2061,31 @@ func resourceImportStatusFinal(status string) bool {
 		}
 	}
 	return false
+}
+
+// A completed core import can still receive the final result of asynchronous
+// enhancements. Monitoring those results must not resubmit the import.
+func resourceImportNeedsMonitoring(job model.ResourceImportJob) (bool, error) {
+	if !resourceImportStatusFinal(job.Status) {
+		return true, nil
+	}
+	if (job.Status != ResourceImportStatusCompleted && job.Status != ResourceImportStatusCompletedWithWarning) || strings.TrimSpace(job.ResultJSON) == "" {
+		return false, nil
+	}
+	var result struct {
+		Task struct {
+			PostEnhancementStatus string `json:"post_enhancement_status"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(job.ResultJSON), &result); err != nil {
+		return false, fmt.Errorf("decode resource import %s postprocess state: %w", job.ID, err)
+	}
+	status := strings.TrimSpace(result.Task.PostEnhancementStatus)
+	pending := status == "pending" || status == "running"
+	if pending && strings.TrimSpace(job.PipelineJobID) == "" {
+		return false, fmt.Errorf("resource import %s postprocess is missing pipeline_job_id", job.ID)
+	}
+	return pending, nil
 }
 
 func normalizeResourceImportPage(page, pageSize int) (int, int) {
