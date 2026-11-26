@@ -45,6 +45,13 @@ export const generalSettingsGroup: SettingGroup = {
       defaultValue: 'false',
     },
     {
+      key: 'media_probe.playback_enabled',
+      label: '播放时自动补齐媒体信息',
+      type: 'toggle',
+      hint: '默认关闭。开启后，云盘直链播放会在后台读取文件以补齐时长、编码、码率等信息，会增加云盘读取。关闭立即取消已排队和正在运行的自动探测；手动文件信息队列独立控制。',
+      defaultValue: 'false',
+    },
+    {
       key: 'transcode.enabled',
       label: '启用转码',
       type: 'toggle',

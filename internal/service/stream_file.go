@@ -168,7 +168,7 @@ func (s *StreamService) redirectResolvedCloudPlayback(
 	setCloudRedirectNoStore(w)
 	http.Redirect(w, r, link.URL, http.StatusFound)
 	if r.Method == http.MethodGet {
-		s.enqueuePlaybackCloudProbe(media, link, r.UserAgent())
+		s.enqueuePlaybackCloudProbe(r.Context(), media, link, r.UserAgent())
 	}
 	return true, nil
 }

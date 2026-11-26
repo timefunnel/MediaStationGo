@@ -76,6 +76,9 @@ func newPlaybackProbeTestService(t *testing.T, mediaID string, prober cloudPlayb
 	if err := repos.Setting.Set(t.Context(), CloudPlaybackModeSettingKey, CloudPlaybackModeSTRM); err != nil {
 		t.Fatal(err)
 	}
+	if err := repos.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, "true"); err != nil {
+		t.Fatal(err)
+	}
 	if err := repos.DB.Create(&model.Media{
 		Base:    model.Base{ID: mediaID},
 		Title:   "Cloud",
@@ -296,7 +299,11 @@ func TestSTRMPlaybackIncompleteProbeBacksOff(t *testing.T) {
 }
 
 func TestPlaybackProbeQueueFullDropsTaskAndBacksOff(t *testing.T) {
-	svc := NewStreamService(&config.Config{}, zap.NewNop(), nil, nil)
+	repos := newStreamTestRepo(t)
+	if err := repos.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, "true"); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewStreamService(&config.Config{}, zap.NewNop(), repos, nil)
 	svc.cloudTrackProbeQueue = make(chan playbackCloudProbeTask)
 	svc.cloudTrackProbeMu.Lock()
 	svc.probe = &playbackQueueProber{}
@@ -304,11 +311,132 @@ func TestPlaybackProbeQueueFullDropsTaskAndBacksOff(t *testing.T) {
 	media := &model.Media{Base: model.Base{ID: "cloud-probe-full"}}
 	link := &cloud.DirectLink{URL: "https://video.115cdn.net/movie.mkv?sign=cdn"}
 
-	if svc.enqueuePlaybackCloudProbe(media, link, "Filmly/1.0") {
+	if svc.enqueuePlaybackCloudProbe(t.Context(), media, link, "Filmly/1.0") {
 		t.Fatal("full queue should drop the probe task")
 	}
 	waitPlaybackProbeBackoff(t, svc, media.ID)
 	if calls, _, _ := svc.probe.(*playbackQueueProber).snapshot(); calls != 0 {
 		t.Fatalf("dropped queue task unexpectedly ran, calls=%d", calls)
+	}
+}
+
+func TestSTRMPlaybackProbeDisabledStillRedirects(t *testing.T) {
+	for _, value := range []string{"", "false", "invalid"} {
+		t.Run("setting="+value, func(t *testing.T) {
+			prober := &playbackQueueProber{}
+			svc, resolver := newPlaybackProbeTestService(t, "probe-disabled", prober)
+			var err error
+			if value == "" {
+				err = svc.repo.Setting.Delete(t.Context(), PlaybackCloudProbeEnabledSettingKey)
+			} else {
+				err = svc.repo.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, value)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/stream/probe-disabled", nil)
+			response := httptest.NewRecorder()
+			if err := svc.ServeFile(response, request, "probe-disabled"); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusFound || response.Header().Get("Location") != resolver.link.URL || resolver.calls != 1 {
+				t.Fatalf("playback changed when probe disabled: status=%d resolves=%d", response.Code, resolver.calls)
+			}
+			svc.cloudTrackProbeMu.Lock()
+			pending := len(svc.cloudTrackProbePending)
+			svc.cloudTrackProbeMu.Unlock()
+			if calls, _, _ := prober.snapshot(); calls != 0 || pending != 0 {
+				t.Fatalf("disabled playback probe calls=%d pending=%d", calls, pending)
+			}
+		})
+	}
+}
+
+func waitPlaybackProbesIdle(t *testing.T, svc *StreamService) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		svc.cloudTrackProbeMu.Lock()
+		pending := len(svc.cloudTrackProbePending)
+		cancels := len(svc.cloudTrackProbeCancels)
+		svc.cloudTrackProbeMu.Unlock()
+		if pending == 0 && cancels == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("probe tasks did not stop: pending=%d cancels=%d", pending, cancels)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestPlaybackProbeDisableCancelsActiveAndQueuedAndCanReenable(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	prober := &playbackQueueProber{started: started, release: release,
+		result: &ProbeResult{DurationSec: 120, Width: 1920, Height: 1080, VideoCodec: "h264", AudioCodec: "aac"}}
+	svc, resolver := newPlaybackProbeTestService(t, "probe-active", prober)
+	if err := svc.repo.DB.Create(&model.Media{Base: model.Base{ID: "probe-queued"}, Path: "cloud://openlist/queued.mkv"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var active, queued model.Media
+	if err := svc.repo.DB.First(&active, "id = ?", "probe-active").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.DB.First(&queued, "id = ?", "probe-queued").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !svc.enqueuePlaybackCloudProbe(t.Context(), &active, resolver.link, "test") {
+		t.Fatal("enabled active task rejected")
+	}
+	waitPlaybackProbeStarted(t, started)
+	if !svc.enqueuePlaybackCloudProbe(t.Context(), &queued, resolver.link, "test") {
+		t.Fatal("enabled queued task rejected")
+	}
+	if err := svc.repo.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, "false"); err != nil {
+		t.Fatal(err)
+	}
+	svc.CancelPlaybackCloudProbes()
+	waitPlaybackProbesIdle(t, svc)
+	if calls, _, _ := prober.snapshot(); calls != 1 {
+		t.Fatalf("canceled queued probe ran: calls=%d", calls)
+	}
+	var updated model.Media
+	if err := svc.repo.DB.First(&updated, "id = ?", active.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.MediaProbeVersion != 0 || len(svc.cloudTrackProbeBackoff) != 0 {
+		t.Fatal("disabling probe persisted a result or created failure backoff")
+	}
+	close(release)
+	if err := svc.repo.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.enqueuePlaybackCloudProbe(t.Context(), &active, resolver.link, "test") {
+		t.Fatal("re-enabled probe rejected")
+	}
+	waitPlaybackProbePersisted(t, svc, active.ID)
+}
+
+func TestPlaybackProbeWorkerRechecksPersistedSwitch(t *testing.T) {
+	prober := &playbackQueueProber{}
+	svc, resolver := newPlaybackProbeTestService(t, "probe-recheck", prober)
+	// Stop automatic workers for this test so the setting changes after enqueue.
+	queued := NewStreamService(&config.Config{}, zap.NewNop(), svc.repo, nil)
+	queued.probe = prober
+	var media model.Media
+	if err := svc.repo.DB.First(&media, "id = ?", "probe-recheck").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !queued.enqueuePlaybackCloudProbe(t.Context(), &media, resolver.link, "test") {
+		t.Fatal("enabled task rejected")
+	}
+	if err := svc.repo.Setting.Set(t.Context(), PlaybackCloudProbeEnabledSettingKey, "false"); err != nil {
+		t.Fatal(err)
+	}
+	queued.runPlaybackCloudProbe(<-queued.cloudTrackProbeQueue)
+	waitPlaybackProbesIdle(t, queued)
+	if calls, _, _ := prober.snapshot(); calls != 0 {
+		t.Fatal("queued probe ignored persisted disabled switch")
 	}
 }

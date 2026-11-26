@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 )
 
 const (
+	PlaybackCloudProbeEnabledSettingKey = "media_probe.playback_enabled"
+
 	playbackCloudProbeTimeout          = 45 * time.Second
 	playbackCloudProbePersistTimeout   = 5 * time.Second
 	playbackCloudProbeFailureBackoff   = 6 * time.Hour
@@ -22,6 +25,7 @@ const (
 )
 
 type playbackCloudProbeTask struct {
+	ctx     context.Context
 	mediaID string
 	rawURL  string
 	headers map[string]string
@@ -34,7 +38,35 @@ func playbackCloudProbeWorkerCount(cfg *config.Config) int {
 	return normalizeFFprobeMaxConcurrent(cfg.App.FFprobeMaxConcurrent)
 }
 
-func (s *StreamService) enqueuePlaybackCloudProbe(media *model.Media, link *cloud.DirectLink, clientUA string) bool {
+func (s *StreamService) playbackCloudProbeEnabled(ctx context.Context) (bool, error) {
+	if s.repo == nil || s.repo.Setting == nil {
+		return false, errors.New("playback metadata probe settings unavailable")
+	}
+	raw, err := s.repo.Setting.Get(ctx, PlaybackCloudProbeEnabledSettingKey)
+	if err != nil {
+		return false, err
+	}
+	switch raw {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid boolean setting %s", PlaybackCloudProbeEnabledSettingKey)
+	}
+}
+
+// CancelPlaybackCloudProbes cancels automatic playback probes only. The setting
+// is persisted before this call, so new requests cannot restart the work.
+func (s *StreamService) CancelPlaybackCloudProbes() {
+	s.cloudTrackProbeMu.Lock()
+	defer s.cloudTrackProbeMu.Unlock()
+	for _, cancel := range s.cloudTrackProbeCancels {
+		cancel()
+	}
+}
+
+func (s *StreamService) enqueuePlaybackCloudProbe(ctx context.Context, media *model.Media, link *cloud.DirectLink, clientUA string) bool {
 	if s == nil || media == nil || link == nil || !mediaTrackMetadataMissing(media) {
 		return false
 	}
@@ -51,6 +83,16 @@ func (s *StreamService) enqueuePlaybackCloudProbe(media *model.Media, link *clou
 	s.cloudTrackProbeMu.Lock()
 	if s.probe == nil || s.cloudTrackProbeQueue == nil {
 		s.cloudTrackProbeMu.Unlock()
+		return false
+	}
+	settingCtx, settingCancel := context.WithTimeout(ctx, playbackCloudProbePersistTimeout)
+	enabled, err := s.playbackCloudProbeEnabled(settingCtx)
+	settingCancel()
+	if err != nil || !enabled {
+		s.cloudTrackProbeMu.Unlock()
+		if err != nil && s.log != nil {
+			s.log.Warn("playback metadata probe setting unavailable; skipping automatic probe", zap.Error(err))
+		}
 		return false
 	}
 	if s.cloudTrackProbePending == nil {
@@ -71,6 +113,12 @@ func (s *StreamService) enqueuePlaybackCloudProbe(media *model.Media, link *clou
 		return false
 	}
 	s.cloudTrackProbePending[task.mediaID] = struct{}{}
+	if s.cloudTrackProbeCancels == nil {
+		s.cloudTrackProbeCancels = make(map[string]context.CancelFunc)
+	}
+	var cancel context.CancelFunc
+	task.ctx, cancel = context.WithCancel(context.Background())
+	s.cloudTrackProbeCancels[task.mediaID] = cancel
 	s.cloudTrackProbeMu.Unlock()
 
 	select {
@@ -106,11 +154,24 @@ func (s *StreamService) playbackCloudProbeWorker() {
 func (s *StreamService) runPlaybackCloudProbe(task playbackCloudProbeTask) {
 	backoff := time.Duration(0)
 	defer func() {
+		if task.ctx.Err() != nil {
+			backoff = 0
+		}
 		s.finishPlaybackCloudProbe(task.mediaID, backoff)
 	}()
 
-	probeCtx, cancel := context.WithTimeout(context.Background(), playbackCloudProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(task.ctx, playbackCloudProbeTimeout)
 	defer cancel()
+	if probeCtx.Err() != nil {
+		return
+	}
+	enabled, err := s.playbackCloudProbeEnabled(probeCtx)
+	if err != nil || !enabled {
+		if err != nil && s.log != nil {
+			s.log.Warn("playback metadata probe setting unavailable; skipping queued probe", zap.Error(err))
+		}
+		return
+	}
 
 	var current model.Media
 	if s.repo == nil || s.repo.DB == nil {
@@ -136,13 +197,16 @@ func (s *StreamService) runPlaybackCloudProbe(task playbackCloudProbeTask) {
 		return
 	}
 	probe, err := prober.ProbeHTTP(probeCtx, task.rawURL, task.headers)
+	if task.ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		backoff = playbackCloudProbeFailureBackoff
 		s.logPlaybackCloudProbeFailure("cloud playback metadata probe failed", task.mediaID, err)
 		return
 	}
 
-	persistCtx, persistCancel := context.WithTimeout(context.Background(), playbackCloudProbePersistTimeout)
+	persistCtx, persistCancel := context.WithTimeout(task.ctx, playbackCloudProbePersistTimeout)
 	defer persistCancel()
 	var previous model.Media
 	if err := s.repo.DB.WithContext(persistCtx).Where("id = ?", task.mediaID).First(&previous).Error; err != nil {
@@ -173,6 +237,10 @@ func (s *StreamService) finishPlaybackCloudProbe(mediaID string, backoff time.Du
 	s.cloudTrackProbeMu.Lock()
 	defer s.cloudTrackProbeMu.Unlock()
 	delete(s.cloudTrackProbePending, mediaID)
+	if cancel, ok := s.cloudTrackProbeCancels[mediaID]; ok {
+		cancel()
+		delete(s.cloudTrackProbeCancels, mediaID)
+	}
 	if backoff > 0 {
 		if s.cloudTrackProbeBackoff == nil {
 			s.cloudTrackProbeBackoff = make(map[string]time.Time)

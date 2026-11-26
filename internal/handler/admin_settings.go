@@ -31,11 +31,18 @@ func updateSettingHandler(svc *service.Container) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if req.Key == service.PlaybackCloudProbeEnabledSettingKey && req.Value != "true" && req.Value != "false" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "播放时自动补齐媒体信息开关必须为 true 或 false"})
+			return
+		}
 		if err := svc.Repo.Setting.Set(c.Request.Context(), req.Key, req.Value); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		service.ApplyRuntimeSetting(svc.Cfg, req.Key, req.Value)
+		if req.Key == service.PlaybackCloudProbeEnabledSettingKey && req.Value == "false" && svc.Stream != nil {
+			svc.Stream.CancelPlaybackCloudProbes()
+		}
 		if svc.FFprobe != nil && (req.Key == "ffprobe.max_concurrent" || req.Key == "app.ffprobe_max_concurrent") {
 			svc.FFprobe.SetMaxConcurrent(svc.Cfg.App.FFprobeMaxConcurrent)
 		}

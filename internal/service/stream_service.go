@@ -49,6 +49,7 @@ type StreamService struct {
 	cloudTrackProbeQueue    chan playbackCloudProbeTask
 	cloudTrackProbeMu       sync.Mutex
 	cloudTrackProbePending  map[string]struct{}
+	cloudTrackProbeCancels  map[string]context.CancelFunc
 	cloudTrackProbeBackoff  map[string]time.Time
 	cloudTrackProbeWarnMu   sync.Mutex
 	cloudTrackProbeLastWarn time.Time
@@ -69,6 +70,7 @@ func NewStreamService(cfg *config.Config, log *zap.Logger, repo *repository.Cont
 		transcoder:             transcoder,
 		cloudTrackProbeQueue:   make(chan playbackCloudProbeTask, workers*4),
 		cloudTrackProbePending: make(map[string]struct{}),
+		cloudTrackProbeCancels: make(map[string]context.CancelFunc),
 		cloudTrackProbeBackoff: make(map[string]time.Time),
 	}
 }

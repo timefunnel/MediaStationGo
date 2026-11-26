@@ -66,6 +66,7 @@ func schemaHandler(_ *service.Container) gin.HandlerFunc {
 						{"key": "ui.danmaku_enabled", "type": "toggle", "label": "显示弹幕相关功能", "defaultValue": "false"},
 						{"key": "tmdb.language", "type": "select", "label": "TMDb 元数据语言"},
 						{"key": "app.server_url", "type": "text", "label": "公开访问域名 / STRM 域名"},
+						{"key": service.PlaybackCloudProbeEnabledSettingKey, "type": "toggle", "label": "播放时自动补齐媒体信息", "defaultValue": "false"},
 						{"key": "transcode.enabled", "type": "toggle", "label": "启用转码"},
 						{"key": "transcode.hw_accel", "type": "select", "label": "硬件编码器"},
 						{"key": "transcode.hw_enabled", "type": "toggle", "label": "启用硬件加速"},
